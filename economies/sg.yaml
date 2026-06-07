@@ -1,0 +1,12 @@
+# Singapore — reference config (Latin script / English)
+# Implements [Z1-1.3]. Loaded + validated by src/config/economy_config.py [Z1-1.2]
+economy_name: Singapore
+script_type: latin
+languages: [en]
+ocr_engine: tesseract
+portals:
+  - name: Singapore Statutes Online
+    url: https://sso.agc.gov.sg
+  - name: Singapore Government Gazette
+    url: https://www.egazette.gov.sg
+llm_override: null   # uses global 5-tier cascade from .env

@@ -1,0 +1,13 @@
+# Thailand — reference config (Asian script / Thai)
+# Demonstrates the non-Latin path: PaddleOCR + Buddhist-era date conversion [Z1-1.3]
+economy_name: Thailand
+script_type: asian
+languages: [th, en]
+ocr_engine: paddleocr
+be_year_conversion: true   # converts Buddhist Era (B.E.) years to Gregorian
+portals:
+  - name: Royal Thai Government Gazette
+    url: https://ratchakitcha.soc.go.th
+  - name: Office of the Council of State (Law Portal)
+    url: https://www.krisdika.go.th
+llm_override: null

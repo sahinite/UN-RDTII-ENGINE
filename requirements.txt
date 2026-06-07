@@ -1,0 +1,34 @@
+# Core
+pyyaml
+pydantic>=2
+python-dotenv
+
+# Crawling (Zone 1) — [Z1-3]
+crawl4ai
+playwright
+
+# Document processing (Zone 2) — [Z2-1]
+pdfplumber
+beautifulsoup4
+pytesseract
+paddleocr
+
+# Translation — [Z2-2]
+deepl
+
+# Retrieval / RAG (Zone 2) — [Z2-3]
+sentence-transformers
+rank-bm25
+faiss-cpu
+
+# LLM clients — [Z2-4] (5-tier cascade: anthropic -> openai -> groq -> ollama)
+anthropic
+openai
+groq
+ollama
+
+# Output / utils — [Z2-6]
+pandas
+
+# Testing
+pytest
