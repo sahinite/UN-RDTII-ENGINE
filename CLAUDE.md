@@ -79,3 +79,6 @@ Two zones wired together in `main.py`:
 - `data/benchmark/` — benchmark PDF for cost logging
 - `outputs/` — CSV/JSON run outputs (gitignored)
 - `logs/` — run logs and cost reports (gitignored)
+
+### NOTE:
+- always update CONTEXT.md once you done implementation.
