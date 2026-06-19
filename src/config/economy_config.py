@@ -64,6 +64,8 @@ class Portal(BaseModel):
 
     name: str
     url: HttpUrl
+    type: Literal["primary", "secondary"] = "primary"
+    search_url_pattern: str | None = None
 
 
 # ── EconomyConfig ──────────────────────────────────────────────────────────────

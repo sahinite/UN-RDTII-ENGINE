@@ -9,3 +9,5 @@ logs/*
 !logs/.gitkeep
 data/benchmark/*.pdf
 .DS_Store
+cache/*
+!cache/.gitkeep

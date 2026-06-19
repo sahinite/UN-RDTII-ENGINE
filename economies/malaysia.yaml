@@ -1,0 +1,15 @@
+# Malaysia — Round 1 config (Latin script / Bahasa Melayu + English)
+# Bilingual economy: Bahasa Malaysia (Malay) + English legislation
+# translation_provider: deepl → Layer 1 keyword translation active for Bahasa portals
+economy_name: Malaysia
+script_type: latin
+languages: [ms, en]
+translation_provider: deepl
+portals:
+  - name: Attorney General's Chambers (MyUndang-Undang)
+    url: https://agc.gov.my
+    type: primary
+  - name: Federal Gazette (AGC)
+    url: https://www.federalgazette.agc.gov.my
+    type: secondary
+llm_override: null

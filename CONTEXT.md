@@ -52,6 +52,20 @@ Both `Portal` and `EconomyConfig` use `ConfigDict(extra="forbid")`. Unknown YAML
 
 ---
 
+## ADR-006 — Portal `type` field is optional with default "primary"
+`type: Literal["primary", "secondary"] = "primary"` on the `Portal` model. Existing YAML files without `type` remain valid; `type` is used only for tie-breaking in probe ranking. An optional `search_url_pattern` field allows per-portal search URL templates (e.g. `https://sso.agc.gov.sg/Search?SearchAct={keyword}`).
+
+## ADR-007 — Translation trigger inferred from `translation_provider`
+`translation_provider is not None` means Layer 1 keyword translation is active for that economy. No separate boolean flag added. Primary non-English language = first entry in `languages` that is not `"en"`.
+
+## ADR-008 — JS portal detection uses httpx-first probe with Playwright fallback
+The probe does not hardcode which portals need Playwright. It sends httpx first; if the response body is JS-rendered (< 200 chars body text, or SPA root markers), it automatically retries with Crawl4AI/Playwright. This keeps the logic dynamic and configurable via YAML `search_url_pattern`.
+
+## ADR-009 — taxonomy.json lives at project root
+`taxonomy.json` holds all 10 indicators (P6-I1 to P7-I5) with `probe_keywords` arrays. Validated at startup by `validate_taxonomy()`. `load_taxonomy()` in `probe.py` is the single loader.
+
+---
+
 ## Implementation State
 
 ### ✅ Completed: [Z1-1] Economy YAML Adapter Schema
@@ -73,9 +87,40 @@ Both `Portal` and `EconomyConfig` use `ConfigDict(extra="forbid")`. Unknown YAML
 
 ---
 
-### 🔲 Pending: [Z1-2] Auto-Probe Portal Discovery
-`src/crawler/probe.py` — `probe_portals(economy_cfg, keyword_sets) -> list[RankedPortal]`
-Scores portals by keyword hit count; skips zero-result portals.
+### ✅ Completed: [Z1-2] Auto-Probe Portal Discovery
+
+**Files changed:**
+- `taxonomy.json` — 10 indicators (P6-I1 to P7-I5) with `probe_keywords` arrays (3–6 terms each)
+- `src/crawler/probe.py` — full implementation: `run_probe()`, `validate_taxonomy()`, `load_taxonomy()`, `translate_keywords()`, `ProbeRawResult`, `ProbeResult`
+- `src/crawler/exceptions.py` — `ProbeError`, `ConfigError`
+- `src/config/economy_config.py` — `Portal` extended: `type: Literal["primary","secondary"] = "primary"`, `search_url_pattern: str | None = None`
+- `economies/singapore.yaml` — added `type` + `search_url_pattern` to portals
+- `economies/thailand.yaml` — added `type` to portals; `translation_provider: deepl`
+- `economies/malaysia.yaml` — new Round 1 economy (Latin/Bahasa, DeepL translation)
+- `main.py` — startup `load_taxonomy()` + `validate_taxonomy()` call
+- `requirements.txt` — added `httpx`, `googletrans`, `pytest-asyncio`, `pytest-mock`, `respx`
+- `.env.example` — added `PROBE_JITTER_MS`, `PROBE_TIMEOUT_SEC`
+- `pytest.ini` — `asyncio_mode = auto`
+- `tests/conftest.py` — shared fixtures: `sg_economy`, `malaysia_economy`, `full_taxonomy`, `clear_translation_memory` (autouse)
+- `tests/test_probe.py` — 34 tests, all passing
+- `tests/test_economy_config.py` — 5 new Portal type/pattern tests (26 total, all passing)
+- `tests/fixtures/search_result_page.html` — mock search result page for tests
+- `cache/.gitkeep` — cache directory for keyword translation persistence
+
+**What was built:**
+- `ProbeRawResult` dataclass (portal_url, keyword, hit_count, status, result_urls)
+- `ProbeResult` dataclass (url, portal_name, portal_type, total_hit_count, is_active, language, probe_status)
+- httpx-first probe with automatic Playwright fallback on JS-rendered responses (`_is_js_rendered`)
+- Result URL deduplication across keyword queries per portal
+- Ranking: total_hit_count descending, primary portal wins ties
+- `probe_status`: "ok" / "partial" / "failed" based on keyword probe success rate
+- Zero-result filtering: portals with `is_active=False` never reach crawler.py
+- `ProbeError` raised if all portals are inactive
+- Structured logging: `probe_skip_{economy}_{ts}.jsonl` + `probe_summary_{economy}_{ts}.json`
+- Layer 1 translation: DeepL primary → Google Translate fallback; in-session + disk cache
+- `ConfigError` raised at startup if any indicator missing `probe_keywords`
+
+**Test coverage:** taxonomy validation, JS detection, search URL building, HTML parsing, httpx routing, Playwright fallback, HTTP 403/429/timeout handling, hit aggregation, deduplication, ranking, zero-result filtering, ProbeError, log files, translation skip/translate/fallback/cache, output contract.
 
 ### 🔲 Pending: [Z1-3] Crawl4AI Document Retrieval
 `src/crawler/crawl4ai_runner.py` — `crawl(portal_url, depth=2) -> list[CandidateDocument]`

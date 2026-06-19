@@ -7,14 +7,18 @@ python-dotenv
 crawl4ai
 playwright
 
+# HTTP probing (Zone 1) — [Z1-2]
+httpx
+
 # Document processing (Zone 2) — [Z2-1]
 pdfplumber
 beautifulsoup4
 pytesseract
 paddleocr
 
-# Translation — [Z2-2]
+# Translation — [Z2-2], [Z1-2-ST5]
 deepl
+googletrans>=4.0.0rc1
 
 # Retrieval / RAG (Zone 2) — [Z2-3]
 sentence-transformers
@@ -32,3 +36,6 @@ pandas
 
 # Testing
 pytest
+pytest-asyncio
+pytest-mock
+respx

@@ -1,0 +1,116 @@
+[
+  {
+    "indicator_id": "P6-I1",
+    "name": "General prohibition / restriction",
+    "legal_question": "Does the law restrict cross-border transfer of personal data as a default?",
+    "probe_keywords": [
+      "cross-border data transfer",
+      "personal data transfer restriction",
+      "transfer of personal data overseas",
+      "cross-border transfer prohibition",
+      "data localisation"
+    ]
+  },
+  {
+    "indicator_id": "P6-I2",
+    "name": "Adequacy standard",
+    "legal_question": "Can data be transferred to countries deemed to have adequate protection?",
+    "probe_keywords": [
+      "adequacy decision data transfer",
+      "comparable protection personal data",
+      "adequate level data protection",
+      "whitelist data transfer countries"
+    ]
+  },
+  {
+    "indicator_id": "P6-I3",
+    "name": "Contractual safeguards",
+    "legal_question": "Are standard contractual clauses or BCRs accepted as transfer mechanisms?",
+    "probe_keywords": [
+      "standard contractual clauses data transfer",
+      "binding corporate rules personal data",
+      "data transfer agreement contract",
+      "contractual protection data overseas"
+    ]
+  },
+  {
+    "indicator_id": "P6-I4",
+    "name": "Consent exception",
+    "legal_question": "Can transfer proceed with individual consent?",
+    "probe_keywords": [
+      "consent personal data transfer",
+      "individual consent data overseas",
+      "explicit consent data transfer exception"
+    ]
+  },
+  {
+    "indicator_id": "P6-I5",
+    "name": "Other exceptions",
+    "legal_question": "What other lawful bases permit cross-border transfer (vital interests, public interest)?",
+    "probe_keywords": [
+      "personal data transfer exceptions",
+      "vital interests data transfer",
+      "public interest data overseas",
+      "lawful basis data transfer",
+      "necessary data transfer exception"
+    ]
+  },
+  {
+    "indicator_id": "P7-I1",
+    "name": "Legal basis for processing",
+    "legal_question": "Does the law require a lawful basis for collecting/processing personal data?",
+    "probe_keywords": [
+      "personal data protection act",
+      "lawful basis data processing",
+      "data collection consent",
+      "personal data collection purpose",
+      "data protection law"
+    ]
+  },
+  {
+    "indicator_id": "P7-I2",
+    "name": "Purpose limitation",
+    "legal_question": "Is data restricted to the purpose for which it was collected?",
+    "probe_keywords": [
+      "purpose limitation personal data",
+      "data use restriction",
+      "personal data purpose specification",
+      "data processing purpose"
+    ]
+  },
+  {
+    "indicator_id": "P7-I3",
+    "name": "Data subject rights",
+    "legal_question": "Do individuals have rights to access, correct, or delete their data?",
+    "probe_keywords": [
+      "right to access personal data",
+      "data correction right",
+      "right to erasure personal data",
+      "data subject rights",
+      "individual rights data protection"
+    ]
+  },
+  {
+    "indicator_id": "P7-I4",
+    "name": "Data breach notification",
+    "legal_question": "Is there a mandatory data breach notification requirement?",
+    "probe_keywords": [
+      "data breach notification",
+      "personal data breach reporting",
+      "mandatory breach notification",
+      "security incident notification"
+    ]
+  },
+  {
+    "indicator_id": "P7-I5",
+    "name": "Enforcement and penalties",
+    "legal_question": "Is there a supervisory authority and penalty regime?",
+    "probe_keywords": [
+      "data protection authority",
+      "personal data penalty",
+      "data protection enforcement",
+      "supervisory authority personal data",
+      "privacy commissioner"
+    ]
+  }
+]

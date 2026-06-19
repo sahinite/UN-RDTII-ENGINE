@@ -171,6 +171,40 @@ def test_unknown_economy_raises_named_error():
     assert "narnia" in str(exc_info.value)
 
 
+# ── Portal type field (added Z1-2) ─────────────────────────────────────────────
+
+
+def test_portal_type_defaults_to_primary():
+    cfg = EconomyConfig.model_validate(_SG_DICT)
+    assert cfg.portals[0].type == "primary"
+
+
+def test_portal_type_secondary_accepted():
+    data = {**_SG_DICT, "portals": [{"name": "Gazette", "url": "https://gazette.gov.sg", "type": "secondary"}]}
+    cfg = EconomyConfig.model_validate(data)
+    assert cfg.portals[0].type == "secondary"
+
+
+def test_portal_type_invalid_rejected():
+    data = {**_SG_DICT, "portals": [{"name": "X", "url": "https://x.gov", "type": "unknown"}]}
+    with pytest.raises(ValidationError):
+        EconomyConfig.model_validate(data)
+
+
+def test_portal_search_url_pattern_accepted():
+    data = {**_SG_DICT, "portals": [
+        {"name": "SSO", "url": "https://sso.agc.gov.sg",
+         "search_url_pattern": "https://sso.agc.gov.sg/Search?SearchAct={keyword}"}
+    ]}
+    cfg = EconomyConfig.model_validate(data)
+    assert cfg.portals[0].search_url_pattern is not None
+
+
+def test_portal_search_url_pattern_defaults_to_none():
+    cfg = EconomyConfig.model_validate(_SG_DICT)
+    assert cfg.portals[0].search_url_pattern is None
+
+
 def test_invalid_config_raises_named_error(tmp_path, monkeypatch):
     bad_yaml = tmp_path / "broken.yaml"
     bad_yaml.write_text("economy_name: Broken\nscript_type: latin\n")  # missing portals
