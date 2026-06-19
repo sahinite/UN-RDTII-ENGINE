@@ -1,0 +1,516 @@
+"""Crawl4AI-based domain-locked depth-2 crawler. [Z1-3]
+
+Two-pass discovery strategy:
+  Pass 1 — KNOWN: seed BFS from Round 1 database URLs → confirm existence.
+  Pass 2 — NEW:   seed BFS from indicator keyword search URLs → discover new acts.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import random
+import time
+import traceback
+import urllib.parse
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+import tldextract
+from bs4 import BeautifulSoup
+
+from src.config.economy_config import EconomyConfig
+from src.crawler.exceptions import CrawlerError
+from src.crawler.probe import ProbeResult
+
+logger = logging.getLogger(__name__)
+
+# ── Environment config ─────────────────────────────────────────────────────────
+
+_CRAWL_TIMEOUT_MS = int(os.getenv("CRAWL_TIMEOUT_MS", "15000"))
+_SSO_TIMEOUT_MS = 20000
+_CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
+_CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "5"))
+_MAX_CONCURRENT_CRAWLS = int(os.getenv("MAX_CONCURRENT_CRAWLS", "3"))
+_CRAWL_JITTER_MS = int(os.getenv("CRAWL_JITTER_MS", "400"))
+
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+]
+
+_SKIP_EXTENSIONS = frozenset([
+    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+    ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map",
+])
+
+_SSO_DOMAIN = "sso.agc.gov.sg"
+_SSO_WAIT_FOR = "css:a[href*='/Act/']"
+
+_ECONOMY_ISO: dict[str, str] = {
+    "singapore": "SG", "malaysia": "MY", "thailand": "TH",
+    "australia": "AU", "indonesia": "ID", "vietnam": "VN",
+    "philippines": "PH", "cambodia": "KH", "myanmar": "MM",
+}
+
+# Module-level alias so tests can patch asyncio.sleep without side-effects
+_sleep = asyncio.sleep
+
+
+# ── Output contract ────────────────────────────────────────────────────────────
+
+@dataclass
+class CandidateAct:
+    act_title: str
+    act_url: str
+    description_snippet: str  # first 500 chars from listing page
+    document_type: str         # "pdf" | "html"
+    discovery_tag: str         # "KNOWN" | "NEW"
+    portal_source: str
+    economy: str               # ISO code, e.g. "SG"
+    pillar: str                # "P6" | "P7" | "P6+P7"
+    pass_number: int           # 1 = KNOWN pass, 2 = NEW pass
+
+
+# ── URL helpers ────────────────────────────────────────────────────────────────
+
+def _normalise_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url.lower().rstrip("/"))
+    params = urllib.parse.parse_qs(parsed.query)
+    keep = {k: v for k, v in params.items() if k not in ("lang", "language", "locale")}
+    new_query = urllib.parse.urlencode(keep, doseq=True)
+    return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+
+def _registered_domain(url: str) -> str:
+    extracted = tldextract.extract(url)
+    return getattr(extracted, "top_domain_under_public_suffix", None) or extracted.registered_domain
+
+
+def _is_same_domain(url: str, portal_domain: str) -> bool:
+    return _registered_domain(url) == portal_domain
+
+
+def _is_skip_url(url: str) -> bool:
+    path = urllib.parse.urlparse(url).path.lower()
+    ext = Path(path).suffix
+    return ext in _SKIP_EXTENSIONS
+
+
+def _make_absolute(href: str, base_url: str) -> str:
+    return urllib.parse.urljoin(base_url, href)
+
+
+def _economy_iso(economy_config: EconomyConfig) -> str:
+    return _ECONOMY_ISO.get(economy_config.economy_name.lower(), economy_config.economy_name[:2].upper())
+
+
+# ── Fetch layer (module-level so tests can monkeypatch) ────────────────────────
+
+async def _fetch_with_httpx(url: str, client: httpx.AsyncClient) -> tuple[str, int]:
+    headers = {"User-Agent": random.choice(_USER_AGENTS)}
+    try:
+        resp = await client.get(url, headers=headers, timeout=_CRAWL_TIMEOUT_MS / 1000, follow_redirects=True)
+        return resp.text, resp.status_code
+    except Exception:
+        return "", 0
+
+
+async def _fetch_with_playwright(url: str, wait_for: str, timeout_ms: int) -> tuple[str, int]:
+    try:
+        from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode  # type: ignore
+    except ImportError as exc:
+        raise CrawlerError("crawl4ai not installed — run: pip install crawl4ai && playwright install chromium") from exc
+
+    try:
+        config = CrawlerRunConfig(
+            cache_mode=CacheMode.BYPASS,
+            wait_for=wait_for,
+            page_timeout=timeout_ms,
+            verbose=False,
+            js_code="window.scrollTo(0, document.body.scrollHeight);",
+        )
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url, config=config)
+            if result.success:
+                return result.html or result.cleaned_html or "", 200
+            return "", 503
+    except Exception as exc:
+        logger.warning("Playwright fetch failed for %s: %s", url, exc)
+        if "SSO_LOAD_TIMEOUT" in str(exc) or "timeout" in str(exc).lower():
+            logger.info("SSO_LOAD_TIMEOUT: %s", url)
+        return "", 0
+
+
+def _is_js_portal(portal_url: str) -> bool:
+    return _SSO_DOMAIN in portal_url
+
+
+# ── Document type detection ────────────────────────────────────────────────────
+
+async def _detect_document_type(url: str, client: httpx.AsyncClient) -> str:
+    path = urllib.parse.urlparse(url).path.lower()
+    if path.endswith(".pdf"):
+        return "pdf"
+    try:
+        resp = await client.head(url, timeout=2.0, follow_redirects=True)
+        if "application/pdf" in resp.headers.get("content-type", "").lower():
+            return "pdf"
+    except Exception:
+        pass
+    return "html"
+
+
+# ── HTML parsing ───────────────────────────────────────────────────────────────
+
+def _extract_act_links(html: str, base_url: str, portal_domain: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    acts: list[dict] = []
+    seen: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if not href or href.startswith(("#", "javascript:", "mailto:")):
+            continue
+        abs_url = _make_absolute(href, base_url)
+        if _is_skip_url(abs_url):
+            continue
+        if not _is_same_domain(abs_url, portal_domain):
+            continue
+        norm = _normalise_url(abs_url)
+        if norm in seen:
+            continue
+        title = a.get_text(strip=True)
+        if not title or len(title) < 5:
+            continue
+        seen.add(norm)
+        parent = a.find_parent(["li", "div", "tr", "p"])
+        snippet = (parent.get_text(separator=" ", strip=True)[:500] if parent else "")
+        acts.append({"url": abs_url, "title": title, "snippet": snippet})
+    return acts
+
+
+def _has_next_page(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for a in soup.find_all("a", href=True):
+        text = a.get_text(strip=True).lower()
+        if text in ("next", "next page", "›", "»", ">", "next »"):
+            return a["href"]
+    return None
+
+
+# ── Backoff ────────────────────────────────────────────────────────────────────
+
+async def _with_retry(fetch_fn, max_retries: int = 3) -> tuple[str, int]:
+    for attempt in range(max_retries + 1):
+        html, status = await fetch_fn()
+        if status == 403:
+            logger.info("HTTP 403 – skipping immediately")
+            return "", 403
+        if status == 429:
+            if attempt == max_retries:
+                logger.warning("HTTP 429 – max retries reached, skipping")
+                return "", 429
+            wait_s = 2 ** attempt
+            logger.info("HTTP 429 – backoff %ds (attempt %d)", wait_s, attempt + 1)
+            await _sleep(wait_s)
+            continue
+        return html, status
+    return "", 0
+
+
+async def _jitter() -> None:
+    jitter_ms = random.randint(200, max(600, _CRAWL_JITTER_MS))
+    await _sleep(jitter_ms / 1000)
+
+
+# ── Session logging ────────────────────────────────────────────────────────────
+
+class _CrawlSession:
+    def __init__(self, economy_iso: str, pillar: str, output_dir: str):
+        self.economy_iso = economy_iso
+        self.pillar = pillar
+        self.output_dir = output_dir
+        self.seen_urls: set[str] = set()
+        self._ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        self._stats: dict[int, dict] = {1: {"pages": 0, "acts": 0}, 2: {"pages": 0, "acts": 0}}
+        self._errors = 0
+
+    def log_page(self, url: str, status: str, depth: int, acts: int, pass_num: int, elapsed_ms: int) -> None:
+        entry = {
+            "url": url, "status": status, "depth": depth, "acts_extracted": acts,
+            "pass": pass_num, "economy": self.economy_iso,
+            "elapsed_ms": elapsed_ms, "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        os.makedirs(self.output_dir, exist_ok=True)
+        log_path = Path(self.output_dir) / f"crawl_{self.economy_iso}_{self._ts}.jsonl"
+        with log_path.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+        if pass_num in self._stats:
+            self._stats[pass_num]["pages"] += 1
+            self._stats[pass_num]["acts"] += acts
+
+    def log_error(self, url: str) -> None:
+        self._errors += 1
+        os.makedirs(self.output_dir, exist_ok=True)
+        err_path = Path(self.output_dir) / f"crawl_errors_{self.economy_iso}_{self._ts}.log"
+        with err_path.open("a") as f:
+            f.write(f"URL: {url}\n{traceback.format_exc()}\n\n")
+
+    def write_summary(self, total: int, known: int, new: int, elapsed_s: float) -> None:
+        summary = {
+            "economy": self.economy_iso, "pillar": self.pillar,
+            "pass_1_pages_crawled": self._stats[1]["pages"],
+            "pass_1_acts_found": self._stats[1]["acts"],
+            "pass_2_pages_crawled": self._stats[2]["pages"],
+            "pass_2_acts_found": self._stats[2]["acts"],
+            "total_candidate_acts": total, "known_count": known, "new_count": new,
+            "errors": self._errors, "elapsed_seconds": round(elapsed_s, 1),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        os.makedirs(self.output_dir, exist_ok=True)
+        summary_path = Path(self.output_dir) / f"crawl_summary_{self.economy_iso}_{self._ts}.json"
+        summary_path.write_text(json.dumps(summary, indent=2))
+        logger.info("[CRAWLER] %s Pass 1: %d pages crawled, %d acts found (KNOWN)",
+                    self.economy_iso, self._stats[1]["pages"], self._stats[1]["acts"])
+        logger.info("[CRAWLER] %s Pass 2: %d pages crawled, %d new acts found (NEW)",
+                    self.economy_iso, self._stats[2]["pages"], self._stats[2]["acts"])
+        logger.info("[CRAWLER] %s complete: %d candidate acts total (%d KNOWN, %d NEW)",
+                    self.economy_iso, total, known, new)
+
+
+# ── BFS crawler ────────────────────────────────────────────────────────────────
+
+async def _crawl_bfs(
+    start_urls: list[str],
+    portal_url: str,
+    pass_num: int,
+    session: _CrawlSession,
+    client: httpx.AsyncClient,
+    max_depth: int = _CRAWL_MAX_DEPTH,
+) -> list[dict]:
+    """BFS from start_urls up to max_depth within the portal's domain."""
+    portal_domain = _registered_domain(portal_url)
+    is_js = _is_js_portal(portal_url)
+    queue: list[tuple[str, int]] = [(u, 0) for u in start_urls]
+    acts_found: list[dict] = []
+    pages_crawled = 0
+
+    while queue and pages_crawled < _CRAWL_MAX_PAGES * len(start_urls):
+        url, depth = queue.pop(0)
+        norm = _normalise_url(url)
+
+        if norm in session.seen_urls:
+            session.log_page(url, "duplicate", depth, 0, pass_num, 0)
+            continue
+        if not _is_same_domain(url, portal_domain):
+            session.log_page(url, "off_domain", depth, 0, pass_num, 0)
+            logger.debug("Off-domain URL skipped: %s", url)
+            continue
+
+        session.seen_urls.add(norm)
+        start_ms = time.monotonic()
+
+        try:
+            await _jitter()
+            if is_js:
+                timeout_ms = _SSO_TIMEOUT_MS if _SSO_DOMAIN in portal_url else _CRAWL_TIMEOUT_MS
+                html, status = await _with_retry(
+                    lambda u=url: _fetch_with_playwright(u, _SSO_WAIT_FOR, timeout_ms)
+                )
+            else:
+                html, status = await _with_retry(
+                    lambda u=url, c=client: _fetch_with_httpx(u, c)
+                )
+        except Exception:
+            session.log_error(url)
+            session.log_page(url, "error", depth, 0, pass_num, 0)
+            continue
+
+        elapsed_ms = int((time.monotonic() - start_ms) * 1000)
+
+        if status in (0,):
+            session.log_page(url, "error", depth, 0, pass_num, elapsed_ms)
+            continue
+        if status in (403, 429):
+            session.log_page(url, f"http_{status}", depth, 0, pass_num, elapsed_ms)
+            continue
+
+        page_acts = _extract_act_links(html, url, portal_domain)
+        session.log_page(url, "ok", depth, len(page_acts), pass_num, elapsed_ms)
+        acts_found.extend(page_acts)
+        pages_crawled += 1
+
+        if depth < max_depth:
+            for act in page_acts:
+                child_norm = _normalise_url(act["url"])
+                if child_norm not in session.seen_urls:
+                    queue.append((act["url"], depth + 1))
+
+        # Follow SSO pagination at the same depth (not consuming depth budget)
+        if is_js and _SSO_DOMAIN in portal_url:
+            next_href = _has_next_page(html)
+            if next_href:
+                next_url = _make_absolute(next_href, url)
+                if _normalise_url(next_url) not in session.seen_urls:
+                    queue.insert(0, (next_url, depth))
+
+    return acts_found
+
+
+# ── Search URL construction ────────────────────────────────────────────────────
+
+def _build_search_urls(
+    portal: ProbeResult,
+    economy_config: EconomyConfig,
+    taxonomy: list[dict],
+) -> list[str]:
+    pattern: str | None = None
+    for p in economy_config.portals:
+        if _normalise_url(str(p.url)) == _normalise_url(portal.url):
+            pattern = p.search_url_pattern
+            break
+
+    keywords: list[str] = []
+    for ind in taxonomy:
+        keywords.extend(ind.get("probe_keywords", []))
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for kw in keywords[:15]:  # cap to avoid excessive requests
+        encoded = urllib.parse.quote_plus(kw)
+        if pattern:
+            url = pattern.replace("{keyword}", encoded)
+        elif _SSO_DOMAIN in portal.url:
+            url = f"https://sso.agc.gov.sg/Search?SearchAct={encoded}"
+        else:
+            url = f"{portal.url.rstrip('/')}?q={encoded}"
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+# ── Known URL loader ───────────────────────────────────────────────────────────
+
+def load_known_urls(xlsx_path: str, economy_name: str | None = None) -> set[str]:
+    """Load known act URLs from a Round 1 Database XLSX file."""
+    try:
+        import openpyxl  # type: ignore
+    except ImportError as exc:
+        raise CrawlerError("openpyxl required: pip install openpyxl") from exc
+
+    wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    urls: set[str] = set()
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            row_text = " ".join(str(c) for c in row if c is not None).lower()
+            if economy_name is not None and economy_name.lower() not in row_text:
+                continue
+            for cell in row:
+                if cell and isinstance(cell, str) and cell.startswith("http"):
+                    urls.add(cell.strip())
+    return urls
+
+
+# ── Public entry point ─────────────────────────────────────────────────────────
+
+async def run_crawler(
+    probe_results: list[ProbeResult],
+    economy_config: EconomyConfig,
+    taxonomy: list[dict],
+    known_urls: set[str],
+    output_dir: str = "logs",
+) -> list[CandidateAct]:
+    """
+    Run Pass 1 (KNOWN) then Pass 2 (NEW) across all active portals.
+    Returns deduplicated CandidateAct list — KNOWN acts sorted before NEW.
+    Raises CrawlerError if no candidate acts are found.
+    """
+    iso = _economy_iso(economy_config)
+    pillar = "P6+P7"
+    session = _CrawlSession(iso, pillar, output_dir)
+    t0 = time.monotonic()
+    candidates: list[CandidateAct] = []
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_CRAWLS)
+    known_norm = {_normalise_url(u) for u in known_urls}
+
+    async with httpx.AsyncClient() as client:
+
+        # ── Pass 1: KNOWN ──────────────────────────────────────────────────────
+        for portal in probe_results:
+            if not portal.is_active:
+                continue
+            portal_domain = _registered_domain(portal.url)
+            seed = [u for u in known_urls if _registered_domain(u) == portal_domain]
+            if not seed:
+                continue
+            async with semaphore:
+                try:
+                    acts = await _crawl_bfs(seed, portal.url, 1, session, client)
+                except Exception as exc:
+                    logger.error("Pass 1 error on %s: %s", portal.url, exc)
+                    session._errors += 1
+                    continue
+            for act in acts:
+                doc_type = await _detect_document_type(act["url"], client)
+                candidates.append(CandidateAct(
+                    act_title=act["title"],
+                    act_url=act["url"],
+                    description_snippet=act["snippet"][:500],
+                    document_type=doc_type,
+                    discovery_tag="KNOWN",
+                    portal_source=portal.url,
+                    economy=iso,
+                    pillar=pillar,
+                    pass_number=1,
+                ))
+
+        # ── Pass 2: NEW ────────────────────────────────────────────────────────
+        pass1_norm = {_normalise_url(c.act_url) for c in candidates}
+        known_titles_lower = {c.act_title.lower() for c in candidates}
+
+        for portal in probe_results:
+            if not portal.is_active:
+                continue
+            search_urls = _build_search_urls(portal, economy_config, taxonomy)
+            if not search_urls:
+                continue
+            async with semaphore:
+                try:
+                    acts = await _crawl_bfs(search_urls, portal.url, 2, session, client)
+                except Exception as exc:
+                    logger.error("Pass 2 error on %s: %s", portal.url, exc)
+                    session._errors += 1
+                    continue
+            for act in acts:
+                norm = _normalise_url(act["url"])
+                if norm in pass1_norm:
+                    continue  # already captured in Pass 1
+                tag = "KNOWN" if (norm in known_norm or act["title"].lower() in known_titles_lower) else "NEW"
+                doc_type = await _detect_document_type(act["url"], client)
+                candidates.append(CandidateAct(
+                    act_title=act["title"],
+                    act_url=act["url"],
+                    description_snippet=act["snippet"][:500],
+                    document_type=doc_type,
+                    discovery_tag=tag,
+                    portal_source=portal.url,
+                    economy=iso,
+                    pillar=pillar,
+                    pass_number=2,
+                ))
+                pass1_norm.add(norm)
+
+    elapsed = time.monotonic() - t0
+    known_count = sum(1 for c in candidates if c.discovery_tag == "KNOWN")
+    new_count = sum(1 for c in candidates if c.discovery_tag == "NEW")
+    session.write_summary(len(candidates), known_count, new_count, elapsed)
+
+    if not candidates:
+        raise CrawlerError(f"No candidate acts found for {iso}")
+
+    candidates.sort(key=lambda c: (0 if c.discovery_tag == "KNOWN" else 1))
+    return candidates

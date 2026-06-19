@@ -13,3 +13,10 @@ class ConfigError(Exception):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class CrawlerError(Exception):
+    """Raised when the crawler fails to find any candidate acts."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)

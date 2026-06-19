@@ -1,0 +1,11 @@
+economy_name: Singapore
+script_type: latin
+languages: [en]
+portals:
+  - name: Singapore Statutes Online
+    url: https://sso.agc.gov.sg
+    type: primary
+    search_url_pattern: "https://sso.agc.gov.sg/Search?SearchAct={keyword}"
+  - name: Singapore Government Gazette
+    url: https://www.egazette.gov.sg
+    type: secondary

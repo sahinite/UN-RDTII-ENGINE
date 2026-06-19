@@ -122,9 +122,38 @@ The probe does not hardcode which portals need Playwright. It sends httpx first;
 
 **Test coverage:** taxonomy validation, JS detection, search URL building, HTML parsing, httpx routing, Playwright fallback, HTTP 403/429/timeout handling, hit aggregation, deduplication, ranking, zero-result filtering, ProbeError, log files, translation skip/translate/fallback/cache, output contract.
 
-### 🔲 Pending: [Z1-3] Crawl4AI Document Retrieval
-`src/crawler/crawl4ai_runner.py` — `crawl(portal_url, depth=2) -> list[CandidateDocument]`
-Domain-locked, Playwright-rendered, depth-2 crawl.
+### ✅ Completed: [Z1-3] Crawl4AI Crawler Integration
+
+**Files changed:**
+- `src/crawler/crawler.py` — full implementation: `CandidateAct`, `run_crawler()`, `load_known_urls()`, BFS engine, logging
+- `src/crawler/exceptions.py` — added `CrawlerError`
+- `tests/test_crawler.py` — 28 tests, all passing
+- `tests/fixtures/sso_listing_page.html` — mock SSO HTML with pagination
+- `tests/fixtures/legislation_au_listing.html` — mock AU listing HTML
+- `tests/fixtures/round1_db_sg.xlsx` — minimal Round 1 DB (3 SG acts + 1 MY act)
+- `tests/fixtures/sg_economy.yaml` — SG economy fixture for tests
+- `requirements.txt` — added `tldextract`, `openpyxl`
+- `.env.example` — added `CRAWL_TIMEOUT_MS`, `CRAWL_MAX_DEPTH`, `CRAWL_MAX_PAGES`, `CRAWL_JITTER_MS`, `MAX_CONCURRENT_CRAWLS`
+
+**What was built:**
+- `CandidateAct` dataclass (9 fields: act_title, act_url, description_snippet, document_type, discovery_tag, portal_source, economy, pillar, pass_number)
+- Two-pass discovery: Pass 1 seeds BFS from known Round 1 URLs (KNOWN tag), Pass 2 seeds from indicator keyword search URLs (KNOWN or NEW tag)
+- BFS crawler with `asyncio.Semaphore` concurrency, manual depth tracking (max 2 tiers), domain-locking via tldextract
+- JS portal detection: `_is_js_portal` → dispatches to `_fetch_with_playwright` (Crawl4AI); static → `_fetch_with_httpx`
+- SSO-specific: `css:a[href*='/Act/']` wait selector, 20s timeout, pagination following (detects "Next" link)
+- Anti-bot: randomised jitter (200–600ms), 3-UA rotation, 429 → exponential backoff (1/2/4s), 403 → immediate skip
+- Document type: HEAD request (Content-Type) + `.pdf` extension check
+- URL dedup: `seen_urls: set[str]` with `_normalise_url` (lowercase, strip trailing `/`, strip cosmetic query params)
+- Quality filter: titles < 5 chars discarded; snippets truncated at 500 chars; skip extensions/off-domain silently
+- `load_known_urls(xlsx_path, economy_name)` — reads Round 1 XLSX, row-level economy filter
+- Structured logging: per-page JSONL + summary JSON + error log; INFO console output for both passes
+- `CrawlerError` raised on empty result (prevents Zone 2 from running with no input)
+- `_sleep` module alias for testable asyncio.sleep patching; `_jitter` patchable no-op in tests
+
+**ADR-010 — `_sleep` alias for testable backoff**
+`_sleep = asyncio.sleep` at module level. Tests patch `src.crawler.crawler._sleep` to record/suppress delays without affecting pytest-asyncio internals.
+
+**Test coverage:** domain locking, depth limit, 429 backoff, 403 skip, KNOWN/NEW tagging, deduplication, pass ordering, Playwright routing, SSO pagination, timeout grace, PDF/HTML detection, title filter, snippet cap, CrawlerError, field completeness, sort order, XLSX loader.
 
 ### 🔲 Pending: [Z1-4] Currency Check + Wayback Archiving
 `src/crawler/currency.py` — verify in-force status, auto-fetch successor, archive to Wayback Machine.

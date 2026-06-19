@@ -6,6 +6,8 @@ python-dotenv
 # Crawling (Zone 1) — [Z1-3]
 crawl4ai
 playwright
+tldextract
+openpyxl
 
 # HTTP probing (Zone 1) — [Z1-2]
 httpx
