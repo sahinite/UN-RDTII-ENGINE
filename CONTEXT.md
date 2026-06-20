@@ -155,8 +155,28 @@ The probe does not hardcode which portals need Playwright. It sends httpx first;
 
 **Test coverage:** domain locking, depth limit, 429 backoff, 403 skip, KNOWN/NEW tagging, deduplication, pass ordering, Playwright routing, SSO pagination, timeout grace, PDF/HTML detection, title filter, snippet cap, CrawlerError, field completeness, sort order, XLSX loader.
 
-### 🔲 Pending: [Z1-4] Currency Check + Wayback Archiving
-`src/crawler/currency.py` — verify in-force status, auto-fetch successor, archive to Wayback Machine.
+### ✅ Completed: [Z1-4] Currency Check + Wayback Archiving
+
+**Files changed:**
+- `src/crawler/currency.py` — full implementation: `CurrencyResult`, `run_currency_check()`, `_validate_url()`, `_detect_currency_status()`, `_handle_cancelled_act()`, `_extract_last_amended()`, `_archive_act_url()`
+- `tests/test_currency.py` — 27 tests, all passing
+- `tests/fixtures/sso_current_page.html` — mock SSO page with "Current" status tag
+- `tests/fixtures/legislation_au_repealed.html` — mock AU page with "Repealed" legislation-status div
+- `tests/fixtures/cancellation_notice.html` — mock cancellation notice with replacement URL
+- `.env.example` — added `CURRENCY_FETCH_TIMEOUT_SEC`, `CURRENCY_RETRY_WAIT_SEC`, `WAYBACK_RATE_LIMIT_SEC`
+
+**What was built:**
+- `CurrencyResult` dataclass (15 fields = 9 from CandidateAct + 6 new: `http_status`, `currency_status`, `flag_for_review`, `currency_note`, `last_amended`, `archive_url`)
+- **ST1 URL validation**: HTTP GET gate — 404 → broken; 301/302 same-domain → follow and update `act_url`; cross-domain redirect → SUSPICIOUS_REDIRECT (broken); 403 → retry alt UA; 429 → backoff retry; 5xx/timeout → uncertain + flag_for_review
+- **ST2 in-force detection**: portal-specific status tags first (SSO `<span class="status-tag">`, legislation.gov.au `<div class="legislation-status">`), then keyword scan (`_CANCELLED_PATTERNS`, `_IN_FORCE_PATTERNS`), Bahasa "Akta ini telah dibatalkan" included; unknown → "uncertain"
+- **ST3 auto-replacement (4 scenarios)**: S1=pass unchanged; S2=parse notice for URL/name → validate → use; S3=re-search portal → if still not found → flag_for_review=True, still passed downstream; S4=sectoral law detection by title keyword → currency_note annotation
+- **ST4 last_amended extraction**: regex patterns for "as amended in YYYY", "consolidated as at YYYY", "[as at DD Mon YYYY]" etc.; most-recent-year wins; sanity range 1950–now; empty string on failure (not null)
+- **ST5 Wayback archiving**: `https://web.archive.org/save/{url}`; Content-Location header → snapshot URL; 429 → 60s wait retry; 523/timeout → archive_url="", pipeline continues; sequential (1 req/sec, `_sleep` alias for testability); only live URLs archived (not 404s)
+- `run_currency_check()` returns ALL acts (broken, cancelled, uncertain, in-force) — ranker.py filters; summary JSON written on completion
+- `_sleep = asyncio.sleep` module alias for testable rate-limit patching
+
+**ADR-011 — CurrencyResult is a standalone dataclass, not an extension of CandidateAct**
+Avoids modifying the tested Z1-3 dataclass. All 9 CandidateAct fields are forwarded into CurrencyResult as flat fields. This keeps both dataclasses independent and fully testable without cross-module coupling.
 
 ### 🔲 Pending: [Z1-5] KNOWN/NEW Tagging + Ranking
 `src/crawler/ranker.py` — two-pass discovery tagging; top 3–5 ranked acts handed to Zone 2.
