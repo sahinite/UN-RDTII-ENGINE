@@ -1,0 +1,9 @@
+economy_name: Thailand
+script_type: asian
+languages: [th, en]
+be_year_conversion: true
+translation_provider: deepl
+portals:
+  - name: Royal Thai Government Gazette
+    url: https://ratchakitcha.soc.go.th
+    type: primary

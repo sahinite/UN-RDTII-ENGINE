@@ -15,8 +15,14 @@ httpx
 # Document processing (Zone 2) — [Z2-1]
 pdfplumber
 beautifulsoup4
+lxml
 pytesseract
 paddleocr
+pymupdf
+opencv-python
+Pillow
+chardet
+fpdf2
 
 # Translation — [Z2-2], [Z1-2-ST5]
 deepl

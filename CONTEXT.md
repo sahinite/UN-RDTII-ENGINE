@@ -245,11 +245,45 @@ Avoids modifying the tested Z1-3 dataclass. All 9 CandidateAct fields are forwar
 **ADR-013 — `normalise_url` shared via direct import from `crawler.py`**
 `seed_loader.py` and `ranker.py` import `_normalise_url` from `src.crawler.crawler` directly. No utility module needed; the test `test_url_normalisation_consistent_with_crawler` enforces identity.
 
-### 🔲 Pending: [Z2-1] Fetch + Route + OCR
-`src/fetcher/router.py`, `src/ocr/processor.py` — route by MIME type; two-stage OCR cascade (CER ≥ 5% → Stage 2).
+### ✅ Completed: [Z2-1] Fetch + Route + OCR Stage 1 (language-based)
+
+**Files created/changed:**
+- `src/fetcher/models.py` — `Zone1Result`, `CostLogEntry`, `FetchedDocument`, `ActSegment`, `to_dict()` — shared contracts for all Zone 2 modules
+- `src/fetcher/logger.py` — JSON-line structured logger (stdout INFO+ / rotating file DEBUG+); every record includes `timestamp`, `level`, `module`, `event`, `economy`, `url`
+- `src/fetcher/extractors/__init__.py` — package init
+- `src/fetcher/extractors/pdf_text.py` — pdfplumber extraction with section hierarchy parser (L1/L2/L3 heading detection), table→TSV flattening, mixed-page reclassification trigger, password-protection handling
+- `src/fetcher/extractors/html_extractor.py` — BeautifulSoup extraction with URL anchor extraction (`location_reference_map`), charset detection (Content-Type → meta charset → chardet → utf-8), JS-rendered detection, boilerplate removal
+- `src/fetcher/extractors/ocr_stage1.py` — OCR Stage 1: engine read from `economy_config.ocr_engine`, OpenCV preprocessing (grayscale, adaptive threshold, deskew), Tesseract (DICT output, no pandas), PaddleOCR singleton, CER gate (raises `OCRQualityError` at ≥5% for Stage-2 handoff), page-marker assembly
+- `src/fetcher/segmenter.py` — consolidated volume splitter: PyMuPDF font-size + pattern boundary detection, PDF slicing, title extraction, short-segment merge (<3 pages), fixed-50-page fallback, extensible `volume_header_patterns` from YAML
+- `src/fetcher/router.py` — Zone 2 entry point: `download()` with 2-attempt retry, content-type priority → byte-sniff type detection, `classify_pdf()`, `is_consolidated_volume()` (200+ pages OR ≥2 act headers in first 10 pages), full `route()` dispatch, `DownloadError`, `UnsupportedDocTypeError`
+- `requirements.txt` — added `lxml`, `pymupdf`, `opencv-python`, `Pillow`, `chardet`, `fpdf2`
+- `tests/test_z2_1_router.py` — 94 unit tests; 91.76% line coverage (≥90% target met); zero real HTTP calls
+- `tests/fixtures/z2_1/sg.yaml`, `th.yaml` — economy config fixtures
+- `tests/fixtures/z2_1/sso_agc_sample.html` — SSO portal page with `#anchor` ids
+- `tests/fixtures/z2_1/pdpa_sg_sample.pdf` — minimal text-native PDF (3 pages, pdfplumber-readable)
+- `tests/fixtures/z2_1/scanned_sample.pdf` — minimal scanned PDF (2 empty pages)
+
+**What was built:**
+- Full `FetchedDocument` output contract: identity, doc metadata, raw text, section hierarchy, `location_reference_map` (HTML), `cer_score` (OCR), segmentation flags, `flag_for_review`, `cost_log_entry`
+- `FetchedDocument.validate()` — enforces non-empty text, valid URL, valid discovery tag, no UNKNOWN doc_type, required cost log
+- Routing: TEXT_PDF → pdfplumber; SCANNED_PDF/IMAGE → OCR Stage 1; HTML → BeautifulSoup; consolidated volume → segment then route each segment
+- Reclassification: TEXT_PDF with >30% empty pages → silently hands off to OCR Stage 1 via `ReclassifyToScannedError`
+- OCR engine is always read from `economy_config.ocr_engine` (derived from `script_type` in YAML) — zero runtime override
+- URL anchors (`location_reference_map`) populated for HTML extraction — judge differentiator
+- All 13 structured log events from ClickUp spec implemented
+- Hackathon cost logging: `cost_usd=0.0` for all local engines (pdfplumber, Tesseract, PaddleOCR, BeautifulSoup)
+
+**ADR-014 — `FetchedDocument` is the single Zone 2 contract**
+All extractors return `FetchedDocument`. Router, segmenter, and all downstream modules (chunker, mapper, writer) consume this type. Validation (`validate()`) is called at the end of every extractor before returning — silent extraction failures are impossible.
+
+**ADR-015 — Existing `EconomyConfig` from `src/config/economy_config.py` reused**
+The ClickUp spec described a `fetcher/models.py` EconomyConfig but the project already has a well-formed Pydantic one. `Zone1Result`, `FetchedDocument`, `CostLogEntry`, and `ActSegment` are defined in `src/fetcher/models.py`; `EconomyConfig` is imported from `src.config.economy_config`.
+
+**ADR-016 — Tesseract uses `Output.DICT` (no pandas dependency)**
+`pytesseract.image_to_data(output_type=Output.DICT)` returns a plain dict. Confidence scores computed with a list comprehension — no pandas import, no pandas dependency in requirements.
 
 ### 🔲 Pending: [Z2-2] Segment + Translate
-`src/fetcher/segmenter.py` — split multi-act volumes; DeepL + Google Translate fallback; persist verbatim original + translation.
+`src/fetcher/segmenter.py` already handles volume splitting (Z2-1 ST5). Z2-2 needs to add: 3-layer DeepL translation, Google Translate fallback, `verbatim_original` + `translation` persistence, Thai Buddhist Era conversion.
 
 ### 🔲 Pending: [Z2-3] RAG Pipeline
 `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — article-level chunking, hybrid BM25 + dense retrieval, cross-encoder rerank, top-5 chunks with location_reference.
