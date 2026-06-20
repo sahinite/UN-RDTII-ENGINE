@@ -1,0 +1,41 @@
+[
+  {
+    "indicator_id": "P6-I1",
+    "name": "General prohibition / restriction",
+    "legal_question": "Does the law restrict cross-border transfer of personal data as a default?",
+    "probe_keywords": [
+      "cross-border data transfer",
+      "personal data transfer restriction",
+      "data localisation"
+    ],
+    "exclude_keywords": [
+      "banking secrecy",
+      "financial institution supervision"
+    ],
+    "exclude_act_titles": [
+      "banking act",
+      "income tax act",
+      "customs act"
+    ]
+  },
+  {
+    "indicator_id": "P7-I3",
+    "name": "Data subject rights",
+    "legal_question": "Do individuals have rights to access, correct, or delete their data?",
+    "probe_keywords": [
+      "right to access personal data",
+      "data correction right",
+      "data subject rights",
+      "individual rights data protection"
+    ],
+    "exclude_keywords": [
+      "criminal procedure",
+      "criminal law enforcement"
+    ],
+    "exclude_act_titles": [
+      "criminal procedure code",
+      "penal code",
+      "banking act"
+    ]
+  }
+]

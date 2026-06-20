@@ -65,7 +65,7 @@ Two zones wired together in `main.py`:
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
 2. `openai` / `gpt-4o`
-3. `groq` / `deepseek-v3`
+3. `groq` / `qwen3-32b` (DeepSeek no longer on Groq as of June 2026; fallback: `qwen3.6-27b`)
 4. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
 5. `ollama` / `granite3-8b` (offline, Apache 2.0)
 

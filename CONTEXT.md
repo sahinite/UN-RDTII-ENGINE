@@ -178,8 +178,72 @@ The probe does not hardcode which portals need Playwright. It sends httpx first;
 **ADR-011 — CurrencyResult is a standalone dataclass, not an extension of CandidateAct**
 Avoids modifying the tested Z1-3 dataclass. All 9 CandidateAct fields are forwarded into CurrencyResult as flat fields. This keeps both dataclasses independent and fully testable without cross-module coupling.
 
-### 🔲 Pending: [Z1-5] KNOWN/NEW Tagging + Ranking
-`src/crawler/ranker.py` — two-pass discovery tagging; top 3–5 ranked acts handed to Zone 2.
+### ✅ Completed: [Z1-5] Two-Pass Discovery Tagging (KNOWN/NEW) + Ranker
+
+**Files changed:**
+- `src/crawler/seed_loader.py` — NEW: `SeedData`, `load_seed_data()`, `normalise_title()`, Round 1 DB xlsx loader, Sample CSV loader
+- `src/crawler/ranker.py` — full implementation replacing stub: `RankedAct`, `RankerError`, `ActIndicatorScore`, `run_ranker()`, all ST2–ST7 pipeline
+- `taxonomy.json` — extended: added `exclude_keywords` and `exclude_act_titles` arrays for all 10 indicators
+- `tests/test_ranker.py` — 40 tests (7 groups), all passing; replaces 2-line stub
+- `tests/fixtures/sample_portals_p6.csv` — NEW: Sample CSV fixture with semicolon-separated reference URLs
+- `tests/fixtures/taxonomy_ranker_test.json` — NEW: 2-indicator test taxonomy with exclusion rules
+
+**What was built:**
+
+**ST1 — Seed Data Loader (`crawler/seed_loader.py`)**
+- `SeedData` dataclass: `known_urls: set[str]`, `known_titles: set[str]`, `economy`, `pillar`
+- Loads Round 1 DB (xlsx): filters by economy + pillar, normalises URLs and titles
+- Loads Sample CSV: splits semicolon-separated `References` URLs, merges into seed sets
+- `normalise_title()`: strips trailing year suffix, lowercases, collapses whitespace
+- Imports `_normalise_url` from `crawler.py` — zero URL normalisation duplication
+- Logs `[SEED] {economy} {pillar}: N known URLs loaded…`; WARN (no crash) if empty
+
+**ST2 — Discovery Tag Finalisation (`resolve_discovery_tag`)**
+- URL match → KNOWN (exact, highest priority)
+- Single title prefix match → KNOWN + note ("URL changed since Round 1")
+- Ambiguous title match (≥2 known titles share prefix) → NEW + `flag_for_review=True`
+- No match → NEW
+
+**ST3 — Layer 2 Translation (`_apply_translation`)**
+- Triggered by `economy_config.translation_provider is not None`
+- DeepL primary (with `DEEPL_API_KEY`); googletrans fallback on DeepL failure
+- In-memory + disk cache (`cache/l2_title_translations_{lang}.json`)
+- `act_title_original` preserved; translated title used for scoring only
+- English economies (SG, AU): zero API calls
+
+**ST4 — Semantic + BM25 Scorer (`_score_acts`)**
+- `SentenceTransformer("all-MiniLM-L6-v2")` — lazy singleton, loaded once per process
+- Batch encode all act texts; cosine similarity per (act, indicator) pair
+- `BM25Okapi` corpus built once per run; normalised by max (negative scores clipped to 0)
+- Returns `list[ActIndicatorScore]` — all scores in [0.0, 1.0]
+
+**ST5 — Exclusion Filter (`is_excluded`)**
+- Checks `exclude_act_titles` (normalised title substring) and `exclude_keywords` (full text)
+- Excluded acts logged to `logs/ranker_excluded_{economy}_{ts}.jsonl`; never sent to LLM gate
+- Adding new rules requires only editing `taxonomy.json` — zero code changes
+- Populated for all 10 indicators: banking/tax/immigration acts excluded from P6, criminal procedure excluded from P7
+
+**ST6 — Score Fusion + DeepSeek LLM Gate (`_call_llm_gate`, `_run_gate_for_indicator`)**
+- Fused score = `RANKER_SEMANTIC_WEIGHT * semantic + RANKER_BM25_WEIGHT * bm25` (configurable via `.env`)
+- Top 20 by fused score sent to LLM gate sequentially (jitter: `GATE_LLM_JITTER_MS=200ms`)
+- LLM cascade: DeepSeek R1 via Groq → Qwen 2.5 via Groq → Ollama qwen2.5:7b (offline)
+- Binary PASS/FAIL prompt; ambiguous responses → FAIL + `GATE_AMBIGUOUS_RESPONSE` log
+- Zero PASS → `RankerError`; fewer than 3 PASS → include UNCERTAIN acts with `flag_for_review=True`
+- `RANKER_TOP_N` env var (default 5, min 3) controls shortlist size
+
+**ST7 — Output Contract + Logs**
+- `RankedAct` dataclass: 20 fields (identity, discovery, currency, ranking, quality)
+- `run_ranker(currency_results, seed_data, taxonomy, economy_config, output_dir)` — full pipeline
+- `logs/ranker_summary_{economy}_{ts}.json` — always written (even on partial failure)
+- `logs/ranker_scores_{economy}_{ts}.jsonl` — one row per (act × indicator) pair
+- `logs/ranker_excluded_{economy}_{ts}.jsonl` — all excluded acts with reason
+- `logs/ranker_cost_{economy}_{ts}.jsonl` — per-gate-call token counts and cost
+
+**ADR-012 — Negative BM25 scores clipped to 0 before normalisation**
+`rank_bm25`'s BM25Okapi can return negative IDF for terms present in all corpus documents. Negative scores are clipped to 0 (semantically: too-common terms carry no discriminative signal) before dividing by max to get [0, 1] range.
+
+**ADR-013 — `normalise_url` shared via direct import from `crawler.py`**
+`seed_loader.py` and `ranker.py` import `_normalise_url` from `src.crawler.crawler` directly. No utility module needed; the test `test_url_normalisation_consistent_with_crawler` enforces identity.
 
 ### 🔲 Pending: [Z2-1] Fetch + Route + OCR
 `src/fetcher/router.py`, `src/ocr/processor.py` — route by MIME type; two-stage OCR cascade (CER ≥ 5% → Stage 2).
