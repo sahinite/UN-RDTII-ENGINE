@@ -1,0 +1,55 @@
+"""
+RAG pipeline configuration + taxonomy loader. [Z2-3 ST6]
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Optional
+
+from src.retrieval.models import TaxonomyEntry
+
+logger = logging.getLogger("retrieval.config")
+
+_TAXONOMY_PATH = Path(__file__).parent.parent.parent / "taxonomy.json"
+
+_taxonomy_cache: Optional[list[TaxonomyEntry]] = None
+
+
+def load_taxonomy(path: Path = _TAXONOMY_PATH) -> list[TaxonomyEntry]:
+    global _taxonomy_cache
+    if _taxonomy_cache is not None:
+        return _taxonomy_cache
+    with open(path, encoding="utf-8") as fh:
+        raw: list[dict] = json.load(fh)
+    entries = [
+        TaxonomyEntry(
+            indicator_id=r["indicator_id"],
+            name=r.get("name", ""),
+            legal_question=r.get("legal_question", ""),
+            probe_keywords=r.get("probe_keywords", []),
+            exclude_keywords=r.get("exclude_keywords", []),
+            exclude_act_titles=r.get("exclude_act_titles", []),
+        )
+        for r in raw
+    ]
+    _taxonomy_cache = entries
+    logger.info({"event": "taxonomy_loaded", "indicators": len(entries)})
+    return entries
+
+
+def get_indicator(indicator_id: str) -> TaxonomyEntry:
+    """Lookup a single indicator; raises KeyError if not found."""
+    for entry in load_taxonomy():
+        if entry.indicator_id == indicator_id:
+            return entry
+    raise KeyError(f"Unknown indicator_id: {indicator_id!r}")
+
+
+# Pipeline hyper-parameters (can be overridden via env for ablation tests)
+BM25_TOP_K = 20
+DENSE_TOP_K = 20
+FUSION_TOP_K = 20
+RERANK_TOP_N = 5

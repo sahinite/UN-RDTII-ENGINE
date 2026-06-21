@@ -316,8 +316,33 @@ Even after BE year conversion the `verbatim_original` field holds the unmodified
 **ADR-018 — Translation provider pinned per economy via YAML `translation_provider`**
 `economy_config.translation_provider` is `"deepl"` | `"google"` | `None`. `None` means try DeepL first (if `DEEPL_API_KEY` present), fall back to Google. This is consistent with probe.py Layer 1 translation (Z1-2 ST3). English economies (`languages: [en]`) skip all provider calls regardless of `translation_provider`.
 
-### 🔲 Pending: [Z2-3] RAG Pipeline
-`src/retrieval/chunker.py`, `embedder.py`, `rag.py` — article-level chunking, hybrid BM25 + dense retrieval, cross-encoder rerank, top-5 chunks with location_reference.
+### ✅ Completed: [Z2-3] RAG Pipeline
+
+**Files changed:**
+- `src/retrieval/models.py` — `LocationReference`, `Chunk`, `RetrievedChunk`, `TaxonomyEntry` dataclasses
+- `src/retrieval/chunker.py` — `chunk_document()`: 3-strategy article splitter (hierarchy → regex → whole-doc fallback); tracks `location_reference` on every chunk
+- `src/retrieval/embedder.py` — `EmbeddingIndex` with lazy `all-MiniLM-L6-v2` singleton; FAISS flat-IP index; `build_index()`, `dense_search()`
+- `src/retrieval/bm25_index.py` — `BM25Index` wrapping `rank_bm25.BM25Okapi`; probe-keyword boosting (×1.5); exclude_keywords + exclude_act_titles negative filter
+- `src/retrieval/fusion.py` — `rrf_fusion()`: Reciprocal Rank Fusion (k=60) merging BM25 + dense → top-20
+- `src/retrieval/reranker.py` — `rerank()`: lazy `cross-encoder/ms-marco-MiniLM-L-6-v2`; top-20 → top-5; ±300-char context windows from adjacent chunks
+- `src/retrieval/config.py` — `load_taxonomy()` / `get_indicator()` backed by `taxonomy.json`; pipeline hyper-parameters
+- `src/retrieval/rag.py` — `retrieve(indicator_id, doc)` orchestrator; `retrieve_batch()` amortised multi-indicator path
+- `src/retrieval/__init__.py` — public exports: `retrieve`, `retrieve_batch`, `Chunk`, `LocationReference`, `RetrievedChunk`
+- `tests/test_rag.py` — 31 unit tests, all passing; all ML models mocked; covers chunker strategies, BM25 boosting/filtering, RRF invariants, reranker ordering, orchestrator end-to-end, taxonomy config
+
+**What was built:**
+- Article-level chunker: prefers section_hierarchy text when ≥2 entries have content; falls back to regex splitting on `Section N.` / `Article N.` patterns; whole-doc fallback ensures never-empty output
+- Embedding index: `all-MiniLM-L6-v2` (Apache 2.0, 384-dim), FAISS IndexFlatIP, normalised cosine similarity
+- BM25 with legal-domain enhancements: `exclude_act_titles` drops off-topic acts (Banking Act, Customs Act); `probe_keywords` boost relevant chunks by 1.5×
+- Hybrid fusion via RRF (k=60): items in both ranked lists score higher than those in one alone
+- Cross-encoder reranker: `ms-marco-MiniLM-L-6-v2` (Apache 2.0) re-scores top-20 candidates; each returned `RetrievedChunk` carries `context_window` (chunk ± adjacent text)
+- Every returned chunk has a verifiable `LocationReference(act_title, part, article_number, page)`
+
+**ADR-019 — Retrieval models use lazy singletons, not module-level imports**
+`all-MiniLM-L6-v2` and `cross-encoder/ms-marco-MiniLM-L-6-v2` are loaded once per process on first call. This prevents import-time model downloads during unit tests and allows the test suite to mock `_get_model()` / `_get_cross_encoder()` cleanly.
+
+**ADR-020 — chunk_document type detection uses isinstance, not getattr**
+`TranslatedDocument` vs `FetchedDocument` is resolved via `isinstance(doc, TranslatedDocument)` so that mock objects in tests cannot accidentally impersonate a `TranslatedDocument` by having auto-created attributes.
 
 ### 🔲 Pending: [Z2-4] LLM Mapping
 `src/llm/client.py`, `src/mapping/mapper.py` — 5-tier cascade client; per-indicator mapping to `{indicator_id, article, verbatim_snippet, mapping_rationale, confidence}`.
