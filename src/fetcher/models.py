@@ -1,8 +1,10 @@
 """
-Shared dataclasses for Z2-1: FetchedDocument, CostLogEntry, Zone1Result.
+Shared dataclasses for Zone 2: FetchedDocument, CostLogEntry, Zone1Result,
+TranslatedDocument, ArticleReference. [Z2-1, Z2-2]
 
 FetchedDocument is the routing contract between router.py, all extractors,
 and downstream Zone 2 modules (RAG, mapper, output writer).
+TranslatedDocument wraps FetchedDocument with 3-layer translation output.
 """
 
 from __future__ import annotations
@@ -103,6 +105,50 @@ class ActSegment:
     raw_bytes: bytes
     economy: str
     source_url: str
+
+
+# ── Article reference (ST2 output) ────────────────────────────────────────────
+
+@dataclass
+class ArticleReference:
+    """A citable (act_title, part, article_number) tuple within a segment."""
+    act_title: str
+    part: str           # e.g. "PART I", "CHAPTER 2" — empty string if none
+    article_number: str # e.g. "1", "5A", "12(1)"
+    heading: str        # Full heading text as it appears in the document
+    text_anchor: str    # HTML anchor id or empty string for PDF
+
+
+# ── Translation cost tracking (ST6) ───────────────────────────────────────────
+
+@dataclass
+class TranslationCostEntry:
+    source_language: str
+    provider: str       # "deepl" | "google" | "none" | "failed"
+    chars_translated: int
+    cost_usd: float     # $0.0 for Google (free tier); $20/1M chars for DeepL Pro
+
+
+# ── Translated document contract (ST4 / ST6) ───────────────────────────────────
+
+@dataclass
+class TranslatedDocument:
+    """
+    Wraps a FetchedDocument with the 3-layer translation output (Z2-2).
+
+    verbatim_original always holds the source-language text so the
+    output JSON can populate both verbatim_original and verbatim_snippet.
+    """
+    fetched: FetchedDocument
+    source_language: str
+    translated_text: str             # Layer 3 output (equals raw_text when English)
+    act_title_translated: str        # Layer 2 output
+    keywords_translated: list        # Layer 1 output (list[str])
+    verbatim_original: str           # Always the original-language raw_text
+    translation_provider: str        # "deepl" | "google" | "none" | "failed"
+    translation_cost_entry: TranslationCostEntry
+    be_year_conversions: list        # [(be_str, ce_int)] — empty for non-BE economies
+    article_references: list = field(default_factory=list)  # list[ArticleReference]
 
 
 # ── Serialisation helper ────────────────────────────────────────────────────────

@@ -1,8 +1,10 @@
 """
-Consolidated volume segmentation via PyMuPDF. [Z2-1 ST5]
+Consolidated volume segmentation via PyMuPDF. [Z2-1 ST5, Z2-2 ST1, ST2]
 
 Splits multi-act consolidated volumes by act boundary before extraction.
-Translation (Z2-2) is a separate downstream step.
+Also provides extract_article_references() to map section_hierarchy entries
+to citable (act_title, part, article_number) tuples. [Z2-2 ST2]
+Translation is handled by src/fetcher/translator.py. [Z2-2 ST3-ST5]
 
 # LICENCE-NOTE: PyMuPDF (AGPL) — single controlled point of use, pending
 # replacement with a permissively-licensed alternative per tech plan.
@@ -14,7 +16,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.fetcher.logger import get_logger
-from src.fetcher.models import ActSegment
+from src.fetcher.models import ActSegment, ArticleReference
 
 if TYPE_CHECKING:
     from src.config.economy_config import EconomyConfig
@@ -32,12 +34,96 @@ ACT_HEADER_PATTERNS: list[re.Pattern[str]] = [
 _MIN_SEGMENT_PAGES = 3
 _FIXED_FALLBACK_SIZE = 50
 
+# ── Article reference patterns (ST2) ──────────────────────────────────────────
+
+# Matches "PART I", "CHAPTER 2", "DIVISION IV", "SCHEDULE 3"
+_PART_RE = re.compile(
+    r"^(PART|CHAPTER|DIVISION|SCHEDULE)\s+([IVXivx]+|\d+)(?:\s[—–-]\s*(.+))?",
+    re.IGNORECASE,
+)
+
+# Matches "12.", "12A.", "5A." at the start of a section heading
+_ARTICLE_NUMBER_RE = re.compile(r"^(\d+[A-Z]?)\.\s+")
+
+# Matches "Section 12", "Article 5", "Regulation 3", "Rule 4", "Clause 2"
+_ARTICLE_KEYWORD_RE = re.compile(
+    r"^(?:Section|Article|Regulation|Rule|Clause|s\.)\s+(\d+[A-Z]?(?:\(\d+\))?)",
+    re.IGNORECASE,
+)
+
 
 def _matches_act_header(text: str) -> bool:
     for pattern in ACT_HEADER_PATTERNS:
         if pattern.search(text.strip()):
             return True
     return False
+
+
+# ── ST2: Article reference mapping ────────────────────────────────────────────
+
+def extract_article_references(
+    section_hierarchy: list[dict],
+    act_title: str,
+) -> list[ArticleReference]:
+    """
+    Build a list of ArticleReference from the section_hierarchy of a FetchedDocument.
+
+    Tracks the current PART/CHAPTER/DIVISION as context for each article so
+    every reference carries a fully-qualified (act_title, part, article_number).
+    Disambiguates duplicate article numbers by appending the part label.
+    """
+    refs: list[ArticleReference] = []
+    current_part = ""
+    seen: dict[str, int] = {}  # article_number → count, for disambiguation
+
+    for entry in section_hierarchy:
+        title: str = (entry.get("title") or "").strip()
+        anchor: str = (entry.get("anchor") or "")
+
+        # Update current part context from level-1 headings
+        part_m = _PART_RE.match(title)
+        if part_m:
+            part_type = part_m.group(1).upper()
+            part_id = part_m.group(2).upper()
+            current_part = f"{part_type} {part_id}"
+            continue  # Part headings are not themselves citable articles
+
+        # Extract article number from level-2/3 headings
+        article_num = ""
+        num_m = _ARTICLE_NUMBER_RE.match(title)
+        if num_m:
+            article_num = num_m.group(1)
+        else:
+            kw_m = _ARTICLE_KEYWORD_RE.match(title)
+            if kw_m:
+                article_num = kw_m.group(1)
+
+        if not article_num:
+            continue
+
+        # Disambiguate: if same article_number seen in a different part, suffix it
+        key = article_num
+        if key in seen:
+            seen[key] += 1
+            disambig = f"{article_num}({current_part})" if current_part else f"{article_num}[{seen[key]}]"
+        else:
+            seen[key] = 1
+            disambig = article_num
+
+        refs.append(ArticleReference(
+            act_title=act_title,
+            part=current_part,
+            article_number=disambig,
+            heading=title,
+            text_anchor=anchor,
+        ))
+
+    logger.info({
+        "event": "article_references_mapped",
+        "act_title": act_title,
+        "count": len(refs),
+    })
+    return refs
 
 
 # ── Boundary detection ─────────────────────────────────────────────────────────

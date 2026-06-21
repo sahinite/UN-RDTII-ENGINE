@@ -286,8 +286,35 @@ The ClickUp spec described a `fetcher/models.py` EconomyConfig but the project a
 **ADR-016 — Tesseract uses `Output.DICT` (no pandas dependency)**
 `pytesseract.image_to_data(output_type=Output.DICT)` returns a plain dict. Confidence scores computed with a list comprehension — no pandas import, no pandas dependency in requirements.
 
-### 🔲 Pending: [Z2-2] Segment + Translate
-`src/fetcher/segmenter.py` already handles volume splitting (Z2-1 ST5). Z2-2 needs to add: 3-layer DeepL translation, Google Translate fallback, `verbatim_original` + `translation` persistence, Thai Buddhist Era conversion.
+### ✅ Completed: [Z2-2] Segment + Translate
+
+**Files changed:**
+- `src/fetcher/translator.py` — NEW: full 3-layer translation pipeline
+- `src/fetcher/segmenter.py` — added ST2 article reference mapping (`extract_article_references`)
+- `src/fetcher/models.py` — added `ArticleReference`, `TranslationCostEntry`, `TranslatedDocument`
+- `tests/test_z2_2_segment_translate.py` — 40 tests, all passing
+
+**What was built:**
+
+**ST1 — Segmenter Core (enhanced):** existing PyMuPDF boundary detection + slicing; expanded act header patterns (Thai, Malay); `extract_article_references` wired to produce per-segment citation maps.
+
+**ST2 — Article Reference Mapping:** `extract_article_references(section_hierarchy, act_title) → list[ArticleReference]`. Tracks current PART/CHAPTER/DIVISION context; extracts article numbers from `"12."`, `"Section 5"`, `"Article 3"` style headings; disambiguates duplicate numbers across parts by appending part label. Each `ArticleReference` carries `(act_title, part, article_number, heading, text_anchor)`.
+
+**ST3 — Layer 1 & 2 Translation:** `translate_keywords()` (Layer 1) and `translate_act_title()` (Layer 2). DeepL primary (`DEEPL_API_KEY`); automatic Google Translate fallback. English economies → zero API calls.
+
+**ST4 — Layer 3 + verbatim_original:** `translate_document(doc, economy_config, taxonomy_keywords?)` runs the full pipeline. `verbatim_original` always holds the source-language `raw_text`. Long documents (> 100 K chars) are chunked before sending to provider. Returns `TranslatedDocument` with both original and translated text.
+
+**ST5 — Buddhist Era + Normalisation:** `convert_be_years(text)` replaces BE 2400–2599 with Gregorian (BE − 543). `normalise_law_reference(title)` strips `B.E.`/`พ.ศ.` suffixes and normalises `No.` spacing. Both applied before Layer 3 when `economy_config.be_year_conversion=True`.
+
+**ST6 — TranslatedDocument + Cost Entry:** `TranslationCostEntry(source_language, provider, chars_translated, cost_usd)` — DeepL at $20/1 M chars, Google at $0.00. `TranslatedDocument` wraps `FetchedDocument` + all translation outputs. `ArticleReference` carries per-article citations for downstream RAG.
+
+**ST7 — Tests:** 40 unit tests across all subtasks; zero real API calls (all provider functions patched); covers BE conversion, normalisation, all three translation layers, chunking, English passthrough, both-fail fallback, article mapping edge cases.
+
+**ADR-017 — `verbatim_original` always the source-language `raw_text`**
+Even after BE year conversion the `verbatim_original` field holds the unmodified `raw_text` from the extractor. BE conversion is applied only to the text sent to the translation provider, not to the stored original. This lets output JSON compare source and translated passages verbatim.
+
+**ADR-018 — Translation provider pinned per economy via YAML `translation_provider`**
+`economy_config.translation_provider` is `"deepl"` | `"google"` | `None`. `None` means try DeepL first (if `DEEPL_API_KEY` present), fall back to Google. This is consistent with probe.py Layer 1 translation (Z1-2 ST3). English economies (`languages: [en]`) skip all provider calls regardless of `translation_provider`.
 
 ### 🔲 Pending: [Z2-3] RAG Pipeline
 `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — article-level chunking, hybrid BM25 + dense retrieval, cross-encoder rerank, top-5 chunks with location_reference.
