@@ -1,0 +1,210 @@
+"""
+Unit tests for Z2-4 ST4: LLM Response Parser + Verbatim Assertion. [Z2-4 ST7]
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.fixtures.z2_4.fixtures import (
+    DOC_METADATA,
+    NOT_FOUND_LLM_JSON,
+    PDPA_CHUNK_TEXT,
+    VALID_LLM_JSON,
+    make_llm_response,
+    make_retrieved_chunk,
+)
+
+
+def test_parse_valid_json_returns_extraction_result():
+    from src.mapping.parser import parse_llm_response
+
+    response = make_llm_response(VALID_LLM_JSON)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert len(results) == 1
+    r = results[0]
+    assert r.article == "Section 26"
+    assert r.confidence == 0.95
+    assert r.indicator_id == "P6-I1"
+    assert r.economy == "Singapore"
+    assert r.provider_used == "anthropic"
+
+
+def test_parse_not_found_returns_empty_list():
+    from src.mapping.parser import parse_llm_response
+
+    response = make_llm_response(NOT_FOUND_LLM_JSON)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert results == []
+
+
+def test_verbatim_assertion_passes_for_exact_match():
+    from src.mapping.parser import _assert_verbatim_in_context
+
+    chunks = [make_retrieved_chunk()]
+    ok, reason = _assert_verbatim_in_context(
+        "An organisation shall not transfer personal data of an individual to a country",
+        chunks,
+    )
+    assert ok is True
+    assert reason is None
+
+
+def test_verbatim_assertion_fails_and_flags_for_review():
+    from src.mapping.parser import parse_llm_response
+
+    hallucinated_json = """{
+      "found": true,
+      "provisions": [{
+        "article": "Section 26",
+        "verbatim_snippet": "This text does not appear in any chunk at all — hallucinated!",
+        "mapping_rationale": "Maps to P6-I1.",
+        "confidence": 0.90,
+        "location_reference": "Page 34",
+        "non_consecutive": false
+      }]
+    }"""
+    response = make_llm_response(hallucinated_json)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert len(results) == 1
+    assert results[0].flag_for_review is True
+    assert "verbatim_assertion_failed" in results[0].flag_reason
+
+
+def test_low_confidence_sets_flag_for_review():
+    from src.mapping.parser import parse_llm_response
+
+    low_conf_json = VALID_LLM_JSON.replace('"confidence": 0.95', '"confidence": 0.65')
+    response = make_llm_response(low_conf_json)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert results[0].flag_for_review is True
+    assert "low_confidence" in results[0].flag_reason
+    assert "Recommend human review" in results[0].notes
+
+
+def test_rationale_over_300_chars_truncated():
+    from src.mapping.parser import parse_llm_response
+
+    long_rat = "X" * 400
+    json_str = VALID_LLM_JSON.replace(
+        '"mapping_rationale": "Section 26 imposes a default prohibition on cross-border transfer of personal data. Maps to P6-I1 because it establishes a blanket restriction on overseas transfer."',
+        f'"mapping_rationale": "{long_rat}"',
+    )
+    response = make_llm_response(json_str)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert len(results[0].mapping_rationale) <= 300
+
+
+def test_markdown_fenced_json_parsed():
+    """LLM wraps JSON in ```json ... ``` — must still parse."""
+    from src.mapping.parser import _extract_json
+
+    fenced = '```json\n{"found": false, "provisions": []}\n```'
+    result = _extract_json(fenced)
+    assert result["found"] is False
+
+
+def test_prose_wrapped_json_parsed():
+    """LLM adds prose before/after JSON — regex fallback must handle."""
+    from src.mapping.parser import _extract_json
+
+    noisy = 'Here is the result:\n{"found": false, "provisions": []}\nHope that helps!'
+    result = _extract_json(noisy)
+    assert result["found"] is False
+
+
+def test_invalid_json_raises_parse_error():
+    from src.mapping.exceptions import ParseError
+    from src.mapping.parser import _extract_json
+
+    with pytest.raises(ParseError):
+        _extract_json("this is not json at all!!!")
+
+
+def test_non_consecutive_provisions_expanded_to_two_rows():
+    from src.mapping.parser import expand_non_consecutive, parse_llm_response
+
+    non_consec_chunk = make_retrieved_chunk(
+        text=(
+            "26. Restriction on transfer of personal data outside Singapore\n"
+            "An organisation shall not transfer. "
+            "31. Section 31 applies to recipients of transferred data."
+        )
+    )
+    non_consec_json = """{
+      "found": true,
+      "provisions": [{
+        "article": "Section 26 and Section 31",
+        "verbatim_snippet": "An organisation shall not transfer. Section 31 applies to recipients of transferred data.",
+        "mapping_rationale": "Both sections together establish P6-I1.",
+        "confidence": 0.88,
+        "location_reference": "Page 34",
+        "non_consecutive": true
+      }]
+    }"""
+    response = make_llm_response(non_consec_json)
+    results = parse_llm_response(response, "P6-I1", [non_consec_chunk], DOC_METADATA)
+    expanded = expand_non_consecutive(results)
+    assert len(expanded) == 2
+    articles = [r.article for r in expanded]
+    assert "Section 26" in articles
+    assert "Section 31" in articles
+
+
+def test_empty_article_and_snippet_discarded():
+    from src.mapping.parser import parse_llm_response
+
+    empty_prov_json = """{
+      "found": true,
+      "provisions": [{"article": "", "verbatim_snippet": "", "confidence": 0.9, "non_consecutive": false}]
+    }"""
+    response = make_llm_response(empty_prov_json)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert results == []
+
+
+def test_confidence_none_when_missing():
+    from src.mapping.parser import parse_llm_response
+
+    no_conf_json = """{
+      "found": true,
+      "provisions": [{
+        "article": "Section 26",
+        "verbatim_snippet": "An organisation shall not transfer personal data of an individual to a country or territory outside Singapore",
+        "mapping_rationale": "Maps to P6-I1.",
+        "non_consecutive": false
+      }]
+    }"""
+    response = make_llm_response(no_conf_json)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert len(results) == 1
+    assert results[0].confidence is None
+    assert results[0].flag_for_review is False  # no confidence means no flagging
+
+
+def test_extraction_result_validate_catches_bad_indicator():
+    from src.mapping.models import ExtractionResult
+
+    r = ExtractionResult(
+        economy="Singapore",
+        law_name="PDPA",
+        law_number_ref=None,
+        last_amended=None,
+        indicator_id="P9-I9",  # invalid
+        article="Section 26",
+        discovery_tag="KNOWN",
+        location_reference=None,
+        verbatim_snippet="Some text",
+        mapping_rationale=None,
+        source_url="https://example.com",
+        confidence=0.95,
+        notes=None,
+        provider_used="anthropic",
+        model_used="claude-sonnet-4-20250514",
+        source_chunk_id="test__26__0",
+        raw_context_before="",
+        raw_context_after="",
+        verbatim_original=None,
+    )
+    with pytest.raises(ValueError, match="Invalid indicator_id"):
+        r.validate()

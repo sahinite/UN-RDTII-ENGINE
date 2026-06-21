@@ -344,8 +344,30 @@ Even after BE year conversion the `verbatim_original` field holds the unmodified
 **ADR-020 — chunk_document type detection uses isinstance, not getattr**
 `TranslatedDocument` vs `FetchedDocument` is resolved via `isinstance(doc, TranslatedDocument)` so that mock objects in tests cannot accidentally impersonate a `TranslatedDocument` by having auto-created attributes.
 
-### 🔲 Pending: [Z2-4] LLM Mapping
-`src/llm/client.py`, `src/mapping/mapper.py` — 5-tier cascade client; per-indicator mapping to `{indicator_id, article, verbatim_snippet, mapping_rationale, confidence}`.
+### ✅ Completed: [Z2-4] LLM Extractor — 5-Tier Auto-Cascade Mapping
+
+**Files changed:**
+- `src/mapping/exceptions.py` — full exception hierarchy: `ProviderRateLimitError`, `ProviderAPIError`, `ProviderTimeoutError`, `AllProvidersExhaustedError`, `ParseError`, `PDPAGateError`, `ConfigError`, `TaxonomyError`
+- `src/mapping/models.py` — `LLMResponse`, `ExtractionResult` (13-col CSV schema + internal metadata), `LLMCostEntry`
+- `src/mapping/base_provider.py` — `BaseLLMProvider` ABC
+- `src/mapping/providers/` — `AnthropicProvider` (`claude-sonnet-4-20250514` PINNED), `OpenAIProvider` (`gpt-4o`), `GroqProvider` (`deepseek-r1-distill-llama-70b`), `OllamaProvider(4/5)` (`qwen2.5:7b` / `granite3-dense:8b`); Llama 3.3 blocked via `LLAMA33_BLOCKLIST`
+- `src/mapping/llm_client.py` — `PROVIDER_CASCADE`, `pin_active_provider()`, `call_llm_with_cascade()` (pinned-first + silent fallthrough + one timeout retry), `get_active_model_version()`
+- `src/mapping/prompts.py` — `SYSTEM_PROMPT`, `build_user_prompt()`, `trim_chunks_to_budget()`, `load_taxonomy_dict()`
+- `src/mapping/parser.py` — `parse_llm_response()`, `_assert_verbatim_in_context()`, `expand_non_consecutive()`, `_dedup_within_response()`
+- `src/mapping/mapper.py` — `extract_provisions(rag_results, doc)` orchestrator; `check_pdpa_gate()`; `_deduplicate()`; `ECONOMY_NAMES` ISO→UN mapping
+- `src/mapping/cost_logger.py` — `CostLogger` writes `logs/cost_report.json`
+- `taxonomy.json` — extended with `in_scope`, `out_of_scope`, `negative_examples` for all 10 indicators
+- `tools/cost_logger.py` — standalone CLI cost benchmarking tool
+- `tests/test_z2_4_*.py` — 60 tests, 60 passed, 82% coverage
+
+**ADR-021 — Mapping module lives in `src/mapping/`, not `src/llm/`**
+All Z2-4 implementation is in `src/mapping/` (providers, llm_client, prompts, parser, mapper). The `src/llm/client.py` stub is not modified.
+
+**ADR-022 — `extract_provisions` accepts both list and dict rag_results**
+Accepts `list[RAGResult]` or `dict[str, list[RetrievedChunk]]` (direct from `retrieve_batch`) via `_DictRAGResult` adapter.
+
+**ADR-023 — `_build_doc_metadata` uses `getattr` with defaults**
+`FetchedDocument` lacks `law_number_ref`, `last_amended_year`, `verbatim_original`. Mapper uses `getattr(doc, field, None)` so future schema additions are handled automatically.
 
 ### 🔲 Pending: [Z2-5] Validation + Confidence Flagging
 `src/output/validator.py` — HTTP GET each source_url; Wayback snapshot; confidence < 0.80 → auto-note.

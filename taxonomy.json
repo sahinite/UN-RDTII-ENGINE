@@ -10,6 +10,17 @@
       "cross-border transfer prohibition",
       "data localisation"
     ],
+    "in_scope": [
+      "Default restriction on transferring personal data outside the jurisdiction",
+      "Requirement to keep data onshore / locally unless conditions met",
+      "Prohibition on sending personal data to foreign recipients"
+    ],
+    "out_of_scope": [
+      "Government data or national security exclusions applied to public agencies only",
+      "Financial/banking secrecy provisions (covered under different pillars)",
+      "Technical standards for data centres already established domestically"
+    ],
+    "negative_examples": ["Banking Act S.47", "tax records", "national intelligence data"],
     "exclude_keywords": [
       "banking secrecy",
       "financial institution supervision",
@@ -28,13 +39,22 @@
   {
     "indicator_id": "P6-I2",
     "name": "Adequacy standard",
-    "legal_question": "Can data be transferred to countries deemed to have adequate protection?",
+    "legal_question": "Can data be transferred to countries with adequate protection?",
     "probe_keywords": [
       "adequacy decision data transfer",
       "comparable protection personal data",
       "adequate level data protection",
       "whitelist data transfer countries"
     ],
+    "in_scope": [
+      "Transfer permitted to countries with comparable or adequate data protection",
+      "Whitelist or approved country list for outbound transfers",
+      "Adequacy assessment mechanism"
+    ],
+    "out_of_scope": [
+      "Intra-group data sharing without adequacy assessment"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "banking secrecy",
       "financial institution supervision",
@@ -59,6 +79,15 @@
       "data transfer agreement contract",
       "contractual protection data overseas"
     ],
+    "in_scope": [
+      "SCCs or model clauses explicitly named as transfer mechanism",
+      "Binding corporate rules accepted as lawful transfer basis",
+      "Contractual obligations on recipient to maintain equivalent protection"
+    ],
+    "out_of_scope": [
+      "General data processing agreements not related to cross-border transfer"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "banking secrecy",
       "financial institution supervision",
@@ -80,6 +109,14 @@
       "individual consent data overseas",
       "explicit consent data transfer exception"
     ],
+    "in_scope": [
+      "Explicit individual consent as a basis for cross-border transfer",
+      "Informed consent allowing overseas data transfer"
+    ],
+    "out_of_scope": [
+      "Consent for data collection (not specifically for transfer)"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "banking secrecy",
       "financial institution supervision",
@@ -94,7 +131,7 @@
   {
     "indicator_id": "P6-I5",
     "name": "Other exceptions",
-    "legal_question": "What other lawful bases permit cross-border transfer (vital interests, public interest)?",
+    "legal_question": "What other lawful bases permit cross-border transfer beyond consent and adequacy?",
     "probe_keywords": [
       "personal data transfer exceptions",
       "vital interests data transfer",
@@ -102,6 +139,17 @@
       "lawful basis data transfer",
       "necessary data transfer exception"
     ],
+    "in_scope": [
+      "Transfer necessary for contract performance with the data subject",
+      "Transfer for vital interests or life-safety situations",
+      "Transfer for legal claims or court proceedings",
+      "Public interest exception for transfers"
+    ],
+    "out_of_scope": [
+      "Consent-based exceptions (covered under P6-I4)",
+      "Adequacy-based transfer (P6-I2)"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "banking secrecy",
       "financial institution supervision",
@@ -116,7 +164,7 @@
   {
     "indicator_id": "P7-I1",
     "name": "Legal basis for processing",
-    "legal_question": "Does the law require a lawful basis for collecting/processing personal data?",
+    "legal_question": "Does the law require a lawful basis for collecting or processing personal data?",
     "probe_keywords": [
       "personal data protection act",
       "lawful basis data processing",
@@ -124,6 +172,17 @@
       "personal data collection purpose",
       "data protection law"
     ],
+    "in_scope": [
+      "Requirement for lawful basis before collecting or processing personal data",
+      "Enumeration of lawful bases (consent, contract, legal obligation, vital interests, public task, legitimate interests)",
+      "Prohibition on processing without a lawful basis"
+    ],
+    "out_of_scope": [
+      "Government data or public sector exclusions",
+      "Employee data processed under employment law (unless explicitly covered)",
+      "National security / intelligence service exclusions"
+    ],
+    "negative_examples": ["government data only", "national security exclusion"],
     "exclude_keywords": [
       "criminal procedure",
       "criminal law enforcement",
@@ -146,6 +205,16 @@
       "personal data purpose specification",
       "data processing purpose"
     ],
+    "in_scope": [
+      "Prohibition on using personal data for purposes other than the stated collection purpose",
+      "Requirement to disclose purpose at point of collection",
+      "Secondary use prohibition unless new consent obtained"
+    ],
+    "out_of_scope": [
+      "Data retention rules (covered under a separate indicator)",
+      "Data quality obligations"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "criminal procedure",
       "criminal law enforcement"
@@ -160,7 +229,7 @@
   {
     "indicator_id": "P7-I3",
     "name": "Data subject rights",
-    "legal_question": "Do individuals have rights to access, correct, or delete their data?",
+    "legal_question": "Do individuals have rights to access, correct, or delete their personal data?",
     "probe_keywords": [
       "right to access personal data",
       "data correction right",
@@ -168,6 +237,17 @@
       "data subject rights",
       "individual rights data protection"
     ],
+    "in_scope": [
+      "Right to request access to personal data held by an organisation",
+      "Right to correct inaccurate or incomplete personal data",
+      "Right to withdraw consent and have data deleted or processed no further",
+      "Right to data portability (transfer data to another organisation)"
+    ],
+    "out_of_scope": [
+      "Rights of legal entities (not natural persons)",
+      "Exemptions for national security"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "criminal procedure",
       "criminal law enforcement"
@@ -189,6 +269,15 @@
       "mandatory breach notification",
       "security incident notification"
     ],
+    "in_scope": [
+      "Mandatory notification to supervisory authority when a data breach occurs",
+      "Notification to affected individuals when breach is likely to cause harm",
+      "Specific timeframe for notification (e.g. 72 hours, 3 days)"
+    ],
+    "out_of_scope": [
+      "Voluntary breach disclosure without legal obligation"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "criminal procedure",
       "income tax assessment"
@@ -202,8 +291,8 @@
   },
   {
     "indicator_id": "P7-I5",
-    "name": "Enforcement and penalties",
-    "legal_question": "Is there a supervisory authority and penalty regime?",
+    "name": "Enforcement & penalties",
+    "legal_question": "Is there a supervisory authority and penalty regime for data protection violations?",
     "probe_keywords": [
       "data protection authority",
       "personal data penalty",
@@ -211,6 +300,16 @@
       "supervisory authority personal data",
       "privacy commissioner"
     ],
+    "in_scope": [
+      "Establishment of a data protection commissioner or supervisory body",
+      "Powers of the authority to investigate and enforce",
+      "Financial penalties or fines for violations",
+      "Criminal offences and imprisonment terms for serious breaches"
+    ],
+    "out_of_scope": [
+      "Self-regulatory industry bodies without statutory powers"
+    ],
+    "negative_examples": [],
     "exclude_keywords": [
       "criminal procedure",
       "income tax assessment",
