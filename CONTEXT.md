@@ -403,5 +403,43 @@ Accepts `list[RAGResult]` or `dict[str, list[RetrievedChunk]]` (direct from `ret
 **ADR-025 — `ValidatedResult` wraps `ExtractionResult` by composition**
 `ValidatedResult(record: ExtractionResult, url_status, url_http_status, archive_url, validated_at)`. Confidence flagging modifies `record.notes` in-place before wrapping. This avoids duplicating the 13-field CSV schema and keeps the writer's output path unchanged.
 
-### 🔲 Pending: [Z2-6] Output Writer + Cost Logger
-`src/output/writer.py`, `tools/cost_logger.py` — 13-column CSV (exact OUTPUT_TEMPLATE_31MAY.xlsx schema) + JSON envelope; actual per-component cost report.
+### ✅ Completed: [Z2-6] Output Writer — 13-Column CSV/JSON + Cost Logger
+
+**Files created/changed:**
+- `src/output/models.py` — `OutputRecord` dataclass (13 CSV cols + 6 JSON extended fields), `OutputSchemaError`, `OutputWriteError`, `CSV_COLUMNS` constant
+- `src/output/writer.py` — ST1 `write_csv` (pandas, UTF-8-BOM, post-write verify), ST2 `write_json` (6 extended fields, per-document grouping, post-write verify), ST3 `validate_record` (pre-write field checks + column order guard), ST4 `write_outputs` (orchestrator + console summary), `build_output_record` (Z2-5 → Z2-6 bridge)
+- `src/output/cost_logger.py` — `CostLogger` class, `compute_llm_cost` (provider-priced), per-component accumulation (OCR/embedding/LLM/crawling), `save()` → `logs/cost_report.json`
+- `src/output/__init__.py` — exports all public symbols
+- `tools/cost_logger.py` — full CLI: runs 3-stage pipeline (OCR → embed → LLM), reports measured costs per component, writes `logs/cost_report.json`
+- `evaluate.py` — `evaluate()`, `load_sample_kit()`, `load_engine_output()`, `_print_report()`; accuracy scoring: KNOWN (0-40pts), NEW discoveries (0-20pts), total 60pts
+- `tests/test_z2_6_output.py` — 45 unit tests, 45 passed, 95% coverage on Z2-6 modules
+
+**What was built:**
+
+**ST1 — CSV Writer:** `write_csv(records, path)` — 13 columns in exact `OUTPUT_TEMPLATE_31MAY.xlsx` order, UTF-8-BOM encoding (Excel-compatible), post-write column order re-verification via `pd.read_csv`.
+
+**ST2 — JSON Envelope Writer:** `write_json(records, path)` — records grouped by `source_url` (per-document), all 6 extended fields: `ocr_quality_cer`, `processing_time_seconds`, `model_version`, `raw_context_before`, `raw_context_after`, `verbatim_original`, `archive_url`. Post-write extended-field presence verification.
+
+**ST3 — Schema Validator:** `validate_record(record)` — checks required fields, column order guard, confidence range [0,1], indicator_id format (P6-I1..P7-I5), discovery_tag must be KNOWN/NEW, mapping_rationale ≤ 300 chars.
+
+**ST4 — Write Orchestrator:** `write_outputs(records, output_dir, economy, pillar)` — validates all records, writes CSV+JSON, console summary table, returns dict with csv_path/json_path/written/skipped counts.
+
+**ST5 — Cost Logger:** `CostLogger` accumulates per-component costs: `record_llm_call` (provider-priced, Anthropic $0.003/0.015 per 1K), `record_ocr_page` (Azure $0.001/page; Tesseract/PaddleOCR free), `record_embedding` (local=free), `record_crawl` (Crawl4AI=free). `save()` writes `logs/cost_report.json`.
+
+**ST6 — evaluate.py:** Loads Round 1 sample kit XLSX by economy sheet, converts Pillar_ID+Indicator_ID to P6-I1 format, matches against engine CSV output, scores KNOWN match rate (40pts) + NEW discoveries (4pts each, max 20pts).
+
+**ST7 — Tests:** 45 tests, 95% coverage on models/writer/cost_logger. All 3 acceptance criteria verified by tests.
+
+**Acceptance criteria verified:**
+- AC1 ✅ CSV column order verified by test `test_csv_columns_match_template_exactly` + `test_csv_column_names_exact`
+- AC2 ✅ JSON extended fields verified by `test_json_extended_fields_present` + `test_json_extended_fields_populated`
+- AC3 ✅ Cost report has non-zero token counts and $ costs verified by `test_save_writes_cost_report_json`
+
+**ADR-026 — CSV uses UTF-8-BOM (not plain UTF-8)**
+`pd.DataFrame.to_csv(..., encoding="utf-8-sig")` — Excel opens BOM files without encoding dialog. Post-write verification checks for BOM bytes `\xef\xbb\xbf`.
+
+**ADR-027 — CostLogger uses monotonic clock, not wall time**
+`time.monotonic()` for elapsed seconds — immune to NTP adjustments or DST changes during long pipeline runs. Absolute timestamps use `datetime.now(timezone.utc)`.
+
+**ADR-028 — evaluate.py indicator ID conversion: sample kit float → P{p}-I{n}**
+Sample kit uses float indicator_ids (6.1, 6.4, 7.3). Conversion: `decimal_part = round((float % 1) * 10)` → sub-indicator digit. Whole numbers (6, 7) are section headers — skipped.
