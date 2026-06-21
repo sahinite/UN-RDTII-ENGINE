@@ -125,7 +125,8 @@ The probe does not hardcode which portals need Playwright. It sends httpx first;
 ### ✅ Completed: [Z1-3] Crawl4AI Crawler Integration
 
 **Files changed:**
-- `src/crawler/crawler.py` — full implementation: `CandidateAct`, `run_crawler()`, `load_known_urls()`, BFS engine, logging
+- `src/crawler/crawl4ai_runner.py` — dedicated Crawl4AI/Playwright wrapper: `SSO_DOMAIN`, `SSO_WAIT_FOR`, `SSO_TIMEOUT_MS`, `is_js_portal()`, `fetch_with_playwright()`. Extracted from crawler.py per CLAUDE.md architecture.
+- `src/crawler/crawler.py` — full implementation: `CandidateAct`, `run_crawler()`, `load_known_urls()`, BFS engine, logging. Now imports Crawl4AI layer from `crawl4ai_runner` instead of inline.
 - `src/crawler/exceptions.py` — added `CrawlerError`
 - `tests/test_crawler.py` — 28 tests, all passing
 - `tests/fixtures/sso_listing_page.html` — mock SSO HTML with pagination
@@ -152,6 +153,9 @@ The probe does not hardcode which portals need Playwright. It sends httpx first;
 
 **ADR-010 — `_sleep` alias for testable backoff**
 `_sleep = asyncio.sleep` at module level. Tests patch `src.crawler.crawler._sleep` to record/suppress delays without affecting pytest-asyncio internals.
+
+**ADR-011 — Crawl4AI layer extracted to `crawl4ai_runner.py`**
+The Crawl4AI/Playwright fetch code (`fetch_with_playwright`, `is_js_portal`, SSO constants) lives exclusively in `src/crawler/crawl4ai_runner.py`. `crawler.py` imports them using aliased names (`fetch_with_playwright as _fetch_with_playwright` etc.) so existing tests that `monkeypatch.setattr(crawler_mod, "_fetch_with_playwright", ...)` continue to work — the alias is a name in `crawler_mod`'s `__dict__`, not a closure. This matches the CLAUDE.md architecture and allows swapping the Playwright backend without touching BFS logic.
 
 **Test coverage:** domain locking, depth limit, 429 backoff, 403 skip, KNOWN/NEW tagging, deduplication, pass ordering, Playwright routing, SSO pagination, timeout grace, PDF/HTML detection, title filter, snippet cap, CrawlerError, field completeness, sort order, XLSX loader.
 

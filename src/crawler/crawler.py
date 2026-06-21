@@ -22,6 +22,13 @@ import tldextract
 from bs4 import BeautifulSoup
 
 from src.config.economy_config import EconomyConfig
+from src.crawler.crawl4ai_runner import (
+    SSO_DOMAIN as _SSO_DOMAIN,
+    SSO_TIMEOUT_MS as _SSO_TIMEOUT_MS,
+    SSO_WAIT_FOR as _SSO_WAIT_FOR,
+    fetch_with_playwright as _fetch_with_playwright,
+    is_js_portal as _is_js_portal,
+)
 from src.crawler.exceptions import CrawlerError
 from src.crawler.probe import ProbeResult
 
@@ -30,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ── Environment config ─────────────────────────────────────────────────────────
 
 _CRAWL_TIMEOUT_MS = int(os.getenv("CRAWL_TIMEOUT_MS", "15000"))
-_SSO_TIMEOUT_MS = 20000
 _CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
 _CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "5"))
 _MAX_CONCURRENT_CRAWLS = int(os.getenv("MAX_CONCURRENT_CRAWLS", "3"))
@@ -47,8 +53,6 @@ _SKIP_EXTENSIONS = frozenset([
     ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map",
 ])
 
-_SSO_DOMAIN = "sso.agc.gov.sg"
-_SSO_WAIT_FOR = "css:a[href*='/Act/']"
 
 _ECONOMY_ISO: dict[str, str] = {
     "singapore": "SG", "malaysia": "MY", "thailand": "TH",
@@ -117,36 +121,6 @@ async def _fetch_with_httpx(url: str, client: httpx.AsyncClient) -> tuple[str, i
         return resp.text, resp.status_code
     except Exception:
         return "", 0
-
-
-async def _fetch_with_playwright(url: str, wait_for: str, timeout_ms: int) -> tuple[str, int]:
-    try:
-        from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode  # type: ignore
-    except ImportError as exc:
-        raise CrawlerError("crawl4ai not installed — run: pip install crawl4ai && playwright install chromium") from exc
-
-    try:
-        config = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            wait_for=wait_for,
-            page_timeout=timeout_ms,
-            verbose=False,
-            js_code="window.scrollTo(0, document.body.scrollHeight);",
-        )
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(url=url, config=config)
-            if result.success:
-                return result.html or result.cleaned_html or "", 200
-            return "", 503
-    except Exception as exc:
-        logger.warning("Playwright fetch failed for %s: %s", url, exc)
-        if "SSO_LOAD_TIMEOUT" in str(exc) or "timeout" in str(exc).lower():
-            logger.info("SSO_LOAD_TIMEOUT: %s", url)
-        return "", 0
-
-
-def _is_js_portal(portal_url: str) -> bool:
-    return _SSO_DOMAIN in portal_url
 
 
 # ── Document type detection ────────────────────────────────────────────────────

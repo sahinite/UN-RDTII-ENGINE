@@ -338,22 +338,20 @@ async def _probe_with_playwright(portal_url: str, keyword: str) -> tuple[int, li
     """
     Use Crawl4AI (Playwright) to probe a JS-rendered portal search page.
     Returns (hit_count, result_urls, status).
+
+    Delegates to crawl4ai_runner.probe_js_page — all Crawl4AI imports are
+    centralised there (see src/crawler/crawl4ai_runner.py).
     """
+    from src.crawler.crawl4ai_runner import probe_js_page  # noqa: PLC0415
+
+    search_url = _build_search_url(portal_url, keyword, None)
     try:
-        from crawl4ai import AsyncWebCrawler  # lazy import — optional at probe time
-
-        search_url = _build_search_url(portal_url, keyword, None)
-        async with AsyncWebCrawler(headless=True) as crawler:
-            result = await crawler.arun(url=search_url)
-
-        if not result.success:
+        html, success = await probe_js_page(search_url)
+        if not success:
             logger.warning(f"Playwright crawl failed for {search_url}")
             return 0, [], "error"
-
-        html = getattr(result, "html", "") or ""
         count, urls = _parse_search_page(html, search_url)
         return count, urls, "ok" if count > 0 else "zero"
-
     except Exception as exc:
         logger.warning(f"Playwright probe failed for {portal_url}: {exc}")
         return 0, [], "error"
