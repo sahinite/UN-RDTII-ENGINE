@@ -443,3 +443,45 @@ Accepts `list[RAGResult]` or `dict[str, list[RetrievedChunk]]` (direct from `ret
 
 **ADR-028 — evaluate.py indicator ID conversion: sample kit float → P{p}-I{n}**
 Sample kit uses float indicator_ids (6.1, 6.4, 7.3). Conversion: `decimal_part = round((float % 1) * 10)` → sub-indicator digit. Whole numbers (6, 7) are section headers — skipped.
+
+---
+
+### ✅ Completed: [Z2-86ey0q56f] AUDIT — Engine Integration & Submission Readiness
+
+**Files changed:**
+- `main.py` — fully wired: argparse (`--economy`, `--pillar`, `--output-dir`, `--format`, `--pdf`), Zone 1 pipeline (probe → crawl → currency → rank), Zone 2 pipeline (route → translate → RAG → extract → validate → write), PDPA gate check, CostLogger integration, `run_pipeline()` public function (called by batch_run.py)
+- `batch_run.py` — implemented: sequential wrapper calling `main.run_pipeline()` per economy/pillar pair (ADR-005: never parallel); full argparse with `--economies`, `--pillar`, `--output-dir`, `--format`
+- `src/output/writer.py` — output filename fixed to `{Economy}_P{pillar}_{timestamp}.csv/.json` (was `{economy.lower()}_pillar{pillar}`)
+- `src/output/models.py` — `last_amended` removed from `_REQUIRED_COLUMNS`; template spec says "blank if never amended"
+- `src/mapping/providers/groq_provider.py` — Groq model updated: `deepseek-r1-distill-llama-70b` → `qwen3-32b` (fallback: `qwen3.6-27b`); added inline fallback on model-not-found error
+- `src/llm/client.py` — converted from empty stub to thin re-export of `src/mapping/llm_client.py`; correct docstring with current model names
+- `src/mapping/cost_logger.py` — converted from duplicate implementation to thin re-export of `src/output/cost_logger.py` (W6 fix)
+- `economies/australia.yaml` — new: Latin-script, English, `legislation.gov.au` primary portal + OAIC secondary
+- `tools/cost_logger.py` — fixed: replaced non-existent `extract_text()` with `pdf_to_images()` + `run_tesseract()`/`run_paddleocr()`; replaced non-existent `map_document()` with `pin_active_provider()` + `retrieve_batch()` + `extract_provisions()`
+- `data/benchmark/benchmark_50pages.pdf` — added: 50-page public-domain legal text PDF for cost logger benchmarking
+- `data/output_schema_sample.json` — added: complete example output JSON envelope with 2 PDPA records
+- `README.md` — completed: quick start, project layout, supported economies table, 13-column CSV schema, LLM cascade table, configuration, cost measurement, PDPA gate, build order
+- `tests/test_z2_6_output.py` — `test_write_outputs_filename_pattern` updated to match new `{Economy}_P{pillar}_{timestamp}` format
+
+**What was fixed:**
+- **B1 (Blocker):** `main.py` `NotImplementedError` → full end-to-end pipeline wired
+- **W2 (Blocker):** Output filename `singapore_pillar6.csv` → `Singapore_P6_{timestamp}.csv`
+- **W3 (Blocker):** `last_amended` removed from `_REQUIRED_COLUMNS` → valid records no longer silently dropped
+- **W1 (Blocker):** Groq model `deepseek-r1-distill-llama-70b` → `qwen3-32b` (correct for June 2026)
+- **M1 (Blocker):** `australia.yaml` created — all 4 submission economies now present
+- **B3 (High):** `tools/cost_logger.py` broken API calls fixed — uses correct stage1 OCR and extract_provisions
+- **B4 (High):** `data/benchmark/benchmark_50pages.pdf` added — judges can now verify measured costs
+- **B2 (Medium):** `batch_run.py` implemented — sequential multi-economy batch runner
+- **W4 (Medium):** `src/llm/client.py` converted from misleading stub to re-export
+- **W6 (Medium):** Duplicate `CostLogger` in `src/mapping/cost_logger.py` removed (re-export redirect)
+- **M2 (Low):** `data/output_schema_sample.json` created — referenced in README
+- **R1 (Urgent):** `README.md` fully updated for submission
+
+**ADR-029 — Output filename includes timestamp for uniqueness**
+`{Economy}_P{pillar}_{YYYY-MM-DDTHHMMSS}.csv` — timestamp from `datetime.now(UTC)` ensures multiple runs per economy/pillar don't overwrite each other. Judges can verify the most recent run by sorting filenames.
+
+**ADR-030 — `src/llm/client.py` is a re-export, not an implementation**
+All LLM implementation stays in `src/mapping/llm_client.py` (ADR-021). `src/llm/client.py` re-exports `pin_active_provider`, `call_llm_with_cascade`, `get_active_model_version`, `PROVIDER_CASCADE` so both import paths work. This avoids moving the implementation and breaking existing imports.
+
+**ADR-031 — `run_pipeline()` is the integration seam between main.py and batch_run.py**
+`batch_run.py` imports and calls `run_pipeline()` from `main.py` directly. No subprocess spawning, no argparse re-parsing. Each call is fully isolated: separate `CostLogger`, separate `pin_active_provider()` call, separate output files (timestamp ensures uniqueness).

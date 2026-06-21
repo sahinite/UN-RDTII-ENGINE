@@ -215,7 +215,8 @@ def write_outputs(
         dict with keys: csv_path, json_path, written, skipped, violations_total.
     """
     output_dir = Path(output_dir)
-    stem = f"{economy.lower()}_pillar{pillar}"
+    ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H%M%S")
+    stem = f"{economy}_P{pillar}_{ts}"
     csv_path = output_dir / f"{stem}.csv"
     json_path = output_dir / f"{stem}.json"
 

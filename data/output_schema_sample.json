@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-06-22T12:00:00+00:00",
+  "total_records": 2,
+  "documents": [
+    {
+      "source_url": "https://sso.agc.gov.sg/Act/PDPA2012",
+      "record_count": 2,
+      "records": [
+        {
+          "economy": "Singapore",
+          "law_name": "Personal Data Protection Act 2012",
+          "law_number_ref": "No. 26 of 2012",
+          "last_amended": "2021",
+          "indicator_id": "P7-I1",
+          "article": "Section 13",
+          "discovery_tag": "KNOWN",
+          "location_reference": "Personal Data Protection Act 2012, PART IV, Section 13",
+          "verbatim_snippet": "An organisation must not collect personal data about an individual unless the individual has given consent to the collection of personal data for a purpose.",
+          "mapping_rationale": "Section 13 directly establishes the consent requirement for personal data collection — core P7-I1 indicator.",
+          "source_url": "https://sso.agc.gov.sg/Act/PDPA2012",
+          "confidence": 0.95,
+          "notes": "",
+          "ocr_quality_cer": 0.002,
+          "processing_time_seconds": 4.3,
+          "model_version": "anthropic/claude-sonnet-4-20250514",
+          "raw_context_before": "Part IV — Collection, Use and Disclosure of Personal Data",
+          "raw_context_after": "14. An organisation must not use personal data about an individual for a purpose unless...",
+          "verbatim_original": null,
+          "archive_url": "https://web.archive.org/web/20260601000000/https://sso.agc.gov.sg/Act/PDPA2012"
+        },
+        {
+          "economy": "Singapore",
+          "law_name": "Personal Data Protection Act 2012",
+          "law_number_ref": "No. 26 of 2012",
+          "last_amended": "2021",
+          "indicator_id": "P7-I3",
+          "article": "Section 24",
+          "discovery_tag": "KNOWN",
+          "location_reference": "Personal Data Protection Act 2012, PART V, Section 24",
+          "verbatim_snippet": "An organisation shall protect personal data in its possession or under its control by making reasonable security arrangements to prevent unauthorised access, collection, use, disclosure, copying, modification, disposal or similar risks.",
+          "mapping_rationale": "Section 24 establishes the security obligation for personal data — directly maps to P7-I3 data security indicator.",
+          "source_url": "https://sso.agc.gov.sg/Act/PDPA2012",
+          "confidence": 0.92,
+          "notes": "",
+          "ocr_quality_cer": 0.002,
+          "processing_time_seconds": 4.3,
+          "model_version": "anthropic/claude-sonnet-4-20250514",
+          "raw_context_before": "Part V — Protection of Personal Data",
+          "raw_context_after": "25. An organisation shall cease to retain its documents containing personal data...",
+          "verbatim_original": null,
+          "archive_url": "https://web.archive.org/web/20260601000000/https://sso.agc.gov.sg/Act/PDPA2012"
+        }
+      ]
+    }
+  ]
+}

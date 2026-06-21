@@ -19,62 +19,120 @@ import time
 from pathlib import Path
 
 
-def _run_ocr_stage(pdf_path: Path, economy_name: str, cost_logger) -> str:
-    """Run OCR on the PDF and record cost. Returns extracted text."""
+def _run_ocr_stage(pdf_path: Path, economy_name: str, cost_logger) -> tuple[str, float | None]:
+    """Run Stage-1 OCR on the PDF and record cost. Returns (extracted_text, cer)."""
     from src.config.economy_config import load_economy
-    from src.ocr.processor import extract_text
+    from src.fetcher.extractors.ocr_stage1 import assemble_pages, pdf_to_images
+    from src.fetcher.extractors.ocr_stage1 import run_paddleocr, run_tesseract
 
     economy = load_economy(economy_name)
-    t0 = time.monotonic()
-    text, cer = extract_text(str(pdf_path), economy)
-    elapsed_ms = (time.monotonic() - t0) * 1000
+    raw_bytes = pdf_path.read_bytes()
 
-    # Estimate pages (72 chars/line × 50 lines/page heuristic, or count by PDF)
-    try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(str(pdf_path))
-        pages = doc.page_count
-        doc.close()
-    except Exception:
-        pages = max(1, len(text) // 3000)
+    t0 = time.monotonic()
+    images = pdf_to_images(raw_bytes)
+    pages = len(images)
+
+    page_texts: list[str] = []
+    last_cer: float | None = None
+
+    # Primary non-English language for PaddleOCR lang param
+    non_en = [l for l in (economy.languages or ["en"]) if l != "en"]
+    paddle_lang = non_en[0] if non_en else "en"
+
+    for img_bytes in images:
+        if economy.ocr_engine == "tesseract":
+            page_text, page_cer = run_tesseract(img_bytes)
+        else:
+            page_text, page_cer = run_paddleocr(img_bytes, lang=paddle_lang)
+        page_texts.append(page_text)
+        last_cer = page_cer
+
+    text = assemble_pages(page_texts)
+    elapsed_ms = (time.monotonic() - t0) * 1000
 
     cost_logger.record_ocr_page(
         engine=economy.ocr_engine,
         pages=pages,
         latency_ms=elapsed_ms,
     )
-    return text, cer
+    return text, last_cer
 
 
 def _run_embedding_stage(text: str, cost_logger) -> list:
-    """Chunk + embed text, record cost. Returns chunk list."""
-    from src.retrieval.chunker import chunk_text
-    from src.retrieval.embedder import embed_chunks
+    """Chunk + embed text, record cost. Returns embedded chunk list."""
+    from src.retrieval.chunker import chunk_document
+    from src.retrieval.embedder import EmbeddingIndex
 
-    chunks = chunk_text(text)
+    # Build a minimal stub document for the chunker
+    from src.fetcher.models import CostLogEntry, FetchedDocument
+    stub_doc = FetchedDocument(
+        source_url="https://benchmark.local/document.pdf",
+        resolved_url="https://benchmark.local/document.pdf",
+        economy="SG",
+        act_title="Benchmark Document",
+        discovery_tag="KNOWN",
+        archive_url="",
+        doc_type="TEXT_PDF",
+        extraction_method="pdfplumber",
+        page_count=1,
+        raw_text=text,
+        section_hierarchy=[],
+        cost_log_entry=CostLogEntry(
+            engine="pdfplumber", pages=1, cost_usd=0.0, processing_time_ms=0.0
+        ),
+    )
+
+    chunks = chunk_document(stub_doc)
     t0 = time.monotonic()
-    embedded = embed_chunks(chunks)
+    index = EmbeddingIndex()
+    index.build_index(chunks)
     elapsed_ms = (time.monotonic() - t0) * 1000
 
     total_tokens = sum(len(c.text.split()) for c in chunks)
     cost_logger.record_embedding(tokens=total_tokens, latency_ms=elapsed_ms)
-    return embedded
+    return chunks
 
 
 def _run_llm_stage(
-    text: str, economy_name: str, pillar: int, embedded_chunks, cost_logger
+    text: str, economy_name: str, pillar: int, chunks: list, cost_logger
 ) -> list:
     """Run RAG + LLM extraction for all indicators. Returns ExtractionResult list."""
-    from src.mapping.mapper import map_document
+    from src.config.economy_config import load_economy
+    from src.fetcher.models import CostLogEntry, FetchedDocument
+    from src.mapping.llm_client import pin_active_provider
+    from src.mapping.mapper import extract_provisions
+    from src.retrieval.rag import retrieve_batch
 
-    results, llm_cost_entry = map_document(
-        text=text,
-        economy_name=economy_name,
-        pillar=pillar,
-        embedded_chunks=embedded_chunks,
+    economy = load_economy(economy_name)
+    economy_iso = {"Singapore": "SG", "Australia": "AU", "Malaysia": "MY", "Thailand": "TH"}.get(
+        economy_name, economy_name[:2].upper()
     )
 
-    # Record each LLM call from the cost entry
+    pin_active_provider()
+
+    stub_doc = FetchedDocument(
+        source_url="https://benchmark.local/document.pdf",
+        resolved_url="https://benchmark.local/document.pdf",
+        economy=economy_iso,
+        act_title="Benchmark Document",
+        discovery_tag="KNOWN",
+        archive_url="",
+        doc_type="TEXT_PDF",
+        extraction_method="pdfplumber",
+        page_count=1,
+        raw_text=text,
+        section_hierarchy=[],
+        cost_log_entry=CostLogEntry(
+            engine="pdfplumber", pages=1, cost_usd=0.0, processing_time_ms=0.0
+        ),
+    )
+
+    # Determine which indicators belong to this pillar
+    indicator_ids = [f"P{pillar}-I{i}" for i in range(1, 6)]
+
+    rag_results = retrieve_batch(indicator_ids, stub_doc)
+    results, llm_cost_entry = extract_provisions(rag_results, stub_doc)
+
     for ind_id, call_data in llm_cost_entry.per_indicator.items():
         cost_logger.record_llm_call(
             provider=call_data.get("provider", "unknown"),
@@ -92,7 +150,7 @@ def main() -> None:
         description="Measure RDTII engine cost per document"
     )
     parser.add_argument("--pdf", required=True, help="Path to PDF file")
-    parser.add_argument("--economy", required=True, help="Economy name")
+    parser.add_argument("--economy", required=True, help="Economy name (e.g. Singapore)")
     parser.add_argument(
         "--pillar", required=True, type=int, choices=[6, 7],
         help="RDTII pillar number"
@@ -120,25 +178,25 @@ def main() -> None:
 
     # ── OCR Stage ──────────────────────────────────────────────────────────────
     print("  [1/3] OCR ...")
+    text, cer = "", None
     try:
         text, cer = _run_ocr_stage(pdf_path, args.economy, cost_logger)
     except Exception as exc:
         print(f"  OCR stage failed: {exc}", file=sys.stderr)
         print("  Continuing with empty text for cost baseline.")
-        text, cer = "", None
 
     # ── Embedding Stage ────────────────────────────────────────────────────────
     print("  [2/3] Chunking + Embedding ...")
+    chunks = []
     try:
-        embedded_chunks = _run_embedding_stage(text, cost_logger)
+        chunks = _run_embedding_stage(text, cost_logger)
     except Exception as exc:
         print(f"  Embedding stage failed: {exc}", file=sys.stderr)
-        embedded_chunks = []
 
     # ── LLM Stage ─────────────────────────────────────────────────────────────
     print("  [3/3] LLM Extraction ...")
     try:
-        _run_llm_stage(text, args.economy, args.pillar, embedded_chunks, cost_logger)
+        _run_llm_stage(text, args.economy, args.pillar, chunks, cost_logger)
     except Exception as exc:
         print(f"  LLM stage failed: {exc}", file=sys.stderr)
 

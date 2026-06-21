@@ -39,11 +39,11 @@ CSV_COLUMNS = [
     "notes",
 ]
 
-# Columns that must not be None/empty
+# Columns that must not be None/empty.
+# last_amended intentionally excluded — template says "blank if never amended".
 _REQUIRED_COLUMNS = {
     "economy",
     "law_name",
-    "last_amended",
     "indicator_id",
     "article",
     "discovery_tag",

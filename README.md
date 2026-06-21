@@ -1,50 +1,203 @@
 # RDTII Extraction Engine
 
-UN Global Hackathon on AI for Digital Trade Regulatory Analysis
-Team: [Team Name] | Round: 1 | Last updated: 2026-06-07
+**UN Global Hackathon on AI for Digital Trade Regulatory Analysis**
+Team: UN ESCAP | Round: 1 | Submission deadline: 20 July 2026 | Demo: 3 August 2026
 
-> Scaffold generated ahead of implementation. See the full technical plan
-> (`RDTII_Engine_Technical_Plan_v2.docx`) and the ClickUp board "UN ESCAP"
-> (epics ZONE 1 — Evidence Discovery, ZONE 2 — Intelligent Mapping) for the
-> authoritative design + build sequence. Story IDs referenced in code/dir
-> comments (e.g. `[Z1-3]`, `[Z2-4]`) map 1:1 to ClickUp stories.
+An end-to-end AI pipeline that crawls government legal portals, extracts regulatory text via OCR/NLP, and maps provisions to RDTII indicators (Pillars 6 & 7) using a 5-tier LLM cascade with hybrid RAG retrieval.
 
-## Quick start (fill in once runnable)
+---
 
-```
+## Quick start
+
+```bash
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in your API keys
-python main.py --economy Singapore --pillar 6
+cp .env.example .env   # fill in API keys (see Configuration below)
+
+# Run for Singapore PDPA (Pillar 7) — PDPA-first gate
+python main.py --economy Singapore --pillar 7
+
+# Run on a local PDF (skip crawler)
+python main.py --economy Singapore --pillar 7 --pdf data/benchmark/benchmark_50pages.pdf
+
+# Evaluate against Round 1 ground truth
+python evaluate.py --sample-kit data/sample_kit/ --economy Singapore
+
+# Measure per-document costs (required by rubric)
+python tools/cost_logger.py --pdf data/benchmark/benchmark_50pages.pdf \
+    --economy Singapore --pillar 7
+
+# Batch run across economies and pillars
+python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
 ```
+
+---
 
 ## Project layout
 
 ```
-src/config/      economy YAML schema + loader            [Z1-1]
-src/crawler/     auto-probe, Crawl4AI, currency, ranker  [Z1-2..Z1-5]
-src/fetcher/     fetch + route + segment + translate     [Z2-1, Z2-2]
-src/ocr/         OCR two-stage cascade processor         [Z2-1, Z2-5]
-src/retrieval/   chunking, embedding, RAG pipeline       [Z2-3]
-src/llm/         5-tier LLM cascade client + providers   [Z2-4]
-src/mapping/     indicator mapping logic                 [Z2-4]
-src/output/      CSV/JSON writer + URL/citation validator[Z2-5, Z2-6]
-tools/           cost_logger.py (measured, not estimated)[Z2-6]
-economies/       per-economy YAML adapter files          [Z1-1]
+src/config/      economy YAML schema + loader                [Z1-1]
+src/crawler/     auto-probe, Crawl4AI, currency, ranker      [Z1-2..Z1-5]
+src/fetcher/     fetch + route + segment + translate         [Z2-1, Z2-2]
+src/ocr/         OCR two-stage cascade (Tesseract/PaddleOCR + Azure DI/Mistral)
+src/retrieval/   chunking, embedding, BM25+dense hybrid RAG  [Z2-3]
+src/llm/         LLM cascade re-export (see src/mapping/)    [Z2-4]
+src/mapping/     5-tier LLM cascade + indicator mapping      [Z2-4]
+src/output/      CSV/JSON writer, URL validator, cost logger [Z2-5, Z2-6]
+tools/           cost_logger.py — standalone cost benchmark  [Z2-6]
+economies/       per-economy YAML configs (SG, AU, MY, TH)   [Z1-1]
 tests/           pytest suite (mirrors src/ modules)
-data/            sample_kit/ (Round 1 ground truth), benchmark/ (cost-logger PDF)
+data/
+  sample_kit/    Round 1 ground truth (evaluation input)
+  benchmark/     benchmark_50pages.pdf (cost logger input)
+  output_schema_sample.json — example output JSON envelope
 outputs/         CSV/JSON run outputs (gitignored)
-logs/            run logs + cost reports (gitignored)
-docs/            schema docs, "add a new economy" guide   [Z1-1.5]
+logs/            run logs + cost_report.json (gitignored)
 ```
 
-## Build order (PDPA-first gate)
+---
 
-Per the planning decisions, **Phase 1 must achieve a fully-verified Singapore
-PDPA (Pillar 7) end-to-end run before expanding** to other acts, indicators,
-or economies. Follow the ClickUp story sequence: `[Z1-1]` → `[Z1-5]` →
-`[Z2-1]` → `[Z2-6]`.
+## Supported economies
+
+| Economy | YAML | Portals | Script | Languages |
+|---------|------|---------|--------|-----------|
+| Singapore | `economies/singapore.yaml` | sso.agc.gov.sg | Latin | en |
+| Australia | `economies/australia.yaml` | legislation.gov.au | Latin | en |
+| Malaysia | `economies/malaysia.yaml` | agc.gov.my | Latin | en, ms |
+| Thailand | `economies/thailand.yaml` | ratchakitcha.soc.go.th | Asian | th, en |
+
+---
+
+## Output format
+
+Outputs are written to `outputs/{Economy}_P{pillar}_{timestamp}.csv` and `.json`.
+
+**13-column CSV schema** (exact order from `OUTPUT_TEMPLATE_31MAY.xlsx`):
+
+| Column | Required | Notes |
+|--------|----------|-------|
+| economy | Yes | UN official economy name |
+| law_name | Yes | Full act title |
+| law_number_ref | No | Act number (blank if none) |
+| last_amended | No | Year of most recent amendment; blank if never amended |
+| indicator_id | Yes | P6-I1 to P7-I5 |
+| article | Yes | Section/Article reference |
+| discovery_tag | Yes | KNOWN or NEW |
+| location_reference | No | `(act, part, article)` citation |
+| verbatim_snippet | Yes | Exact text from the act |
+| mapping_rationale | No | Max 300 chars |
+| source_url | Yes | Government portal URL |
+| confidence | No | 0.00–1.00 |
+| notes | No | Human review flags |
+
+The JSON envelope groups records by `source_url` and adds 7 extended fields.
+See `data/output_schema_sample.json` for a complete example.
+
+---
+
+## LLM cascade
+
+Provider order is fixed (ADR-021, pinned once per run via `LLM_PROVIDER` env var):
+
+| Tier | Provider | Model | Notes |
+|------|----------|-------|-------|
+| 1 | Anthropic | `claude-sonnet-4-20250514` | Recommended primary |
+| 2 | OpenAI | `gpt-4o` | Fallback on API error |
+| 3 | Groq | `qwen3-32b` (fallback: `qwen3.6-27b`) | Free tier |
+| 4 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
+| 5 | Ollama | `granite3-dense:8b` | Offline, Apache 2.0 |
+
+**Note:** Llama 3.3 is explicitly excluded (non-Apache 2.0 license).
+
+The LLM cascade implementation lives in `src/mapping/llm_client.py`.
+`src/llm/client.py` re-exports the same public API for backwards compatibility.
+
+### Swapping the LLM
+
+Set `LLM_PROVIDER` in `.env`:
+```bash
+LLM_PROVIDER=anthropic   # use Anthropic as primary (recommended)
+LLM_PROVIDER=groq        # use Groq free tier as primary
+LLM_PROVIDER=ollama      # use local Ollama as primary (offline mode)
+```
+
+### Adding a new LLM provider
+
+1. Subclass `src/mapping/base_provider.py:BaseLLMProvider`
+2. Implement `provider_name`, `model`, `is_available()`, `complete()`
+3. Insert the new provider at the desired position in `PROVIDER_CASCADE` in `src/mapping/llm_client.py`
+4. Add pricing constants to `src/output/cost_logger.py:_PROVIDER_PRICING`
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in your keys:
+
+```bash
+# Tier 1 — Anthropic (recommended)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Tier 2 — OpenAI
+OPENAI_API_KEY=sk-...
+
+# Tier 3 — Groq (free)
+GROQ_API_KEY=gsk_...
+
+# Tier 4/5 — Ollama (offline)
+# Run: ollama serve && ollama pull qwen2.5:7b
+
+# OCR Stage 2 (optional, triggers when CER >= 5%)
+AZURE_DI_KEY=...
+AZURE_DI_ENDPOINT=https://...cognitiveservices.azure.com/
+MISTRAL_API_KEY=...
+
+# Translation (for non-English economies)
+DEEPL_API_KEY=...
+
+# Provider pin (optional — auto-detects if not set)
+LLM_PROVIDER=anthropic
+```
+
+---
+
+## Cost measurement
+
+The hackathon rubric requires **measured** (not estimated) per-document costs.
+
+```bash
+python tools/cost_logger.py \
+    --pdf data/benchmark/benchmark_50pages.pdf \
+    --economy Singapore --pillar 7
+```
+
+Output: `logs/cost_report.json` — includes per-component costs for OCR, embedding, LLM, and crawling. Judges verify this file against the code.
+
+---
+
+## PDPA-first gate
+
+Singapore PDPA (Pillar 7) **must pass end-to-end before testing any other economy**. This is enforced architecturally: `main.py` runs `check_pdpa_gate()` after Singapore Pillar 7 extraction. Gate requires at least one P7 provision with confidence ≥ 0.80.
+
+---
+
+## Running tests
+
+```bash
+pytest                              # all tests
+pytest tests/test_economy_config.py # specific module
+pytest -v --tb=short                # verbose output
+```
+
+---
+
+## Build order (ClickUp story sequence)
+
+All stories completed: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]` → `[Z2-86ey0q56f]` (audit/integration fixes).
+
+---
 
 ## License
 
 Apache License 2.0 — see `LICENSE`.
+All offline models in the cascade (`qwen2.5:7b`, `granite3-dense:8b`) are Apache 2.0 licensed.

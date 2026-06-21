@@ -406,8 +406,11 @@ class TestWriteOutputs:
     def test_write_outputs_filename_pattern(self, tmp_path):
         records = [_make_output_record()]
         result = write_outputs(records, tmp_path, "Singapore", 6)
-        assert "singapore_pillar6" in result["csv_path"]
-        assert "singapore_pillar6" in result["json_path"]
+        # Pattern: {Economy}_P{pillar}_{timestamp}.csv
+        assert "Singapore_P6_" in result["csv_path"]
+        assert result["csv_path"].endswith(".csv")
+        assert "Singapore_P6_" in result["json_path"]
+        assert result["json_path"].endswith(".json")
 
 
 # ── build_output_record helper ─────────────────────────────────────────────────

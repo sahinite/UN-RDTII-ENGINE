@@ -1,4 +1,4 @@
-"""Groq provider — DeepSeek/Qwen via Groq free tier. [Z2-4 ST1]"""
+"""Groq provider — Qwen3 via Groq free tier. [Z2-4 ST1]"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-GROQ_MODEL = "deepseek-r1-distill-llama-70b"
-GROQ_MODEL_FALLBACK = "qwen-qwq-32b"
+GROQ_MODEL = "qwen3-32b"
+GROQ_MODEL_FALLBACK = "qwen3.6-27b"
 
 
 class GroqProvider(BaseLLMProvider):
@@ -42,9 +42,10 @@ class GroqProvider(BaseLLMProvider):
 
         client = Groq(api_key=os.environ["GROQ_API_KEY"])
         t0 = time.time()
+        model_to_use = GROQ_MODEL
         try:
             resp = client.chat.completions.create(
-                model=GROQ_MODEL,
+                model=model_to_use,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=[
@@ -54,7 +55,22 @@ class GroqProvider(BaseLLMProvider):
             )
         except Exception as e:
             err_str = str(e).lower()
-            if "rate" in err_str or "429" in err_str:
+            if "model" in err_str or "not found" in err_str or "does not exist" in err_str:
+                # Primary model unavailable — try fallback
+                try:
+                    model_to_use = GROQ_MODEL_FALLBACK
+                    resp = client.chat.completions.create(
+                        model=model_to_use,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                    )
+                except Exception as e2:
+                    raise ProviderAPIError("groq", str(e2))
+            elif "rate" in err_str or "429" in err_str:
                 raise ProviderRateLimitError("groq", str(e))
             elif "timeout" in err_str or "connection" in err_str:
                 raise ProviderTimeoutError("groq", str(e))
@@ -68,7 +84,7 @@ class GroqProvider(BaseLLMProvider):
             text=resp.choices[0].message.content,
             input_tokens=usage.prompt_tokens,
             output_tokens=usage.completion_tokens,
-            model=GROQ_MODEL,
+            model=model_to_use,
             provider="groq",
             latency_ms=latency_ms,
             cost_usd=0.0,  # Groq free tier

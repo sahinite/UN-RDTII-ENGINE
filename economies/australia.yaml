@@ -1,0 +1,14 @@
+# Australia — economy config (Latin script / English)
+# legislation.gov.au is the primary portal for Commonwealth legislation.
+economy_name: Australia
+script_type: latin
+languages: [en]
+portals:
+  - name: Federal Register of Legislation
+    url: https://www.legislation.gov.au
+    type: primary
+    search_url_pattern: "https://www.legislation.gov.au/Search?Title={keyword}"
+  - name: Office of the Australian Information Commissioner
+    url: https://www.oaic.gov.au
+    type: secondary
+llm_override: null   # uses global 5-tier cascade from .env
