@@ -289,5 +289,23 @@ def _try_ocr(
     economy_config: "EconomyConfig",
     is_segment: bool = False,
 ) -> FetchedDocument:
-    """Run OCR Stage 1; OCRQualityError propagates to caller for Stage 2 handoff."""
-    return extract_ocr_stage1(raw_bytes, zone1_result, economy_config, is_segment=is_segment)
+    """Run OCR Stage 1; on CER failure automatically escalates to Stage 2."""
+    try:
+        return extract_ocr_stage1(raw_bytes, zone1_result, economy_config, is_segment=is_segment)
+    except OCRQualityError as exc:
+        logger.info({
+            "event": "ocr_stage1_quality_failed_escalating",
+            "stage1_cer": round(exc.cer, 4),
+            "stage1_engine": exc.engine_used,
+            "url": zone1_result.url,
+            "economy": zone1_result.economy,
+        })
+        from src.ocr.processor import run_ocr_stage2
+        return run_ocr_stage2(
+            raw_bytes=raw_bytes,
+            zone1_result=zone1_result,
+            economy_config=economy_config,
+            stage1_cer=exc.cer,
+            stage1_engine=exc.engine_used,
+            is_segment=is_segment,
+        )

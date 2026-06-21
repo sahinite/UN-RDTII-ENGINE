@@ -369,8 +369,39 @@ Accepts `list[RAGResult]` or `dict[str, list[RetrievedChunk]]` (direct from `ret
 **ADR-023 — `_build_doc_metadata` uses `getattr` with defaults**
 `FetchedDocument` lacks `law_number_ref`, `last_amended_year`, `verbatim_original`. Mapper uses `getattr(doc, field, None)` so future schema additions are handled automatically.
 
-### 🔲 Pending: [Z2-5] Validation + Confidence Flagging
-`src/output/validator.py` — HTTP GET each source_url; Wayback snapshot; confidence < 0.80 → auto-note.
+### ✅ Completed: [Z2-5] Validate + Archive + OCR Stage 2 Fallback + Confidence Flagging
+
+**Files created/changed:**
+- `src/ocr/processor.py` — full OCR Stage 2 implementation: `OCRResult`, `_estimate_cer_from_text`, `run_azure_di` (ST3), `run_mistral_ocr` (ST4), `_route_stage2`, `maybe_stage2_fallback`, `run_ocr_stage2` (ST5)
+- `src/fetcher/router.py` — `_try_ocr` now catches `OCRQualityError` and auto-escalates to Stage 2 via `run_ocr_stage2`
+- `src/fetcher/models.py` — `extraction_method` Literal extended with `"azure_di"` and `"mistral_ocr"`
+- `src/output/validator.py` — ST1 URL Validator (`validate_url`), ST2 Wayback Archiver (`archive_wayback`), ST6 Confidence Flagging (`_flag_confidence`), `ValidatedResult` dataclass, `validate_and_flag` orchestrator
+- `tests/test_z2_5_validator.py` — 50 unit tests (50 passed), 95%/94% coverage on processor/validator
+
+**What was built:**
+
+**ST1 — URL Validator:** `validate_url(url)` HTTP GET with 3 retries on 429/5xx, soft-404 detection (HTTP 200 but body contains "page not found" etc.), cross-domain redirect detection, returns `(URLStatusType, http_code)`.
+
+**ST2 — Wayback Archiver:** `archive_wayback(url)` POSTs to `https://web.archive.org/save/{url}`, extracts archive URL from `Content-Location` header or redirect chain; 429 → 60s wait + retry; network error → `""` (pipeline continues).
+
+**ST3 — Azure Document Intelligence:** `run_azure_di(image_bytes)` calls prebuilt-read model via `{endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`, polls `Operation-Location` header until succeeded, extracts word-level confidence for true CER.
+
+**ST4 — Mistral OCR:** `run_mistral_ocr(image_bytes)` calls `https://api.mistral.ai/v1/ocr` with `mistral-ocr-latest` model, base64-encodes image as data URL; `_estimate_cer_from_text` for CER when no word confidence available.
+
+**ST5 — Stage 2 Controller:** `maybe_stage2_fallback(cer, image_bytes, ...)` — triggers Stage 2 when CER ≥ 5%; `_route_stage2` tries Azure DI first (if `AZURE_DI_KEY` set), then Mistral OCR (if `MISTRAL_API_KEY` set); logs engine used + resulting CER; falls back to Stage 1 text if all providers fail. `run_ocr_stage2` is the full document-level entry point called by `router.py`.
+
+**ST6 — Confidence Flagging + Orchestrator:** `_flag_confidence` appends exact note `"Recommend human review — OCR/translation source"` when `confidence < 0.80`; `validate_and_flag(records)` orchestrates ST1+ST2+ST6 per record, returns `list[ValidatedResult]`.
+
+**Acceptance criteria verified:**
+- AC1 ✅ CER ≥ 5% triggers Stage 2 automatically; engine + resulting CER logged
+- AC2 ✅ confidence < 0.80 → exact review note in `notes` field
+- AC3 ✅ every `source_url` validated; broken URLs flagged with `BROKEN URL (HTTP N)` note
+
+**ADR-024 — Stage 2 OCR providers are credentials-gated, not hardcoded**
+`_route_stage2` checks `AZURE_DI_KEY` and `MISTRAL_API_KEY` env vars before calling each provider. Missing credentials → provider silently skipped. If both missing, `stage1_text` returned with `flag_for_review=True`. Zero code changes needed to enable/disable providers — only env vars.
+
+**ADR-025 — `ValidatedResult` wraps `ExtractionResult` by composition**
+`ValidatedResult(record: ExtractionResult, url_status, url_http_status, archive_url, validated_at)`. Confidence flagging modifies `record.notes` in-place before wrapping. This avoids duplicating the 13-field CSV schema and keeps the writer's output path unchanged.
 
 ### 🔲 Pending: [Z2-6] Output Writer + Cost Logger
 `src/output/writer.py`, `tools/cost_logger.py` — 13-column CSV (exact OUTPUT_TEMPLATE_31MAY.xlsx schema) + JSON envelope; actual per-component cost report.
