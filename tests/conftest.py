@@ -1,5 +1,21 @@
 """Shared pytest fixtures for all test modules."""
 
+import os
+
+# Must be set before any library loads OpenMP (faiss loads one copy at import
+# time; torch/sentence-transformers loads a second one, which the runtime
+# rejects with SIGABRT on macOS).  Setting this env var tells the Intel OMP
+# runtime to tolerate multiple instances in the same process.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+# Prevent HuggingFace tokenizers from spawning a parallelism thread pool inside
+# a pytest worker process — avoids deadlocks on fork.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+# Single-threaded OMP avoids the race that triggers the duplicate-lib check on
+# some macOS Python builds.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import pytest
 
 from src.config.economy_config import EconomyConfig
