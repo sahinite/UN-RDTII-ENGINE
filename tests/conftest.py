@@ -22,7 +22,15 @@ from src.config.economy_config import EconomyConfig
 
 # ── Economy config fixtures ────────────────────────────────────────────────────
 
-_SG_PORTAL_PRIMARY = {"name": "Singapore Statutes Online", "url": "https://sso.agc.gov.sg", "type": "primary"}
+_SG_PORTAL_PRIMARY = {
+    "name": "Singapore Statutes Online",
+    "url": "https://sso.agc.gov.sg",
+    "type": "primary",
+    "js_required": True,
+    "playwright_wait_for": "css:a[href*='/Act/']",
+    "playwright_timeout_ms": 20000,
+    "follow_pagination": True,
+}
 _SG_PORTAL_SECONDARY = {"name": "Singapore Government Gazette", "url": "https://www.egazette.gov.sg", "type": "secondary"}
 
 _MY_PORTAL_PRIMARY = {"name": "Attorney General's Chambers", "url": "https://agc.gov.my", "type": "primary"}

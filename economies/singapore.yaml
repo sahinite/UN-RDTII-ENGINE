@@ -9,6 +9,10 @@ portals:
     url: https://sso.agc.gov.sg
     type: primary
     search_url_pattern: "https://sso.agc.gov.sg/Search?SearchAct={keyword}"
+    js_required: true
+    playwright_wait_for: "css:a[href*='/Act/']"
+    playwright_timeout_ms: 20000
+    follow_pagination: true
   - name: Singapore Government Gazette
     url: https://www.egazette.gov.sg
     type: secondary

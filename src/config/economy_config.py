@@ -67,6 +67,12 @@ class Portal(BaseModel):
     type: Literal["primary", "secondary"] = "primary"
     search_url_pattern: str | None = None
 
+    # Playwright / JS-rendering config (all optional — static portals omit these)
+    js_required: bool = False               # set True when portal needs JS rendering
+    playwright_wait_for: str | None = None  # CSS/XPath selector to wait for before parsing
+    playwright_timeout_ms: int | None = None  # page-load timeout; None → module default
+    follow_pagination: bool = False         # True → follow "Next" links at same BFS depth
+
 
 # ── EconomyConfig ──────────────────────────────────────────────────────────────
 

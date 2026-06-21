@@ -11,21 +11,26 @@ RDTII_Engine_Technical_Plan_v2.docx §6 Technology Stack.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.config.economy_config import Portal
 
 logger = logging.getLogger(__name__)
 
-# ── Portal-specific constants ──────────────────────────────────────────────────
+# ── Module-level defaults (used when a portal doesn't declare its own values) ──
 
-SSO_DOMAIN = "sso.agc.gov.sg"
+# Default wait selector for Act-listing pages — portals that need a different
+# selector should set playwright_wait_for in their YAML Portal entry.
 SSO_WAIT_FOR = "css:a[href*='/Act/']"
 SSO_TIMEOUT_MS = 20000
 
 
 # ── Portal type detection ──────────────────────────────────────────────────────
 
-def is_js_portal(portal_url: str) -> bool:
-    """Return True when the portal requires JS rendering via Playwright."""
-    return SSO_DOMAIN in portal_url
+def is_js_portal(portal: "Portal") -> bool:
+    """Return True when the Portal's YAML config declares js_required=true."""
+    return portal.js_required
 
 
 # ── Crawl4AI page fetch ────────────────────────────────────────────────────────

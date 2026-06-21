@@ -17,6 +17,7 @@ from src.crawler.crawler import (
     load_known_urls,
     run_crawler,
 )
+from src.config.economy_config import Portal
 from src.crawler.exceptions import CrawlerError
 from src.crawler.probe import ProbeResult
 
@@ -49,11 +50,13 @@ def _no_sleep(monkeypatch):
 # ── 1. Crawl4AI setup and domain locking ──────────────────────────────────────
 
 def test_is_js_portal_true_for_sso():
-    assert _is_js_portal("https://sso.agc.gov.sg") is True
+    portal = Portal(name="SSO", url="https://sso.agc.gov.sg", js_required=True)
+    assert _is_js_portal(portal) is True
 
 
 def test_is_js_portal_false_for_static():
-    assert _is_js_portal("https://www.egazette.gov.sg") is False
+    portal = Portal(name="Gazette", url="https://www.egazette.gov.sg")
+    assert _is_js_portal(portal) is False
 
 
 async def test_off_domain_url_discarded(monkeypatch, sg_economy, full_taxonomy, tmp_path):

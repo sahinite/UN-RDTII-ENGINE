@@ -21,9 +21,8 @@ import httpx
 import tldextract
 from bs4 import BeautifulSoup
 
-from src.config.economy_config import EconomyConfig
+from src.config.economy_config import EconomyConfig, Portal
 from src.crawler.crawl4ai_runner import (
-    SSO_DOMAIN as _SSO_DOMAIN,
     SSO_TIMEOUT_MS as _SSO_TIMEOUT_MS,
     SSO_WAIT_FOR as _SSO_WAIT_FOR,
     fetch_with_playwright as _fetch_with_playwright,
@@ -257,17 +256,31 @@ class _CrawlSession:
 
 # ── BFS crawler ────────────────────────────────────────────────────────────────
 
+def _lookup_portal_cfg(portal_url: str, economy_config: EconomyConfig) -> Portal | None:
+    """Return the Portal config object whose URL matches portal_url, or None."""
+    norm = _normalise_url(portal_url)
+    for p in economy_config.portals:
+        if _normalise_url(str(p.url)) == norm:
+            return p
+    return None
+
+
 async def _crawl_bfs(
     start_urls: list[str],
     portal_url: str,
     pass_num: int,
     session: _CrawlSession,
     client: httpx.AsyncClient,
+    portal_cfg: Portal | None = None,
     max_depth: int = _CRAWL_MAX_DEPTH,
 ) -> list[dict]:
     """BFS from start_urls up to max_depth within the portal's domain."""
     portal_domain = _registered_domain(portal_url)
-    is_js = _is_js_portal(portal_url)
+    is_js = _is_js_portal(portal_cfg) if portal_cfg else False
+    pw_wait_for = (portal_cfg.playwright_wait_for if portal_cfg else None) or _SSO_WAIT_FOR
+    pw_timeout_ms = (portal_cfg.playwright_timeout_ms if portal_cfg else None) or _SSO_TIMEOUT_MS
+    do_pagination = portal_cfg.follow_pagination if portal_cfg else False
+
     queue: list[tuple[str, int]] = [(u, 0) for u in start_urls]
     acts_found: list[dict] = []
     pages_crawled = 0
@@ -290,9 +303,8 @@ async def _crawl_bfs(
         try:
             await _jitter()
             if is_js:
-                timeout_ms = _SSO_TIMEOUT_MS if _SSO_DOMAIN in portal_url else _CRAWL_TIMEOUT_MS
                 html, status = await _with_retry(
-                    lambda u=url: _fetch_with_playwright(u, _SSO_WAIT_FOR, timeout_ms)
+                    lambda u=url: _fetch_with_playwright(u, pw_wait_for, pw_timeout_ms)
                 )
             else:
                 html, status = await _with_retry(
@@ -323,8 +335,8 @@ async def _crawl_bfs(
                 if child_norm not in session.seen_urls:
                     queue.append((act["url"], depth + 1))
 
-        # Follow SSO pagination at the same depth (not consuming depth budget)
-        if is_js and _SSO_DOMAIN in portal_url:
+        # Follow pagination at the same depth when the portal declares it
+        if do_pagination:
             next_href = _has_next_page(html)
             if next_href:
                 next_url = _make_absolute(next_href, url)
@@ -357,8 +369,6 @@ def _build_search_urls(
         encoded = urllib.parse.quote_plus(kw)
         if pattern:
             url = pattern.replace("{keyword}", encoded)
-        elif _SSO_DOMAIN in portal.url:
-            url = f"https://sso.agc.gov.sg/Search?SearchAct={encoded}"
         else:
             url = f"{portal.url.rstrip('/')}?q={encoded}"
         if url not in seen:
@@ -421,9 +431,10 @@ async def run_crawler(
             seed = [u for u in known_urls if _registered_domain(u) == portal_domain]
             if not seed:
                 continue
+            portal_cfg = _lookup_portal_cfg(portal.url, economy_config)
             async with semaphore:
                 try:
-                    acts = await _crawl_bfs(seed, portal.url, 1, session, client)
+                    acts = await _crawl_bfs(seed, portal.url, 1, session, client, portal_cfg)
                 except Exception as exc:
                     logger.error("Pass 1 error on %s: %s", portal.url, exc)
                     session._errors += 1
@@ -452,9 +463,10 @@ async def run_crawler(
             search_urls = _build_search_urls(portal, economy_config, taxonomy)
             if not search_urls:
                 continue
+            portal_cfg = _lookup_portal_cfg(portal.url, economy_config)
             async with semaphore:
                 try:
-                    acts = await _crawl_bfs(search_urls, portal.url, 2, session, client)
+                    acts = await _crawl_bfs(search_urls, portal.url, 2, session, client, portal_cfg)
                 except Exception as exc:
                     logger.error("Pass 2 error on %s: %s", portal.url, exc)
                     session._errors += 1
