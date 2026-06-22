@@ -130,7 +130,7 @@ Provider order is fixed (ADR-021, pinned once per run via `LLM_PROVIDER` env var
 | 2 | OpenAI | `gpt-4o` | Fallback on API error |
 | 3 | Groq | `qwen3-32b` (fallback: `qwen3.6-27b`) | Free tier |
 | 4 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
-| 5 | Ollama | `granite3-dense:8b` | Offline, Apache 2.0 |
+| 5 | Ollama | `granite3-8b` | Offline, Apache 2.0 |
 
 **Note:** Llama 3.3 is explicitly excluded (non-Apache 2.0 license).
 
@@ -216,6 +216,28 @@ pytest -v --tb=short                # verbose output
 
 ---
 
+## Adding a new economy
+
+Only a YAML file is required — zero Python code changes:
+
+1. Create `economies/{code}.yaml` with these fields:
+   ```yaml
+   economy_name: Vietnam
+   iso_code: VN
+   un_name: Viet Nam
+   script_type: latin       # or "asian" for PaddleOCR
+   languages: [vi, en]
+   portals:
+     - name: Ministry of Justice
+       url: https://vbpl.vn
+       type: primary
+   ```
+2. Run: `python main.py --economy Vietnam --pillar 7`
+
+The pipeline will auto-derive the OCR engine from `script_type`, pick up the UN name for CSV output, and include the economy in `_get_economy_names()` lookups. The `--pillar` argument accepts any integer — no code change needed for new pillars either.
+
+---
+
 ## Build order (ClickUp story sequence)
 
 All stories completed: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]` → `[Z2-86ey0q56f]` (audit/integration fixes).
@@ -225,4 +247,4 @@ All stories completed: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]` → `[Z2-
 ## License
 
 Apache License 2.0 — see `LICENSE`.
-All offline models in the cascade (`qwen2.5:7b`, `granite3-dense:8b`) are Apache 2.0 licensed.
+All offline models in the cascade (`qwen2.5:7b`, `granite3-8b`) are Apache 2.0 licensed.
