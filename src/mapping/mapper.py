@@ -82,6 +82,7 @@ def extract_provisions(
             top_chunks=chunks_for_prompt,
             act_title=getattr(doc, "act_title", ""),
             economy=getattr(doc, "economy", ""),
+            source_url=getattr(doc, "source_url", ""),
         )
 
         t0 = time.time()

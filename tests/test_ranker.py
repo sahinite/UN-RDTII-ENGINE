@@ -19,8 +19,6 @@ from src.crawler.ranker import (
     _fuse_scores,
     _get_model,
     _reset_model_cache,
-    _translate_text,
-    _l2_cache,
     is_excluded,
     resolve_discovery_tag,
     run_ranker,
@@ -222,46 +220,32 @@ class TestDiscoveryTagFinalisation:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestLayer2Translation:
-    def setup_method(self):
-        """Clear translation cache before each test."""
-        _l2_cache.clear()
-
     def test_english_economy_skips_translation(self):
-        """Singapore (English) → no translation API call."""
+        """Singapore (English) → no shared translate_text call."""
         from src.crawler.ranker import _apply_translation
         results = [_make_currency_result()]
-        with patch("src.crawler.ranker._translate_text") as mock_trans:
+        with patch("src.crawler.ranker._shared_translate_text") as mock_trans:
             translations = _apply_translation(results, _sg_economy_config())
         mock_trans.assert_not_called()
         assert translations["https://sso.agc.gov.sg/Act/PDPA2012"][0] == results[0].act_title
 
     def test_bahasa_title_translated(self):
-        """Malaysia (ms) economy → _translate_text called."""
+        """Malaysia (ms) economy → shared translate_text called."""
         from src.crawler.ranker import _apply_translation
         results = [_make_currency_result(act_title="Akta Perlindungan Data Peribadi 2010")]
-        with patch("src.crawler.ranker._translate_text", return_value="Personal Data Protection Act 2010") as mock_trans:
+        with patch(
+            "src.crawler.ranker._shared_translate_text",
+            return_value=("Personal Data Protection Act 2010", "deepl", 0.0001),
+        ) as mock_trans:
             translations = _apply_translation(results, _my_economy_config())
         assert mock_trans.called
         translated_title = translations[results[0].act_url][0]
         assert translated_title == "Personal Data Protection Act 2010"
 
-    def test_translation_cache_hit_no_api_call(self):
-        """Same title translated twice → DeepL called only once."""
-        from src.crawler.ranker import _apply_translation, _translation_cache_key
-        results = [_make_currency_result(act_title="Akta Perlindungan Data Peribadi")]
-        cache_key = _translation_cache_key("ms", "Akta Perlindungan Data Peribadi")
-        _l2_cache[cache_key] = "Personal Data Protection Act"
-
-        with patch("src.crawler.ranker._translate_text", wraps=_translate_text) as mock_trans:
-            # Calling _apply_translation which calls _translate_text internally
-            # Since we pre-populate the cache, _translate_text should return from cache
-            # We test this by checking the cache hit path directly:
-            from src.crawler.ranker import _translation_cache_key as _ck
-            key = _ck("ms", "Akta Perlindungan Data Peribadi")
-            assert key in _l2_cache  # cache hit
-
     def test_deepl_failure_falls_back_to_google(self):
-        """DeepL raises exception → googletrans called, no crash."""
+        """DeepL raises exception → googletrans called via shared translate_text, no crash."""
+        from src.fetcher.translator import translate_text
+
         mock_deepl_module = MagicMock()
         mock_deepl_module.Translator.return_value.translate_text.side_effect = Exception("DeepL down")
 
@@ -270,10 +254,9 @@ class TestLayer2Translation:
         mock_gt_instance.translate.return_value = MagicMock(text="translated text")
         mock_gt_module.Translator.return_value = mock_gt_instance
 
-        _l2_cache.clear()
         with patch.dict(os.environ, {"DEEPL_API_KEY": "fake-key"}):
             with patch.dict("sys.modules", {"deepl": mock_deepl_module, "googletrans": mock_gt_module}):
-                result = _translate_text("Undang-undang", "ms")
+                result, provider, cost = translate_text("Undang-undang", "ms")
         # No crash — returned translated or original string
         assert isinstance(result, str)
 

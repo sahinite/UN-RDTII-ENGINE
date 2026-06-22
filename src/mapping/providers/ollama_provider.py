@@ -1,4 +1,4 @@
-"""Ollama offline provider — qwen2.5:7b (P4) and granite3-dense:8b (P5). [Z2-4 ST1]"""
+"""Ollama offline provider — qwen2.5:7b (P4) and granite3-8b (P5). [Z2-4 ST1]"""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from src.mapping.exceptions import ProviderAPIError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
 OLLAMA_MODELS = {
-    4: "qwen2.5:7b",         # Priority 4 — Apache 2.0
-    5: "granite3-dense:8b",  # Priority 5 — Apache 2.0 (IBM Granite 3.0 8B)
+    4: "qwen2.5:7b",    # Priority 4 — Apache 2.0
+    5: "granite3-8b",   # Priority 5 — Apache 2.0 (IBM Granite 3.0 8B)
 }
 
 # CRITICAL: Llama 3.3 is EXPLICITLY EXCLUDED — non-Apache 2.0 license.

@@ -53,29 +53,27 @@ class GroqProvider(BaseLLMProvider):
                     {"role": "user", "content": user_prompt},
                 ],
             )
-        except Exception as e:
-            err_str = str(e).lower()
-            if "model" in err_str or "not found" in err_str or "does not exist" in err_str:
-                # Primary model unavailable — try fallback
-                try:
-                    model_to_use = GROQ_MODEL_FALLBACK
-                    resp = client.chat.completions.create(
-                        model=model_to_use,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                    )
-                except Exception as e2:
+        except Exception:
+            # Primary model failed for any reason — always attempt fallback first
+            try:
+                model_to_use = GROQ_MODEL_FALLBACK
+                resp = client.chat.completions.create(
+                    model=model_to_use,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+            except Exception as e2:
+                err_str2 = str(e2).lower()
+                if "rate" in err_str2 or "429" in err_str2:
+                    raise ProviderRateLimitError("groq", str(e2))
+                elif "timeout" in err_str2 or "connection" in err_str2:
+                    raise ProviderTimeoutError("groq", str(e2))
+                else:
                     raise ProviderAPIError("groq", str(e2))
-            elif "rate" in err_str or "429" in err_str:
-                raise ProviderRateLimitError("groq", str(e))
-            elif "timeout" in err_str or "connection" in err_str:
-                raise ProviderTimeoutError("groq", str(e))
-            else:
-                raise ProviderAPIError("groq", str(e))
 
         latency_ms = (time.time() - t0) * 1000
         usage = resp.usage

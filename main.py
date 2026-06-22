@@ -17,9 +17,14 @@ import sys
 import time
 from pathlib import Path
 
+import logging
+
 from src.config.economy_config import InvalidEconomyConfigError, UnknownEconomyError, load_economy
 from src.crawler.exceptions import ConfigError
 from src.crawler.probe import load_taxonomy, validate_taxonomy
+from src.mapping.exceptions import PDPAGateError
+
+logger = logging.getLogger("main")
 
 
 # ISO code lookup for economy names
@@ -145,8 +150,19 @@ def run_pipeline(
             # Translate if needed
             try:
                 translated = translate_document(doc, economy_config)
-            except Exception:
-                translated = doc  # use untranslated on failure
+            except Exception as exc:
+                logger.error({
+                    "event": "translation_failed",
+                    "url": getattr(doc, "source_url", ""),
+                    "error": str(exc),
+                })
+                doc.flag_for_review = True
+                print(
+                    f"    [WARN] Translation failed for {getattr(doc, 'source_url', '')}: {exc}. "
+                    "Downstream extraction will use raw (possibly non-Latin) text.",
+                    file=sys.stderr,
+                )
+                translated = doc
 
             # RAG
             try:
@@ -192,13 +208,11 @@ def run_pipeline(
 
     # ── PDPA gate (Singapore only) ──────────────────────────────────────────────
     if economy_iso == "SG" and pillar == 7:
-        p7_high = [r for r in all_records
-                   if r.indicator_id.startswith("P7") and (r.confidence or 0.0) >= 0.80]
-        if not p7_high:
-            print(
-                "[WARN] PDPA gate: no P7 provision with confidence >= 0.80 found. "
-                "Verify PDPA text was extracted correctly before expanding to other economies."
-            )
+        try:
+            check_pdpa_gate(economy_iso, all_records)
+        except PDPAGateError as exc:
+            print(f"[ERROR] PDPA gate failed: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     # ── Write outputs ───────────────────────────────────────────────────────────
     cost_logger.save(log_dir=Path("logs"))

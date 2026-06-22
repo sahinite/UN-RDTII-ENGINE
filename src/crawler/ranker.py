@@ -15,7 +15,6 @@ Top 3-5 RankedAct objects per indicator hand off to Zone 2 (fetcher/router).
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -31,6 +30,7 @@ import numpy as np
 from src.crawler.crawler import _normalise_url as normalise_url
 from src.crawler.currency import CurrencyResult
 from src.crawler.seed_loader import SeedData, normalise_title
+from src.fetcher.translator import translate_text as _shared_translate_text
 
 logger = logging.getLogger(__name__)
 
@@ -62,31 +62,6 @@ def _reset_model_cache() -> None:
     _model = None
 
 
-# ── Translation cache (in-memory + optional file persistence) ─────────────────
-
-_l2_cache: dict[str, str] = {}
-
-
-def _translation_cache_key(lang: str, text: str) -> str:
-    return f"l2_{lang}_{hashlib.md5(text.encode()).hexdigest()[:8]}"
-
-
-def _load_translation_cache(lang: str, cache_dir: str = "cache") -> None:
-    path = Path(cache_dir) / f"l2_title_translations_{lang}.json"
-    if path.exists():
-        try:
-            _l2_cache.update(json.loads(path.read_text(encoding="utf-8")))
-        except Exception:
-            pass
-
-
-def _persist_translation_cache(lang: str, cache_dir: str = "cache") -> None:
-    Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    path = Path(cache_dir) / f"l2_title_translations_{lang}.json"
-    try:
-        path.write_text(json.dumps(_l2_cache, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Failed to persist translation cache: %s", exc)
 
 
 # ── Exceptions ─────────────────────────────────────────────────────────────────
@@ -161,41 +136,6 @@ def resolve_discovery_tag(
     return "NEW", False, ""
 
 
-# ── ST3: Layer 2 Translation ───────────────────────────────────────────────────
-
-def _translate_text(text: str, source_lang: str) -> str:
-    """Translate text to EN-US. DeepL primary, googletrans fallback. Cached."""
-    cache_key = _translation_cache_key(source_lang, text)
-    if cache_key in _l2_cache:
-        return _l2_cache[cache_key]
-
-    # DeepL primary
-    try:
-        import deepl  # type: ignore
-        _api_key = os.getenv("DEEPL_API_KEY", "")
-        if _api_key:
-            client = deepl.Translator(_api_key)
-            result = client.translate_text(text, target_lang="EN-US",
-                                           source_lang=source_lang.upper())
-            translated = result.text
-            _l2_cache[cache_key] = translated
-            return translated
-    except Exception as exc:
-        logger.warning("DeepL translation failed (%s), falling back to googletrans: %s",
-                       source_lang, exc)
-
-    # googletrans fallback
-    try:
-        from googletrans import Translator as GTranslator  # type: ignore
-        gt = GTranslator()
-        translated = gt.translate(text, dest="en", src=source_lang).text
-        _l2_cache[cache_key] = translated
-        return translated
-    except Exception as exc:
-        logger.error("googletrans fallback also failed: %s", exc)
-        return text   # return original — do not crash scoring
-
-
 def _needs_translation(economy_config: Any) -> tuple[bool, str]:
     """
     Returns (should_translate, source_lang).
@@ -238,15 +178,11 @@ def _apply_translation(
             translations[r.act_url] = (r.act_title, r.description_snippet)
         return translations
 
-    # Load cache from disk once per language per session
-    _load_translation_cache(src_lang)
-
     for r in results:
-        title_en   = _translate_text(r.act_title, src_lang)
-        snippet_en = _translate_text(r.description_snippet[:500], src_lang)
+        title_en, _, _ = _shared_translate_text(r.act_title, src_lang)
+        snippet_en, _, _ = _shared_translate_text(r.description_snippet[:500], src_lang)
         translations[r.act_url] = (title_en, snippet_en)
 
-    _persist_translation_cache(src_lang)
     return translations
 
 

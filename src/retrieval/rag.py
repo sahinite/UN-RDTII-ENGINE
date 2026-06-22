@@ -124,7 +124,12 @@ def retrieve_batch(
 
     results: dict[str, list[RetrievedChunk]] = {}
     for iid in indicator_ids:
-        indicator = get_indicator(iid)
+        try:
+            indicator = get_indicator(iid)
+        except KeyError:
+            logger.warning({"event": "unknown_indicator_id_skipped", "indicator_id": iid})
+            results[iid] = []
+            continue
         query = indicator.legal_question + " " + " ".join(indicator.probe_keywords[:3])
 
         dense_results = emb_index.dense_search(query, top_k=DENSE_TOP_K)

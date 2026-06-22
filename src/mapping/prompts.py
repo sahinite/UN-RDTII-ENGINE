@@ -55,11 +55,16 @@ def build_user_prompt(
     top_chunks: list[RetrievedChunk],
     act_title: str,
     economy: str,
+    source_url: str = "",
 ) -> str:
     """
     Builds the full user-facing prompt for one (indicator × document) call.
     taxonomy is a dict keyed by indicator_id with in_scope/out_of_scope/negative_examples.
     """
+    if not act_title.strip():
+        act_title = f"[Untitled document from {source_url}]" if source_url else "[Untitled document]"
+        logger.debug({"event": "act_title_empty_substitution", "source_url": source_url})
+
     entry = taxonomy[indicator_id]
 
     indicator_block = _build_indicator_block(indicator_id, entry)

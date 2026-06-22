@@ -44,13 +44,14 @@ class OCRResult:
     cer: float
     engine_used: str
     stage2_triggered: bool = False
+    stage2_failed: bool = False
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 
 def _estimate_cer_from_text(text: str) -> float:
     """Heuristic CER from non-printable character ratio (no ground truth needed)."""
-    if not text:
+    if not text or not text.strip():
         return 1.0
     garbage = sum(
         1 for ch in text
@@ -282,6 +283,7 @@ def maybe_stage2_fallback(
             cer=cer,
             engine_used=stage1_engine,
             stage2_triggered=True,
+            stage2_failed=True,
         )
 
 

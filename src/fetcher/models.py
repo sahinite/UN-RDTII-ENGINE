@@ -150,6 +150,42 @@ class TranslatedDocument:
     be_year_conversions: list        # [(be_str, ce_int)] — empty for non-BE economies
     article_references: list = field(default_factory=list)  # list[ArticleReference]
 
+    # ── Proxy attributes delegating to wrapped FetchedDocument ─────────────────
+    # Required so mapper._build_doc_metadata() and main.py getattr() calls
+    # return real values instead of empty defaults on bilingual documents.
+
+    @property
+    def source_url(self) -> str:
+        return self.fetched.source_url
+
+    @property
+    def economy(self) -> str:
+        return self.fetched.economy
+
+    @property
+    def act_title(self) -> str:
+        return self.fetched.act_title
+
+    @property
+    def discovery_tag(self) -> str:
+        return self.fetched.discovery_tag
+
+    @property
+    def raw_text(self) -> str:
+        return self.fetched.raw_text
+
+    @property
+    def law_number_ref(self) -> None:
+        return None
+
+    @property
+    def last_amended_year(self) -> None:
+        return None
+
+    @property
+    def source_pdf_path(self) -> None:
+        return None
+
 
 # ── Serialisation helper ────────────────────────────────────────────────────────
 
