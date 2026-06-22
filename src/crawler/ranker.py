@@ -31,6 +31,8 @@ from src.crawler.crawler import _normalise_url as normalise_url
 from src.crawler.currency import CurrencyResult
 from src.crawler.seed_loader import SeedData, normalise_title
 from src.fetcher.translator import translate_text as _shared_translate_text
+from src.mapping.providers.groq_provider import GROQ_MODEL, GROQ_MODEL_FALLBACK
+from src.mapping.providers.ollama_provider import OLLAMA_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +340,7 @@ def _call_llm_gate(act_title: str, description_snippet: str, indicator: dict) ->
     # Primary + fallback: Qwen3 models via Groq (Apache 2.0, free tier)
     groq_key = os.getenv("GROQ_API_KEY", "")
     if groq_key:
-        for model_id in ("qwen/qwen3-32b", "qwen/qwen3.6-27b"):
+        for model_id in (f"qwen/{GROQ_MODEL}", f"qwen/{GROQ_MODEL_FALLBACK}"):
             try:
                 from groq import Groq  # type: ignore
                 client = Groq(api_key=groq_key)
@@ -360,11 +362,11 @@ def _call_llm_gate(act_title: str, description_snippet: str, indicator: dict) ->
             except Exception as exc:
                 logger.warning("Groq gate failed (%s): %s — trying next model", model_id, exc)
 
-    # Offline fallback: Ollama qwen2.5:7b
+    # Offline fallback: Ollama (priority 4 model)
     try:
         import ollama  # type: ignore
         resp = ollama.chat(
-            model="qwen2.5:7b",
+            model=OLLAMA_MODELS[4],
             messages=[{"role": "user", "content": prompt}],
             options={"num_predict": 10, "temperature": 0},
         )

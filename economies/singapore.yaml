@@ -2,6 +2,8 @@
 # ocr_engine is derived automatically: script_type=latin → tesseract
 # Loaded + validated by src/config/economy_config.py [Z1-1.2]
 economy_name: Singapore
+iso_code: SG
+un_name: "Singapore"
 script_type: latin
 languages: [en]
 portals:

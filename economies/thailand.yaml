@@ -2,6 +2,8 @@
 # ocr_engine is derived automatically: script_type=asian → paddleocr
 # be_year_conversion converts Buddhist Era (B.E.) years to Gregorian
 economy_name: Thailand
+iso_code: TH
+un_name: "Thailand"
 script_type: asian
 languages: [th, en]
 be_year_conversion: true

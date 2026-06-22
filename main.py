@@ -27,15 +27,6 @@ from src.mapping.exceptions import PDPAGateError
 logger = logging.getLogger("main")
 
 
-# ISO code lookup for economy names
-_ECONOMY_ISO = {
-    "singapore": "SG",
-    "australia": "AU",
-    "malaysia": "MY",
-    "thailand": "TH",
-    "india": "IN",
-    "indonesia": "ID",
-}
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -44,8 +35,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument("--economy", required=True, help="Economy name (e.g. Singapore)")
     p.add_argument(
-        "--pillar", required=True, type=int, choices=[6, 7],
-        help="RDTII pillar number (6 or 7)"
+        "--pillar", required=True, type=int,
+        help="RDTII pillar number (e.g. 6, 7, 8)"
     )
     p.add_argument(
         "--output-dir", default="outputs",
@@ -73,8 +64,8 @@ def run_pipeline(
     Full end-to-end pipeline.
 
     Args:
-        economy: Economy name (e.g. "Singapore")
-        pillar: RDTII pillar (6 or 7)
+        economy: Economy name (e.g. "Singapore", "Viet Nam")
+        pillar: RDTII pillar number
         output_dir: Directory for output files
         fmt: "csv" | "json" | "both"
         pdf_path: If set, skip crawler and process this PDF directly
@@ -91,6 +82,7 @@ def run_pipeline(
     from src.output.models import OutputRecord
     from src.output.validator import validate_and_flag
     from src.output.writer import build_output_record, write_outputs
+    from src.retrieval.config import load_taxonomy as _load_taxonomy
     from src.retrieval.rag import retrieve_batch
 
     output_dir = Path(output_dir)
@@ -106,7 +98,7 @@ def run_pipeline(
         print(f"[ERROR] Invalid economy config: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    economy_iso = _ECONOMY_ISO.get(economy.lower(), economy[:2].upper())
+    economy_iso = economy_config.iso_code
 
     # ── Pin LLM provider once ───────────────────────────────────────────────────
     try:
@@ -130,7 +122,13 @@ def run_pipeline(
 
     # ── Zone 2: Intelligent Mapping ─────────────────────────────────────────────
     cost_logger = CostLogger(economy=economy, pillar=pillar, pdf_path=pdf_path or "")
-    indicator_ids = [f"P{pillar}-I{i}" for i in range(1, 6)]
+    indicator_ids = [
+        e.indicator_id for e in _load_taxonomy()
+        if e.indicator_id.startswith(f"P{pillar}-")
+    ]
+    if not indicator_ids:
+        print(f"[ERROR] No indicators found in taxonomy.json for pillar {pillar}.", file=sys.stderr)
+        sys.exit(1)
     all_records: list[OutputRecord] = []
 
     for i, z1 in enumerate(zone1_results):
@@ -260,7 +258,7 @@ def _run_zone1(economy: str, pillar: int, economy_config) -> list:
         print(f"[WARN] Zone 1 module not available ({exc}), using empty document list.")
         return []
 
-    economy_iso = _ECONOMY_ISO.get(economy.lower(), economy[:2].upper())
+    economy_iso = economy_config.iso_code
     taxonomy = load_taxonomy("taxonomy.json")
 
     _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"

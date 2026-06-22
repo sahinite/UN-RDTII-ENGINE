@@ -21,15 +21,31 @@ from src.retrieval.models import RetrievedChunk
 
 logger = logging.getLogger("mapping.mapper")
 
-# ISO → UN official economy names (must match output template exactly)
-ECONOMY_NAMES = {
-    "SG": "Singapore",
-    "AU": "Australia",
-    "MY": "Malaysia",
-    "TH": "Thailand",
-    "IN": "India",
-    "ID": "Indonesia",
-}
+_ECONOMY_NAMES_CACHE: dict[str, str] | None = None
+
+
+def _get_economy_names() -> dict[str, str]:
+    """Build ISO→UN name map by scanning economies/*.yaml at first call."""
+    global _ECONOMY_NAMES_CACHE
+    if _ECONOMY_NAMES_CACHE is not None:
+        return _ECONOMY_NAMES_CACHE
+    from pathlib import Path
+    import yaml as _yaml
+    economies_dir = Path(__file__).parent.parent.parent / "economies"
+    names: dict[str, str] = {}
+    for yaml_path in economies_dir.glob("*.yaml"):
+        if yaml_path.stem.lower() == "readme":
+            continue
+        try:
+            raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            iso = str(raw.get("iso_code", "")).upper()
+            un_name = str(raw.get("un_name", ""))
+            if iso and un_name:
+                names[iso] = un_name
+        except Exception:
+            pass
+    _ECONOMY_NAMES_CACHE = names
+    return names
 
 
 def extract_provisions(
@@ -148,7 +164,7 @@ def _build_doc_metadata(doc) -> dict:
 
 
 def _official_un_name(iso_code: str) -> str:
-    name = ECONOMY_NAMES.get(iso_code.upper() if iso_code else "")
+    name = _get_economy_names().get(iso_code.upper() if iso_code else "")
     if name is None:
         logger.warning({"event": "unknown_economy_iso", "iso_code": iso_code})
         return iso_code

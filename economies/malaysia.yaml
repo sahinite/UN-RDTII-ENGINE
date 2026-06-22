@@ -2,6 +2,8 @@
 # Bilingual economy: Bahasa Malaysia (Malay) + English legislation
 # translation_provider: deepl → Layer 1 keyword translation active for Bahasa portals
 economy_name: Malaysia
+iso_code: MY
+un_name: "Malaysia"
 script_type: latin
 languages: [ms, en]
 translation_provider: deepl

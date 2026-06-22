@@ -23,7 +23,7 @@ Provider cascade order (pinned, never reordered):
     2. OpenAIProvider     — gpt-4o
     3. GroqProvider       — qwen3-32b (fallback: qwen3.6-27b)
     4. OllamaProvider(4)  — qwen2.5:7b  (Apache 2.0, offline)
-    5. OllamaProvider(5)  — granite3-dense:8b  (Apache 2.0, offline)
+    5. OllamaProvider(5)  — granite3-8b  (Apache 2.0, offline)
 
 NOTE: Llama 3.3 is explicitly excluded — non-Apache 2.0 license.
 """

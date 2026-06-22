@@ -66,8 +66,8 @@ class ExtractionResult:
             raise ValueError(f"mapping_rationale exceeds 300 chars: {len(self.mapping_rationale)}")
         if self.confidence is not None and not (0.0 <= self.confidence <= 1.0):
             raise ValueError(f"confidence out of range: {self.confidence}")
-        valid_ids = [f"P{p}-I{i}" for p in [6, 7] for i in range(1, 6)]
-        if self.indicator_id not in valid_ids:
+        from src.retrieval.config import get_valid_indicator_ids
+        if self.indicator_id not in get_valid_indicator_ids():
             raise ValueError(f"Invalid indicator_id: {self.indicator_id}")
 
 

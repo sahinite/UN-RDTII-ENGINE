@@ -1,6 +1,8 @@
 # Australia — economy config (Latin script / English)
 # legislation.gov.au is the primary portal for Commonwealth legislation.
 economy_name: Australia
+iso_code: AU
+un_name: "Australia"
 script_type: latin
 languages: [en]
 portals:

@@ -512,3 +512,74 @@ All LLM implementation stays in `src/mapping/llm_client.py` (ADR-021). `src/llm/
 
 **ADR-033 — `evaluate()` accepts explicit `csv_path` to bypass auto-detection**
 `_find_best_csv()` uses `glob(f"{economy.lower()}*.csv")` which is case-sensitive on Python 3.14 even on macOS. `write_outputs()` names files `{Economy}_P{pillar}_{ts}.csv` (original case). Tests that call `evaluate()` after `write_outputs()` should pass `csv_path=Path(summary["csv_path"])` directly to avoid glob mismatch.
+
+---
+
+### ✅ Completed: [Z2-86ey0q56f] Bug Fixes — 10 Correctness & Reliability Bugs (PRD 86ey16a3t)
+
+**Files changed:**
+- `src/fetcher/models.py` — 8 `@property` accessors added to `TranslatedDocument`
+- `src/ocr/processor.py` — CER fix for whitespace-only pages; `stage2_failed` flag on `OCRResult`
+- `src/retrieval/rag.py` — `retrieve_batch()` gracefully skips unknown indicator IDs
+- `src/crawler/ranker.py` — removed duplicate `_translate_text()` / `_l2_cache`; delegates to `src.fetcher.translator.translate_text`; imports `GROQ_MODEL`, `GROQ_MODEL_FALLBACK`, `OLLAMA_MODELS` from provider modules (single source of truth)
+- `src/mapping/prompts.py` — `build_user_prompt()` accepts `source_url` param; substitutes `[Untitled document]` for empty `act_title`
+- `src/mapping/mapper.py` — passes `source_url` to `build_user_prompt()`; PDPA gate uses `check_pdpa_gate()` raising `PDPAGateError`
+- `src/mapping/providers/groq_provider.py` — all primary failures attempt `GROQ_MODEL_FALLBACK` before raising
+- `src/mapping/providers/ollama_provider.py` — `OLLAMA_MODELS[5]` corrected from `granite3-dense:8b` to `granite3-8b`
+- `main.py` — translation failure logs and flags doc; PDPA gate wired to `PDPAGateError`
+- `tests/test_bug_fixes.py` — NEW: 27 tests covering all 10 bugs
+- `tests/test_ranker.py` — updated to patch `_shared_translate_text` (tuple return) instead of removed `_translate_text`
+
+**Bug summary:**
+- Bug 1: `TranslatedDocument` missing proxy accessors → blank mandatory CSV columns for bilingual economies
+- Bug 2: PDPA gate was a print-warn, not a real gate → `check_pdpa_gate()` + `PDPAGateError` now enforced
+- Bug 3: Whitespace-only pages returned CER 0.0 → now returns 1.0, triggering Stage 2 correctly
+- Bug 4: `OCRResult` lacked `stage2_failed` flag → callers couldn't distinguish OCR success from silent failure
+- Bug 5: Translation failures swallowed silently → now logged + `flag_for_review=True` set
+- Bug 6: Ollama model tag `granite3-dense:8b` invalid → corrected to `granite3-8b`
+- Bug 7: Groq didn't fall back on model-not-found → now retries with `GROQ_MODEL_FALLBACK`
+- Bug 8: Unknown indicator IDs in `retrieve_batch()` raised `KeyError` → graceful skip + warning log
+- Bug 9: Ranker duplicated translation logic + model strings → consolidated to shared translator + provider constants
+- Bug 10: Empty `act_title` in LLM prompt → substituted with `[Untitled document from {url}]`
+
+**Final state:** 507 passed, 2 skipped across full test suite.
+
+---
+
+### ✅ Completed: [Z2-86ey0q56f] Configurability Audit & Gap Fixes
+
+**Problem:** Several fields were hardcoded in Python source that should be data-driven or YAML-configurable: economy ISO codes, UN economy names, pillar CLI choices, indicator ID validation, indicator count assumption, seed loader pillar matching, and LLM model string duplication in ranker.
+
+**Files changed:**
+- `src/config/economy_config.py` — added `iso_code: str = ""` and `un_name: str = ""` optional fields with ISO validator; added `load_economy_by_iso(iso_code)` helper
+- `economies/singapore.yaml` — added `iso_code: SG`, `un_name: Singapore`
+- `economies/australia.yaml` — added `iso_code: AU`, `un_name: Australia`
+- `economies/malaysia.yaml` — added `iso_code: MY`, `un_name: Malaysia`
+- `economies/thailand.yaml` — added `iso_code: TH`, `un_name: Thailand`
+- `main.py` — removed `_ECONOMY_ISO` dict; uses `economy_config.iso_code`; removed `choices=[6, 7]` from `--pillar`; derives `indicator_ids` from `load_taxonomy()` instead of hardcoded `P{p}-I{n}` comprehension
+- `batch_run.py` — removed `choices=[6, 7]` from `--pillar`
+- `src/mapping/mapper.py` — replaced `ECONOMY_NAMES` hardcoded dict with `_get_economy_names()` lazy YAML scanner; cached on first call; auto-picks up new economy YAMLs
+- `src/retrieval/config.py` — added `get_valid_indicator_ids() -> frozenset[str]` derived from `taxonomy.json`
+- `src/mapping/models.py` — replaced hardcoded `valid_ids = [P6/P7 comprehension]` with `get_valid_indicator_ids()`
+- `src/output/writer.py` — same replacement for hardcoded `valid_ids`
+- `src/crawler/seed_loader.py` — added generic regex fallback in `_pillar_matches()` for any `Pn` beyond P6/P7
+- `src/crawler/ranker.py` — ranker LLM gate imports `GROQ_MODEL`, `GROQ_MODEL_FALLBACK` from `groq_provider.py` and `OLLAMA_MODELS` from `ollama_provider.py`; no more hardcoded model strings
+- `src/llm/__init__.py` — updated stale comment `granite3-dense:8b` → `granite3-8b`
+- `tests/conftest.py` — added `iso_code` and `un_name` to `sg_economy` and `malaysia_economy` fixtures
+- `tests/test_economy_config.py` — added `iso_code` and `un_name` to `_SG_DICT` and `_TH_DICT`
+
+**Gaps closed:**
+1. `_ECONOMY_ISO` hardcoded dict → `economy_config.iso_code` from YAML
+2. `ECONOMY_NAMES` hardcoded dict → lazy `_get_economy_names()` YAML scanner
+3. `--pillar choices=[6, 7]` → unconstrained; any pillar supported
+4. `valid_ids` P6/P7-only hardcode → `get_valid_indicator_ids()` from `taxonomy.json`
+5. `indicator_ids` in `main.py` fixed 5-indicator assumption → taxonomy-driven count
+6. `_pillar_matches()` P6/P7-only static map → generic regex fallback for any `Pn`
+7. Ranker LLM model strings duplicated → single source of truth in provider modules
+8. Economy YAMLs self-describe `iso_code` and `un_name` → `load_economy_by_iso()` enables lookup by ISO
+
+**Adding a Round 2 economy now requires only:**
+1. Create `economies/{code}.yaml` with `iso_code`, `un_name`, `script_type`, `languages`, `portals`
+2. No Python code changes needed
+
+**Final state:** 507 passed, 2 skipped across full test suite (no regressions).

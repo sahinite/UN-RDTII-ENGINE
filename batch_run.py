@@ -26,8 +26,8 @@ def main() -> None:
         help="Economy names to process (e.g. Singapore Australia Malaysia)"
     )
     parser.add_argument(
-        "--pillar", nargs="+", type=int, choices=[6, 7], default=[6, 7],
-        help="Pillar(s) to process (default: 6 7)"
+        "--pillar", nargs="+", type=int, default=[6, 7],
+        help="Pillar(s) to process (default: 6 7, e.g. --pillar 6 7 8)"
     )
     parser.add_argument(
         "--output-dir", default="outputs",

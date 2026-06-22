@@ -48,6 +48,11 @@ def get_indicator(indicator_id: str) -> TaxonomyEntry:
     raise KeyError(f"Unknown indicator_id: {indicator_id!r}")
 
 
+def get_valid_indicator_ids() -> frozenset[str]:
+    """Return frozenset of all indicator_id values from taxonomy.json."""
+    return frozenset(e.indicator_id for e in load_taxonomy())
+
+
 # Pipeline hyper-parameters (can be overridden via env for ablation tests)
 BM25_TOP_K = 20
 DENSE_TOP_K = 20

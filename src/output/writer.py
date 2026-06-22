@@ -60,9 +60,9 @@ def validate_record(record: OutputRecord) -> list[str]:
     if record.confidence is not None and not (0.0 <= record.confidence <= 1.0):
         violations.append(f"confidence {record.confidence} out of range [0, 1]")
 
-    # Indicator ID format
-    valid_ids = {f"P{p}-I{i}" for p in (6, 7) for i in range(1, 6)}
-    if record.indicator_id not in valid_ids:
+    # Indicator ID format — derived from taxonomy.json, not hardcoded
+    from src.retrieval.config import get_valid_indicator_ids
+    if record.indicator_id not in get_valid_indicator_ids():
         violations.append(f"invalid indicator_id '{record.indicator_id}'")
 
     # Discovery tag

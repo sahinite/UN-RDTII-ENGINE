@@ -55,7 +55,15 @@ def _normalise_economy(raw: str) -> str:
 
 
 def _pillar_matches(raw_pillar: str, target: str) -> bool:
-    return raw_pillar.lower().strip() in _PILLAR_MATCH.get(target, frozenset())
+    if raw_pillar.lower().strip() in _PILLAR_MATCH.get(target, frozenset()):
+        return True
+    # Generic fallback for any pillar not in the static map (e.g. P8, P9)
+    m = re.match(r"^P(\d+)$", target, re.IGNORECASE)
+    if m:
+        n = m.group(1)
+        generic = {f"p{n}", n, f"pillar {n}", f"pillar{n}"}
+        return raw_pillar.lower().strip() in generic
+    return False
 
 
 # ── Output contract ────────────────────────────────────────────────────────────

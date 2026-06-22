@@ -42,6 +42,8 @@ def sg_economy() -> EconomyConfig:
     """Singapore economy config — English only, no translation."""
     return EconomyConfig.model_validate({
         "economy_name": "Singapore",
+        "iso_code": "SG",
+        "un_name": "Singapore",
         "script_type": "latin",
         "languages": ["en"],
         "portals": [_SG_PORTAL_PRIMARY, _SG_PORTAL_SECONDARY],
@@ -53,6 +55,8 @@ def malaysia_economy() -> EconomyConfig:
     """Malaysia economy config — Bahasa + English, DeepL translation active."""
     return EconomyConfig.model_validate({
         "economy_name": "Malaysia",
+        "iso_code": "MY",
+        "un_name": "Malaysia",
         "script_type": "latin",
         "languages": ["ms", "en"],
         "translation_provider": "deepl",

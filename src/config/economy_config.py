@@ -90,6 +90,8 @@ class EconomyConfig(BaseModel):
 
     # Core identity
     economy_name: str
+    iso_code: str = ""  # ISO 3166-1 alpha-2 code, e.g. "SG", "VN" — required in production YAMLs
+    un_name: str = ""   # UN official name for CSV output — required in production YAMLs
     script_type: _SUPPORTED_SCRIPT_TYPES
     languages: list[str]
 
@@ -107,6 +109,14 @@ class EconomyConfig(BaseModel):
     translation_provider: _SUPPORTED_TRANSLATION_PROVIDERS | None = None
 
     # ── Validators ────────────────────────────────────────────────────────────
+
+    @field_validator("iso_code", mode="before")
+    @classmethod
+    def iso_code_valid(cls, v: object) -> object:
+        s = str(v).strip()
+        if s and not re.fullmatch(r"[A-Za-z]{2,3}", s):
+            raise ValueError(f"'{v}' is not a valid ISO 3166-1 alpha-2/3 code")
+        return s.upper() if s else ""
 
     @field_validator("languages", mode="before")
     @classmethod
@@ -162,3 +172,20 @@ def load_economy(name: str) -> EconomyConfig:
         return EconomyConfig.model_validate(raw)
     except ValidationError as exc:
         raise InvalidEconomyConfigError(name, str(exc)) from exc
+
+
+def load_economy_by_iso(iso_code: str) -> EconomyConfig | None:
+    """
+    Scan economies/*.yaml and return the config whose iso_code matches.
+    Returns None if no matching YAML is found.
+    """
+    for yaml_path in _ECONOMIES_DIR.glob("*.yaml"):
+        if yaml_path.stem.lower() == "readme":
+            continue
+        try:
+            cfg = load_economy(yaml_path.stem)
+            if cfg.iso_code == iso_code.upper():
+                return cfg
+        except (UnknownEconomyError, InvalidEconomyConfigError):
+            pass
+    return None

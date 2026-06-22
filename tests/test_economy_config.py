@@ -14,6 +14,8 @@ from src.config.economy_config import (
 
 _SG_DICT = {
     "economy_name": "Singapore",
+    "iso_code": "SG",
+    "un_name": "Singapore",
     "script_type": "latin",
     "languages": ["en"],
     "portals": [{"name": "SSO", "url": "https://sso.agc.gov.sg"}],
@@ -21,6 +23,8 @@ _SG_DICT = {
 
 _TH_DICT = {
     "economy_name": "Thailand",
+    "iso_code": "TH",
+    "un_name": "Thailand",
     "script_type": "asian",
     "languages": ["th", "en"],
     "be_year_conversion": True,
