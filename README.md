@@ -7,6 +7,31 @@ An end-to-end AI pipeline that crawls government legal portals, extracts regulat
 
 ---
 
+## Prerequisites
+
+Before running Quick Start, install system dependencies:
+
+```bash
+python setup.py
+```
+
+This script will:
+- Install **Tesseract** (required — default OCR engine)
+- Optionally pre-download the **sentence-transformers** embedding model (~90MB)
+- Optionally install **Ollama** with offline models (~9GB) — only needed if you have no cloud API key
+
+> **If you have any one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY`, you can skip Ollama.**
+
+### Manual install (if you prefer not to use setup.py)
+
+| Dependency | Required | Install |
+|---|---|---|
+| Tesseract 5.3+ | **Yes** | macOS: `brew install tesseract` / Ubuntu: `sudo apt-get install -y tesseract-ocr` / Windows: [installer](https://github.com/UB-Mannheim/tesseract/wiki) |
+| Ollama + models | No (offline only) | macOS: `brew install ollama` / Ubuntu: `curl -fsSL https://ollama.com/install.sh \| sh` |
+| sentence-transformers model | No (auto-downloads on first run) | `python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"` |
+
+---
+
 ## Quick start
 
 ```bash
