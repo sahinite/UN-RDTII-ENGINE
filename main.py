@@ -12,6 +12,7 @@ Wires together Zone 1 (Evidence Discovery) and Zone 2 (Intelligent Mapping).
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 import time
 from pathlib import Path
@@ -191,11 +192,6 @@ def run_pipeline(
 
     # ── PDPA gate (Singapore only) ──────────────────────────────────────────────
     if economy_iso == "SG" and pillar == 7:
-        from src.mapping.models import ExtractionResult
-        raw_results: list[ExtractionResult] = [r.record for r in
-                                                 [vr for vr in all_records
-                                                  if hasattr(vr, 'record')] ]
-        # Simplified: just check if we have P7 records with confidence >= 0.80
         p7_high = [r for r in all_records
                    if r.indicator_id.startswith("P7") and (r.confidence or 0.0) >= 0.80]
         if not p7_high:
@@ -250,11 +246,14 @@ def _run_zone1(economy: str, pillar: int, economy_config) -> list:
         print(f"[WARN] Zone 1 module not available ({exc}), using empty document list.")
         return []
 
+    economy_iso = _ECONOMY_ISO.get(economy.lower(), economy[:2].upper())
     taxonomy = load_taxonomy("taxonomy.json")
+
+    _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
 
     # Probe portals
     try:
-        probe_results = run_probe(economy_config, taxonomy)
+        probe_results = asyncio.run(run_probe(economy_config, taxonomy))
     except Exception as exc:
         print(f"[WARN] Probe failed: {exc}", file=sys.stderr)
         return []
@@ -264,28 +263,36 @@ def _run_zone1(economy: str, pillar: int, economy_config) -> list:
         print(f"[WARN] No active portals found for {economy}.", file=sys.stderr)
         return []
 
-    # Crawl for candidate acts
+    # Load known URLs for Pass 1 seeding
+    known_urls = load_known_urls(_ROUND1_DB, economy_name=economy)
+
+    # Crawl for candidate acts (Pass 1 KNOWN + Pass 2 NEW)
     try:
-        candidate_acts = run_crawler(probe_results, economy_config, pillar=pillar)
+        candidate_acts = asyncio.run(
+            run_crawler(probe_results, economy_config, taxonomy, known_urls)
+        )
     except Exception as exc:
         print(f"[WARN] Crawler failed: {exc}", file=sys.stderr)
         return []
 
     # Currency check
     try:
-        currency_results = run_currency_check(candidate_acts)
+        currency_results = asyncio.run(run_currency_check(candidate_acts))
     except Exception as exc:
         print(f"[WARN] Currency check failed: {exc}", file=sys.stderr)
         currency_results = candidate_acts  # use raw candidates as fallback
 
     # Load seed data + rank
     try:
-        seed_data = load_seed_data(economy=economy, pillar=pillar)
-        ranked = run_ranker(currency_results, seed_data, taxonomy, economy_config, output_dir=Path("logs"))
+        seed_data = load_seed_data(
+            economy_iso=economy_iso,
+            pillar=f"P{pillar}",
+            round1_db_path=_ROUND1_DB,
+        )
+        ranked = run_ranker(currency_results, seed_data, taxonomy, economy_config, output_dir="logs")
     except Exception as exc:
         print(f"[WARN] Ranker failed: {exc}", file=sys.stderr)
-        # Fall back to all currency results
-        ranked = currency_results
+        ranked = currency_results  # fall back to all currency results
 
     # Convert to Zone1Result
     zone1_results = []
@@ -294,10 +301,9 @@ def _run_zone1(economy: str, pillar: int, economy_config) -> list:
         title = getattr(act, "act_title", "") or getattr(act, "title", "Unknown")
         tag = getattr(act, "discovery_tag", "KNOWN")
         archive = getattr(act, "archive_url", "")
-        iso = _ECONOMY_ISO.get(economy.lower(), economy[:2].upper())
         zone1_results.append(Zone1Result(
             url=url,
-            economy=iso,
+            economy=economy_iso,
             act_title=title,
             discovery_tag=tag,
             archive_url=archive or "",

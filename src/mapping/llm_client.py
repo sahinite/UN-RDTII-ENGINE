@@ -4,7 +4,7 @@
 PROVIDER_CASCADE order (DO NOT reorder):
   1. AnthropicProvider  — claude-sonnet-4-20250514 (pinned primary)
   2. OpenAIProvider     — gpt-4o
-  3. GroqProvider       — deepseek-r1-distill-llama-70b (free tier)
+  3. GroqProvider       — qwen3-32b (free tier; deepseek removed from Groq June 2026)
   4. OllamaProvider(4) — qwen2.5:7b (Apache 2.0, offline)
   5. OllamaProvider(5) — granite3-dense:8b (Apache 2.0, offline)
 
@@ -37,7 +37,7 @@ logger = logging.getLogger("mapping.llm_client")
 PROVIDER_CASCADE: list[BaseLLMProvider] = [
     AnthropicProvider(),   # 1 — claude-sonnet-4-20250514 (pinned)
     OpenAIProvider(),      # 2 — gpt-4o
-    GroqProvider(),        # 3 — deepseek-r1-distill-llama-70b via Groq
+    GroqProvider(),        # 3 — qwen3-32b via Groq (qwen3.6-27b fallback)
     OllamaProvider(4),     # 4 — qwen2.5:7b (Apache 2.0, offline)
     OllamaProvider(5),     # 5 — granite3-dense:8b (Apache 2.0, offline)
 ]
