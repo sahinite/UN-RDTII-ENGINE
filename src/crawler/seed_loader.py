@@ -116,9 +116,9 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
 
         headers = [str(h).strip().lower() if h else "" for h in raw_headers]
         col_economy = _find_col(headers, ["economy", "country"])
-        col_title   = _find_col(headers, ["act title", "title", "act_title"])
+        col_title   = _find_col(headers, ["act title", "title", "act_title", "act and/or practice", "act and/or"])
         col_url     = _find_col(headers, ["url", "act_url", "link"])
-        col_pillar  = _find_col(headers, ["pillar", "pillar.name"])
+        col_pillar  = _find_col(headers, ["pillar_id", "pillar", "pillar.name"])
         col_refs    = _find_col(headers, ["references", "reference"])
 
         for row in rows:
@@ -137,13 +137,15 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
                 continue
             if not _pillar_matches(row_pillar, pillar):
                 continue
-            if not row_url or row_url.lower() in ("none", "n/a", ""):
-                continue
 
-            seed.known_urls.add(normalise_url(row_url))
-            count += 1
+            has_url = row_url and row_url.lower() not in ("none", "n/a", "")
+            if has_url:
+                seed.known_urls.add(normalise_url(row_url))
+                count += 1
             if row_title:
                 seed.known_titles.add(normalise_title(row_title))
+                if not has_url:
+                    count += 1  # count title-only rows so we know seeds loaded
 
             # Anchor-level provision URLs from References column
             for anchor_url in _extract_anchor_urls(row_refs):
@@ -221,7 +223,7 @@ def load_seed_data(
     if sample_csv_path and Path(sample_csv_path).exists():
         csv_count = _load_sample_csv(sample_csv_path, economy_iso, pillar, seed)
 
-    if not seed.known_urls:
+    if not seed.known_urls and not seed.known_titles:
         logger.warning("WARN: No seed data found for %s %s", economy_iso, pillar)
     else:
         logger.info(

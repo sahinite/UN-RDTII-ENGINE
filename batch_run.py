@@ -11,6 +11,9 @@ Cost telemetry per economy must be clean and the hackathon rubric verifies actua
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import sys
 import time

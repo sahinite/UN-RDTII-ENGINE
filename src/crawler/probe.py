@@ -384,16 +384,61 @@ async def _probe_portal_keyword(
     )
 
 
+async def _probe_base_url_only(portal_url: str) -> list[ProbeRawResult]:
+    """
+    For portals without a search_url_pattern: check base URL reachability only.
+    Returns a single ProbeRawResult — 'ok' if the portal responds, 'error' otherwise.
+    """
+    await _jitter()
+    ua = random.choice(_USER_AGENTS)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=_PROBE_TIMEOUT_SEC) as client:
+            resp = await client.get(portal_url, headers={"User-Agent": ua})
+        reachable = resp.status_code < 400
+    except Exception:
+        reachable = False
+
+    status = "ok" if reachable else "error"
+    logger.info("Base URL probe %s → %s (%s)", portal_url, status,
+                "reachable" if reachable else "unreachable")
+    return [ProbeRawResult(
+        portal_url=portal_url,
+        keyword="",
+        hit_count=1 if reachable else 0,
+        status=status,
+        result_urls=[],
+    )]
+
+
 async def _probe_portal_all_keywords(
     portal_url: str,
     search_url_pattern: str | None,
     keywords: list[str],
 ) -> list[ProbeRawResult]:
-    """Probe one portal against all keywords (sequential to respect jitter)."""
+    """Probe one portal against all keywords (sequential to respect jitter).
+
+    Early-exit on consecutive 403/error responses — portal is blocked, no
+    point spawning Playwright for every remaining keyword.
+    """
     results = []
+    consecutive_errors = 0
+    _EARLY_EXIT_THRESHOLD = 2
+
     for kw in keywords:
         raw = await _probe_portal_keyword(portal_url, kw, search_url_pattern)
         results.append(raw)
+
+        if raw.status == "error":
+            consecutive_errors += 1
+            if consecutive_errors >= _EARLY_EXIT_THRESHOLD:
+                logger.warning(
+                    "%d consecutive errors from %s — skipping remaining %d keywords",
+                    consecutive_errors, portal_url, len(keywords) - len(results),
+                )
+                break
+        else:
+            consecutive_errors = 0
+
     return results
 
 
@@ -579,11 +624,17 @@ async def run_probe(
     all_results: list[ProbeResult] = []
     for portal in economy_config.portals:
         portal_url = str(portal.url)
-        raw = await _probe_portal_all_keywords(
-            portal_url,
-            portal.search_url_pattern,
-            keywords,
-        )
+
+        if not portal.search_url_pattern:
+            # No search pattern — just check base URL reachability (one request).
+            # Full keyword scanning would probe the same URL 44+ times pointlessly.
+            raw = await _probe_base_url_only(portal_url)
+        else:
+            raw = await _probe_portal_all_keywords(
+                portal_url,
+                portal.search_url_pattern,
+                keywords,
+            )
         result = _aggregate_portal_results(
             raw,
             portal_name=portal.name,

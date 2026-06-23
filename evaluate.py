@@ -14,6 +14,9 @@ Outputs a comparison report:
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import csv
 import re

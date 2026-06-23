@@ -12,6 +12,9 @@ Required by the hackathon rubric — judges verify these against the code.
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import json
 import sys

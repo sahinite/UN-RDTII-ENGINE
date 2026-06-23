@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 
 import logging
+from dotenv import load_dotenv
+load_dotenv()  # load .env before any provider/config imports read os.environ
 
 from src.config.economy_config import InvalidEconomyConfigError, UnknownEconomyError, load_economy
 from src.crawler.exceptions import ConfigError
@@ -278,10 +280,37 @@ def _run_zone1(economy: str, pillar: int, economy_config) -> list:
     _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
 
     # Probe portals
+    probe_results = []
     try:
         probe_results = asyncio.run(run_probe(economy_config, taxonomy))
     except Exception as exc:
         print(f"[WARN] Probe failed: {exc}", file=sys.stderr)
+        print("[INFO] Falling back to known seed URLs from Round 1 DB.", file=sys.stderr)
+
+    # If probe failed or returned nothing, fall back to seed known_urls directly
+    if not probe_results:
+        try:
+            from src.crawler.seed_loader import load_seed_data
+            from src.fetcher.models import Zone1Result
+            seed = load_seed_data(
+                economy_iso=economy_iso,
+                pillar=f"P{pillar}",
+                round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
+            )
+            if seed.known_urls:
+                print(f"[INFO] Using {len(seed.known_urls)} known URLs from seed data.", file=sys.stderr)
+                return [
+                    Zone1Result(
+                        url=url,
+                        economy=economy_iso,
+                        act_title="",
+                        discovery_tag="KNOWN",
+                        archive_url="",
+                    )
+                    for url in seed.known_urls
+                ]
+        except Exception as seed_exc:
+            print(f"[WARN] Seed fallback also failed: {seed_exc}", file=sys.stderr)
         return []
 
     active_probes = [p for p in probe_results if p.is_active]
