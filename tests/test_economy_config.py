@@ -205,6 +205,40 @@ def test_trailing_whitespace_malaysia_resolves():
     assert cfg.economy_name == "Malaysia"
 
 
+# ── ISO code short-form resolution ────────────────────────────────────────────
+
+
+def test_iso_lowercase_sg_resolves():
+    cfg = load_economy("sg")
+    assert cfg.economy_name == "Singapore"
+
+
+def test_iso_uppercase_SG_resolves():
+    cfg = load_economy("SG")
+    assert cfg.economy_name == "Singapore"
+
+
+def test_iso_au_resolves():
+    cfg = load_economy("au")
+    assert cfg.economy_name == "Australia"
+
+
+def test_iso_my_resolves():
+    cfg = load_economy("my")
+    assert cfg.economy_name == "Malaysia"
+
+
+def test_iso_th_resolves():
+    cfg = load_economy("th")
+    assert cfg.economy_name == "Thailand"
+
+
+def test_unknown_iso_code_raises_unsupported_message():
+    with pytest.raises(UnknownEconomyError) as exc_info:
+        load_economy("vn")
+    assert "not supported yet" in str(exc_info.value)
+
+
 # ── Portal type field (added Z1-2) ─────────────────────────────────────────────
 
 

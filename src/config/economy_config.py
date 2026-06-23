@@ -168,13 +168,14 @@ def _available_economy_names() -> list[str]:
 
 def load_economy(name: str) -> EconomyConfig:
     """
-    Load and validate an economy config by name.
+    Load and validate an economy config by name or ISO code.
 
-    Normalises input with .strip().title() before lookup so "singapore" and
-    "  Singapore  " both resolve correctly.  On failure, uses difflib to suggest
-    the closest matching economy name in the error message.
-
-    Looks for  economies/{name.lower()}.yaml  relative to the project root.
+    Resolution order:
+      1. Normalise: .strip().title()  → exact YAML filename match
+      2. ISO code fallback: if input looks like a 2-3 letter code (e.g. "sg", "AU"),
+         scan YAML files for a matching iso_code field
+      3. Fuzzy match: suggest the closest economy name via difflib
+      4. Unsupported: instruct the user to add a YAML file
 
     Raises:
         UnknownEconomyError   — file does not exist
@@ -184,6 +185,13 @@ def load_economy(name: str) -> EconomyConfig:
     yaml_path = _ECONOMIES_DIR / f"{normalised.lower()}.yaml"
 
     if not yaml_path.exists():
+        # ISO code fallback (e.g. "sg" → Singapore, "AU" → Australia)
+        stripped = name.strip()
+        if re.fullmatch(r"[A-Za-z]{2,3}", stripped):
+            cfg = load_economy_by_iso(stripped)
+            if cfg is not None:
+                return cfg
+
         available = _available_economy_names()
         matches = difflib.get_close_matches(normalised, available, n=1, cutoff=0.6)
         suggestion = matches[0] if matches else ""
