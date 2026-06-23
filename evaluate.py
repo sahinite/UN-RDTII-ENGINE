@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +38,11 @@ def _indicator_id_from_sample_kit(pillar_id, indicator_id_raw) -> str | None:
         return f"P{int(pillar_id)}-I{decimal_part}"
     except (TypeError, ValueError):
         return None
+
+
+def _normalise_for_key(s: str) -> str:
+    """Lowercase, collapse whitespace — for (law_name, article) key comparison."""
+    return re.sub(r"\s+", " ", s.strip().lower())
 
 
 def load_sample_kit(
@@ -120,6 +126,72 @@ def load_sample_kit(
     return provisions
 
 
+def _load_known_provision_keys(
+    sample_kit_dir: Path, economy: str, pillar: int | None = None
+) -> set[tuple[str, str]]:
+    """
+    Build (normalised_law_name, normalised_article_ref) pairs from sample kit.
+    Used to distinguish genuinely NEW provisions from KNOWN ones in evaluate().
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        return set()
+
+    kit_path = sample_kit_dir / "ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+    if not kit_path.exists():
+        candidates = list(sample_kit_dir.glob("*.xlsx"))
+        if not candidates:
+            return set()
+        kit_path = candidates[0]
+
+    wb = openpyxl.load_workbook(str(kit_path))
+    sheet_name = None
+    for name in wb.sheetnames:
+        if name.lower() == economy.lower():
+            sheet_name = name
+            break
+    if not sheet_name:
+        return set()
+
+    ws = wb[sheet_name]
+    keys: set[tuple[str, str]] = set()
+    current_pillar = None
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        p_id = row[0]
+        if p_id is not None:
+            try:
+                current_pillar = int(p_id)
+            except (TypeError, ValueError):
+                continue
+
+        if pillar is not None and current_pillar != pillar:
+            continue
+        if current_pillar not in (6, 7):
+            continue
+
+        law_name = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+        references = str(row[7]).strip() if len(row) > 7 and row[7] else ""
+
+        if not law_name:
+            continue
+
+        # Parse article references from the References cell (anchor URLs → article numbers)
+        parts = re.split(r"[;\n]", references)
+        for part in parts:
+            part = part.strip()
+            anchor_match = re.search(r"#pr(\d+[a-zA-Z]?)-?", part, re.IGNORECASE)
+            if anchor_match:
+                article_ref = f"section {anchor_match.group(1)}"
+                keys.add((_normalise_for_key(law_name), article_ref))
+            elif part.startswith("http"):
+                # Base URL — add law name with empty article to mark law as known
+                keys.add((_normalise_for_key(law_name), ""))
+
+    return keys
+
+
 # ── Engine Output Loader ───────────────────────────────────────────────────────
 
 def load_engine_output(csv_path: Path) -> list[dict]:
@@ -160,6 +232,7 @@ def evaluate(
     Returns evaluation report dict.
     """
     ground_truth = load_sample_kit(sample_kit_dir, economy, pillar)
+    known_provision_keys = _load_known_provision_keys(sample_kit_dir, economy, pillar)
 
     if csv_path is None:
         csv_path = _find_best_csv(output_dir, economy, pillar)
@@ -177,14 +250,28 @@ def evaluate(
 
     matched_known = known_indicators & engine_indicators
     missed_known = known_indicators - engine_indicators
-    new_discoveries = engine_indicators - known_indicators
 
     known_score = (
         (len(matched_known) / len(known_indicators) * 40)
         if known_indicators
         else 0.0
     )
-    new_score = min(len(new_discoveries) * 4, 20)
+
+    # Decision 4: NEW score — provision-level comparison
+    # Count rows tagged "NEW" whose (law_name, article) is not in the known provision keys
+    genuine_new_provisions: list[dict] = []
+    for row in engine_rows:
+        if row.get("discovery_tag", "").strip().upper() != "NEW":
+            continue
+        law_key = _normalise_for_key(row.get("law_name", ""))
+        art_key = _normalise_for_key(row.get("article", ""))
+        # Check against both exact article key and the bare law-level key
+        art_num_match = re.search(r"\d+", art_key)
+        art_num_key = f"section {art_num_match.group()}" if art_num_match else art_key
+        if (law_key, art_num_key) not in known_provision_keys and (law_key, "") not in known_provision_keys:
+            genuine_new_provisions.append(row)
+
+    new_score = min(len(genuine_new_provisions) * 4, 20)
     total_score = known_score + new_score
 
     return {
@@ -195,12 +282,12 @@ def evaluate(
         "engine_indicators": sorted(engine_indicators),
         "matched_known": sorted(matched_known),
         "missed_known": sorted(missed_known),
-        "new_discoveries": sorted(new_discoveries),
+        "genuine_new_provisions": len(genuine_new_provisions),
         "scores": {
             "known_matched": len(matched_known),
             "known_total": len(known_indicators),
             "known_score": round(known_score, 1),
-            "new_discovered": len(new_discoveries),
+            "new_discovered": len(genuine_new_provisions),
             "new_score": round(new_score, 1),
             "total_score": round(total_score, 1),
             "max_score": 60.0,
@@ -224,10 +311,8 @@ def _print_report(report: dict) -> None:
     if report["missed_known"]:
         print(f"    Missed         : {', '.join(report['missed_known'])}")
     print(f"  {'─'*56}")
-    print(f"  NEW discoveries  : {s['new_discovered']}")
+    print(f"  NEW provisions   : {s['new_discovered']} genuine new provisions")
     print(f"    Score          : {s['new_score']:.1f} / 20.0")
-    if report["new_discoveries"]:
-        print(f"    Found          : {', '.join(report['new_discoveries'])}")
     print(f"  {'─'*56}")
     print(f"  TOTAL SCORE      : {s['total_score']:.1f} / {s['max_score']:.1f}")
     print(f"{'='*60}\n")

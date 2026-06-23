@@ -10,14 +10,24 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
 from typing import Optional
 
 from src.mapping.exceptions import ParseError
 from src.mapping.models import ExtractionResult, LLMResponse
+from src.mapping.provision_tag import infer_article_anchor, resolve_provision_tag
 from src.retrieval.models import RetrievedChunk
 
 logger = logging.getLogger("mapping.parser")
+
+_CROSS_REF_PATTERNS = re.compile(
+    r"\b(see also|pursuant to|as defined in|referred to in section|under [A-Z][a-z]+ Act)\b",
+    re.IGNORECASE,
+)
+_DELEGATED_LEG_KEYWORDS = re.compile(
+    r"\b(Regulations|Order|Rules|Subsidiary Legislation|Direction)\b"
+)
 
 
 def parse_llm_response(
@@ -25,6 +35,7 @@ def parse_llm_response(
     indicator_id: str,
     top_chunks: list[RetrievedChunk],
     doc_metadata: dict,
+    known_provisions: "set[str] | None" = None,
 ) -> list[ExtractionResult]:
     """
     Parses LLM JSON response → list[ExtractionResult].
@@ -51,8 +62,9 @@ def parse_llm_response(
         return []
 
     results = []
+    kp = known_provisions or set()
     for prov in parsed["provisions"]:
-        result = _build_extraction_result(prov, indicator_id, top_chunks, doc_metadata, response)
+        result = _build_extraction_result(prov, indicator_id, top_chunks, doc_metadata, response, kp)
         if result is not None:
             results.append(result)
 
@@ -91,7 +103,7 @@ def _assert_verbatim_in_context(
     """
     Verifies verbatim_snippet appears in at least one source chunk.
     Returns (True, None) on pass, (False, reason) on fail.
-    Failed assertion flags for review but does NOT discard the row.
+    Failed assertion discards the row unless ALLOW_UNVERIFIED_SNIPPETS=true.
     """
     def normalise(text: str) -> str:
         return re.sub(r"\s+", " ", text.strip().lower())
@@ -114,6 +126,7 @@ def _build_extraction_result(
     top_chunks: list[RetrievedChunk],
     doc_metadata: dict,
     response: LLMResponse,
+    known_provisions: "set[str]" = frozenset(),
 ) -> Optional[ExtractionResult]:
     snippet = prov.get("verbatim_snippet", "").strip()
     article = prov.get("article", "").strip()
@@ -130,21 +143,56 @@ def _build_extraction_result(
         rationale = rationale[:297] + "..."
         logger.warning({"event": "rationale_truncated", "indicator_id": indicator_id})
 
+    # Decision 8: verbatim assertion — hard discard unless ALLOW_UNVERIFIED_SNIPPETS=true
     assertion_ok, assertion_reason = _assert_verbatim_in_context(snippet, top_chunks)
+    allow_unverified = os.environ.get("ALLOW_UNVERIFIED_SNIPPETS", "").lower() == "true"
 
-    flag_for_review = False
-    flag_reasons = []
-    if not assertion_ok:
-        flag_for_review = True
-        flag_reasons.append(f"verbatim_assertion_failed: {assertion_reason}")
+    if not assertion_ok and not allow_unverified:
         logger.warning({
-            "event": "verbatim_assertion_failed",
+            "event": "verbatim_assertion_failed_discarded",
             "indicator_id": indicator_id,
             "reason": assertion_reason,
         })
+        return None
+
+    flag_for_review = False
+    flag_reasons = []
+
+    if not assertion_ok and allow_unverified:
+        flag_for_review = True
+        flag_reasons.append(f"verbatim_assertion_failed: {assertion_reason}")
+        logger.warning({
+            "event": "verbatim_assertion_failed_flagged",
+            "indicator_id": indicator_id,
+            "reason": assertion_reason,
+        })
+
     if confidence is not None and confidence < 0.80:
         flag_for_review = True
         flag_reasons.append(f"low_confidence: {confidence}")
+
+    # Decision 6: law name abbreviation check
+    law_name = doc_metadata.get("law_name", "")
+    if re.match(r'^[A-Z]{2,8}$', law_name) or (law_name and len(law_name) < 20):
+        flag_for_review = True
+        flag_reasons.append("law_name_possibly_abbreviated")
+
+    # Decision 7: article sub-paragraph check
+    if article and re.match(r'^(Art\.|s\.|Section|Reg\.)\s*\d+$', article):
+        flag_for_review = True
+        flag_reasons.append("article_missing_paragraph")
+
+    # Decision 2/3: provision-level discovery tag
+    anchor = infer_article_anchor(article) if article else None
+    tag, tag_unresolvable = resolve_provision_tag(
+        source_url=doc_metadata.get("source_url", ""),
+        article_anchor=anchor,
+        doc_discovery_tag=doc_metadata.get("discovery_tag", "KNOWN"),
+        known_provisions=known_provisions,
+    )
+    if tag_unresolvable:
+        flag_for_review = True
+        flag_reasons.append("discovery_tag_unresolvable")
 
     notes_parts = []
     if flag_for_review:
@@ -152,32 +200,47 @@ def _build_extraction_result(
     if doc_metadata.get("verbatim_original"):
         notes_parts.append("Translation source: DeepL/Google Translate")
 
+    # Decision 12: cross-reference and delegated legislation detection
+    if snippet and _CROSS_REF_PATTERNS.search(snippet):
+        notes_parts.append("Cross-reference detected — provision may depend on another instrument")
+    if law_name and _DELEGATED_LEG_KEYWORDS.search(law_name):
+        notes_parts.append("Delegated legislation — verify enabling act")
+
     source_chunk = top_chunks[0] if top_chunks else None
-    # context_window is a single string — use as before context
     context_window = source_chunk.context_window if source_chunk else ""
 
-    # Build location_reference string from chunk if not provided by LLM
-    if not location_ref and source_chunk:
+    # Decision 9: always prefer chunk-derived page number; LLM value is supplementary
+    chunk_location_ref = None
+    if source_chunk:
         loc = source_chunk.chunk.location_reference
         parts = []
         if loc.page is not None:
             parts.append(f"Page {loc.page + 1}")
         if loc.article_number:
             parts.append(f"Art. {loc.article_number}")
-        location_ref = " | ".join(parts) if parts else None
+        chunk_location_ref = " | ".join(parts) if parts else None
+
+    if chunk_location_ref:
+        # Append LLM value only if it adds anchor/HTML context not in chunk ref
+        if location_ref and location_ref not in chunk_location_ref:
+            final_location_ref = f"{chunk_location_ref} | {location_ref}"
+        else:
+            final_location_ref = chunk_location_ref
+    else:
+        final_location_ref = location_ref or None
 
     result = ExtractionResult(
         economy=doc_metadata["economy"],
-        law_name=doc_metadata["law_name"],
+        law_name=law_name,
         law_number_ref=doc_metadata.get("law_number_ref"),
         last_amended=doc_metadata.get("last_amended"),
         indicator_id=indicator_id,
         article=article,
-        discovery_tag=doc_metadata["discovery_tag"],
-        location_reference=location_ref or None,
+        discovery_tag=tag,
+        location_reference=final_location_ref,
         verbatim_snippet=snippet,
         mapping_rationale=rationale or None,
-        source_url=doc_metadata["source_url"],
+        source_url=doc_metadata.get("source_url", ""),
         confidence=float(confidence) if confidence is not None else None,
         notes="; ".join(notes_parts) if notes_parts else None,
         provider_used=response.provider,
@@ -186,6 +249,7 @@ def _build_extraction_result(
         raw_context_before=context_window,
         raw_context_after="",
         verbatim_original=doc_metadata.get("verbatim_original"),
+        doc_type=doc_metadata.get("doc_type"),
         flag_for_review=flag_for_review,
         flag_reason="; ".join(flag_reasons) if flag_reasons else None,
         non_consecutive=non_consecutive,

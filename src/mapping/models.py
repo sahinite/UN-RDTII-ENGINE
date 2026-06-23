@@ -53,6 +53,7 @@ class ExtractionResult:
     raw_context_before: str
     raw_context_after: str
     verbatim_original: Optional[str]
+    doc_type: Optional[str] = None       # "TEXT_PDF" | "SCANNED_PDF" | "HTML" | etc.
     flag_for_review: bool = False
     flag_reason: Optional[str] = None
     non_consecutive: bool = False

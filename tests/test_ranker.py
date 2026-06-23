@@ -144,6 +144,28 @@ class TestSeedDataLoader:
         for t in seed.known_titles:
             assert t == t.lower()   # all lowercase
 
+    def test_known_provisions_field_exists(self):
+        """SeedData.known_provisions is initialised (may be empty if no anchor URLs in fixture)."""
+        seed = load_seed_data("SG", "P6+P7", round1_db_path=ROUND1_DB)
+        assert isinstance(seed.known_provisions, set)
+
+    def test_anchor_urls_extracted_from_refs(self):
+        """_extract_anchor_urls splits on ';' and '\\n', keeps strings containing '#'."""
+        from src.crawler.seed_loader import _extract_anchor_urls
+        raw = "https://sso.agc.gov.sg/Act/PDPA2012#pr26-;https://sso.agc.gov.sg/Act/PDPA2012\nhttps://sso.agc.gov.sg/Act/PDPA2012#pr27-"
+        result = _extract_anchor_urls(raw)
+        assert "https://sso.agc.gov.sg/Act/PDPA2012#pr26-" in result
+        assert "https://sso.agc.gov.sg/Act/PDPA2012#pr27-" in result
+        # base URL without anchor is excluded
+        assert "https://sso.agc.gov.sg/Act/PDPA2012" not in result
+
+    def test_non_anchor_urls_not_in_known_provisions(self):
+        """Non-anchor URLs contribute to known_urls but not known_provisions."""
+        seed = load_seed_data("SG", "P6+P7", round1_db_path=ROUND1_DB)
+        # All entries in known_provisions must have '#' in the normalised form
+        for prov in seed.known_provisions:
+            assert "#" in prov
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. Discovery Tag Finalisation (ST2)

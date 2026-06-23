@@ -108,6 +108,20 @@ def run_pipeline(
         print(f"[ERROR] No LLM provider available: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    # ── Load seed data once at startup (for provision-level KNOWN fingerprints) ──
+    from src.crawler.seed_loader import load_seed_data as _load_seed
+    _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+    try:
+        _seed = _load_seed(
+            economy_iso=economy_iso,
+            pillar=f"P{pillar}",
+            round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
+        )
+        known_provisions = _seed.known_provisions
+    except Exception as exc:
+        logger.warning({"event": "seed_load_failed", "error": str(exc)})
+        known_provisions = set()
+
     # ── Zone 1: Evidence Discovery OR single-PDF mode ──────────────────────────
     if pdf_path:
         zone1_results = _build_zone1_from_pdf(pdf_path, economy_iso)
@@ -171,7 +185,7 @@ def run_pipeline(
 
             # LLM extraction
             try:
-                results, llm_cost = extract_provisions(rag_results, translated)
+                results, llm_cost = extract_provisions(rag_results, translated, known_provisions)
             except Exception as exc:
                 print(f"    LLM extraction failed: {exc}", file=sys.stderr)
                 continue

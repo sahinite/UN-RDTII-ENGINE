@@ -22,10 +22,12 @@ Your ONLY job is to extract verbatim text from the provided legal document chunk
 CRITICAL RULES — violations cause immediate disqualification of the row:
 1. VERBATIM ONLY: Copy the exact text from the source. Do NOT paraphrase, summarise, or rephrase any part of the provision.
 2. NO INVENTION: If no relevant provision exists in the provided chunks, return null for verbatim_snippet. Never fabricate text.
-3. EXACT ARTICLE: The article field must cite the exact section/article/regulation number as it appears in the text (e.g. "Section 26(2)", "Regulation 4(1)(b)").
+3. EXACT ARTICLE: The article field must cite the exact section/article/regulation number as it appears in the text, INCLUDING the sub-paragraph level (e.g. "Section 26(2)", "Regulation 4(1)(b)"). Never use bare article numbers like "Section 26" if sub-paragraphs exist.
 4. RATIONALE CAP: mapping_rationale must be 300 characters or fewer.
 5. CONFIDENCE: Score 0.00–1.00 reflecting how clearly the provision answers the indicator question. Below 0.80 means the mapping is uncertain.
 6. JSON OUTPUT ONLY: Return a valid JSON object. No prose, no markdown fences, no explanation outside the JSON.
+7. LAW NAME: If the act_title is abbreviated (all-caps acronym, under 20 characters, or ends without a year), expand it to the full official name including the enactment year. Example: expand "PDPA" to "Personal Data Protection Act 2012".
+8. RATIONALE FORMAT: Use exactly this structure: "This [Art./s./Reg. X(Y)] [prohibits / requires / permits / establishes] [what]. Maps to [indicator_id] because [one-sentence legal logic]." Do NOT describe what the article is about. Do NOT restate the verbatim_snippet. Name the legal mechanism.
 
 Output schema (return exactly this structure):
 {

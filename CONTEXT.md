@@ -622,3 +622,53 @@ All LLM implementation stays in `src/mapping/llm_client.py` (ADR-021). `src/llm/
 ```
 
 **Final state:** 523 passed, 2 skipped across full test suite (no regressions).
+
+---
+
+### ✅ Completed: [86ey13cyh] Output Template Compliance — Discovery Tag, Field Validation & Scoring Fixes
+
+**Problem:** Two scoring-critical failures: (1) `discovery_tag` was set at document level and never updated at provision level, causing articles not in the sample kit to be mislabelled KNOWN. (2) `evaluate.py` NEW score always returned 0 because it compared indicator IDs (which are always fully covered) rather than individual provision articles. Additionally, several field-level rules from the output template were unenforced.
+
+**Files changed:**
+- `src/crawler/seed_loader.py` — `SeedData` extended with `known_provisions: set[str]`; `_extract_anchor_urls()` helper; `_load_round1_db()` and `_load_sample_csv()` now parse References column (col index 7 / "references" header) for anchor-level URLs (`#pr26-` etc.) and populate `known_provisions`
+- `src/mapping/provision_tag.py` — NEW: `resolve_provision_tag()` pure function (KNOWN/NEW at provision level); `infer_article_anchor()` heuristic (`"Section 26"` → `"#pr26-"`)
+- `src/mapping/models.py` — `ExtractionResult` gains `doc_type: Optional[str] = None` (non-CSV metadata field)
+- `src/mapping/mapper.py` — `extract_provisions()` accepts `known_provisions: set[str]` and passes it to parser; `_build_doc_metadata()` extracts `doc_type` from `fetched.doc_type`; `_official_un_name()` now raises `ConfigError` on unknown ISO codes (no longer silently returns raw code)
+- `src/mapping/parser.py` — Decision 8: verbatim assertion failure → hard discard (`return None`) unless `ALLOW_UNVERIFIED_SNIPPETS=true` env var; Decision 2/3: `resolve_provision_tag()` called per provision; Decision 6: law name abbreviation check (`flag_for_review`); Decision 7: article missing sub-paragraph check (`flag_for_review`); Decision 9: chunk-derived page number preferred over LLM value for `location_reference`; Decision 12: cross-reference and delegated legislation auto-flagging in `notes`
+- `src/mapping/prompts.py` — Added Rules 7 (LAW NAME expansion) and 8 (RATIONALE FORMAT) to `SYSTEM_PROMPT`
+- `src/output/models.py` — `OutputRecord` gains `doc_type: Optional[str] = None` (not written to CSV)
+- `src/output/writer.py` — `validate_record()` checks `location_reference` required for PDF doc types; Decision 11: portal domain allowlist check via `_get_portal_domains()` (soft — appends to notes); `build_output_record()` passes `doc_type`
+- `evaluate.py` — Decision 4: NEW score now provision-level (`discovery_tag=="NEW"` rows whose `(law_name, article)` is not in `known_provision_keys`); `_load_known_provision_keys()` parses anchor URLs from sample kit; `new_score = min(count * 4, 20)`
+- `economies/vietnam.yaml`, `philippines.yaml`, `cambodia.yaml`, `myanmar.yaml`, `laos.yaml`, `brunei.yaml` — NEW: minimal economy YAML files with `iso_code` and `un_name` for Decision 5
+- `main.py` — loads `SeedData` at startup; passes `seed_data.known_provisions` to `extract_provisions()`
+- `tests/test_provision_tag.py` — NEW: 10 tests for `resolve_provision_tag()` and `infer_article_anchor()`
+- `tests/test_evaluate.py` — NEW: 5 tests for provision-level NEW scoring
+- `tests/test_z2_4_parser.py` — updated: verbatim assertion test updated for hard-discard (Seam 4); 3 new provision tag tests (Seam 3)
+- `tests/test_z2_4_mapper.py` — updated: `test_unknown_economy_returns_iso_code` → `test_unknown_economy_raises_config_error`
+- `tests/test_z2_6_output.py` — added 4 field-level violation tests (Seam 5)
+- `tests/test_ranker.py` — added 3 `known_provisions` tests (Seam 1)
+
+**Decisions implemented:**
+1. `SeedData.known_provisions` — anchor-level provision fingerprints from Round 1 DB XLSX References column
+2. `resolve_provision_tag()` — pure function, provision-level KNOWN/NEW; falls back to doc-level with `flag_for_review` when no anchor can be inferred
+3. `known_provisions` threaded: `main.py` → `extract_provisions()` → `parse_llm_response()` → `_build_extraction_result()`
+4. `evaluate.py` NEW score compares (law_name, article) pairs, not indicator IDs; capped at 20 pts
+5. Economy names: VN→"Viet Nam", PH→"Philippines", KH→"Cambodia", MM→"Myanmar", LA→"Lao People's Democratic Republic", BN→"Brunei Darussalam" via new YAML files; `_official_un_name()` raises `ConfigError` on unknown codes
+6. SYSTEM_PROMPT Rule 7: expand abbreviated law names including year
+7. Parser: bare article (`Section 26` without sub-paragraph) → `flag_for_review` + `article_missing_paragraph` reason
+8. Verbatim assertion → hard discard (return None); `ALLOW_UNVERIFIED_SNIPPETS=true` reverts to flag-only (OCR edge case)
+9. PDF sources require `location_reference`; chunk-derived page number preferred over LLM value
+10. SYSTEM_PROMPT Rule 8: rationale format enforced in prompt
+11. Portal domain allowlist: unknown domains append note (soft check, no violation)
+12. Cross-reference (`see also`, `pursuant to`, etc.) and delegated legislation keywords auto-flagged in `notes`
+
+**ADR-034 — `ALLOW_UNVERIFIED_SNIPPETS` env var for OCR edge cases**
+Default `false` for production. Set `true` only for scanned-PDF runs where OCR character variations cause verbatim assertion false-negatives. Must NOT be set for hackathon submission runs.
+
+**ADR-035 — Provision-level discovery tag uses URL anchor heuristic**
+`infer_article_anchor("Section 26")` → `"#pr26-"` — matches Singapore SSO portal URL scheme. Other portal schemes will not match the known_provisions set and will fall through to doc-level tag with `flag_for_review=True`. The heuristic is safe: an unresolvable anchor never wrongly marks something KNOWN.
+
+**ADR-036 — evaluate.py NEW score is provision-level, not indicator-level**
+Before: `engine_indicators - known_indicators` always empty (all 10 indicators are in the kit). After: rows with `discovery_tag=="NEW"` whose `(law_name, article)` doesn't match the kit's anchor-parsed provision keys. Score: `min(count * 4, 20)`.
+
+**Final state:** 556 passed, 2 skipped across full test suite (no regressions).

@@ -32,6 +32,56 @@ if TYPE_CHECKING:
 logger = get_logger("output.writer")
 
 
+_PORTAL_DOMAINS_CACHE: dict[str, set[str]] = {}
+
+
+def _get_portal_domains(economy_name: str) -> set[str]:
+    """Load portal base domains for an economy from economies/*.yaml (cached)."""
+    if economy_name in _PORTAL_DOMAINS_CACHE:
+        return _PORTAL_DOMAINS_CACHE[economy_name]
+    try:
+        from pathlib import Path as _Path
+        import yaml as _yaml
+        economies_dir = _Path(__file__).parent.parent.parent / "economies"
+        domains: set[str] = set()
+        for yaml_path in economies_dir.glob("*.yaml"):
+            if yaml_path.stem.lower() == "readme":
+                continue
+            try:
+                raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+                if raw.get("un_name") == economy_name or raw.get("economy_name") == economy_name:
+                    for portal in raw.get("portals", []):
+                        url = portal.get("url", "")
+                        if url:
+                            from urllib.parse import urlparse
+                            domains.add(urlparse(url).netloc)
+            except Exception:
+                pass
+        _PORTAL_DOMAINS_CACHE[economy_name] = domains
+        return domains
+    except Exception:
+        return set()
+
+
+def _check_portal_domain(record: OutputRecord) -> None:
+    """Append a note if source_url domain is not in the economy's known portals."""
+    try:
+        from urllib.parse import urlparse
+        source_domain = urlparse(record.source_url).netloc
+        if not source_domain:
+            return
+        portal_domains = _get_portal_domains(record.economy)
+        if not portal_domains:
+            return  # no portals configured — skip check
+        if not any(source_domain == d or source_domain.endswith("." + d) for d in portal_domains):
+            note = "source_url domain not in known portals — verify manually"
+            existing = record.notes or ""
+            if note not in existing:
+                record.notes = f"{existing}; {note}".lstrip("; ") if existing else note
+    except Exception:
+        pass
+
+
 # ── ST3: Output Schema Validator ───────────────────────────────────────────────
 
 def validate_record(record: OutputRecord) -> list[str]:
@@ -65,6 +115,9 @@ def validate_record(record: OutputRecord) -> list[str]:
     if record.indicator_id not in get_valid_indicator_ids():
         violations.append(f"invalid indicator_id '{record.indicator_id}'")
 
+    # Decision 11: source URL portal domain check (soft — appends to notes, not violations)
+    _check_portal_domain(record)
+
     # Discovery tag
     if record.discovery_tag not in ("KNOWN", "NEW"):
         violations.append(
@@ -76,6 +129,11 @@ def validate_record(record: OutputRecord) -> list[str]:
         violations.append(
             f"mapping_rationale exceeds 300 chars ({len(record.mapping_rationale)})"
         )
+
+    # Decision 9: location_reference required for PDF-sourced records
+    pdf_types = {"TEXT_PDF", "SCANNED_PDF"}
+    if record.doc_type in pdf_types and not (record.location_reference or "").strip():
+        violations.append("location_reference required for PDF sources")
 
     return violations
 
@@ -343,4 +401,5 @@ def build_output_record(
         raw_context_after=rec.raw_context_after,
         verbatim_original=rec.verbatim_original,
         archive_url=validated_result.archive_url,
+        doc_type=getattr(rec, "doc_type", None),
     )

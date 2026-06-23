@@ -193,8 +193,11 @@ def test_economy_name_mapping():
     assert _official_un_name("TH") == "Thailand"
 
 
-def test_unknown_economy_returns_iso_code():
+def test_unknown_economy_raises_config_error():
+    """Decision 5: unknown economy ISO code raises ConfigError (surfaces misconfiguration early)."""
+    from src.mapping.exceptions import ConfigError
     from src.mapping.mapper import _official_un_name
+    import pytest
 
-    result = _official_un_name("XX")
-    assert result == "XX"  # falls through gracefully
+    with pytest.raises(ConfigError, match="Unknown economy ISO code 'XX'"):
+        _official_un_name("XX")

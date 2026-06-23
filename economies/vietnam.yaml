@@ -1,0 +1,7 @@
+economy_name: Viet Nam
+iso_code: VN
+un_name: "Viet Nam"
+script_type: latin
+languages: [vi, en]
+portals: []
+llm_override: null

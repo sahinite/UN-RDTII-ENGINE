@@ -82,6 +82,7 @@ class OutputRecord:
     raw_context_after: str                    # chunk context window (after)
     verbatim_original: Optional[str]          # original-language text before translation
     archive_url: str                          # Wayback Machine URL or ""
+    doc_type: Optional[str] = None            # "TEXT_PDF" | "SCANNED_PDF" | "HTML" | etc. (not written to CSV)
 
     def as_csv_row(self) -> dict:
         """Return ordered dict matching CSV_COLUMNS exactly."""

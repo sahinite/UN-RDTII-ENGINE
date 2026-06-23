@@ -72,6 +72,7 @@ def _pillar_matches(raw_pillar: str, target: str) -> bool:
 class SeedData:
     known_urls: set[str] = field(default_factory=set)
     known_titles: set[str] = field(default_factory=set)
+    known_provisions: set[str] = field(default_factory=set)  # anchor-level URLs e.g. "sso.agc.gov.sg/act/pdpa2012#pr26-"
     economy: str = ""
     pillar: str = ""
 
@@ -96,6 +97,12 @@ def _find_csv_col(fields_lower: dict[str, str], candidates: list[str]) -> str | 
 
 # ── Loaders ────────────────────────────────────────────────────────────────────
 
+def _extract_anchor_urls(raw: str) -> list[str]:
+    """Split a cell value on ';' and newlines, return strings containing '#'."""
+    parts = re.split(r"[;\n]", raw)
+    return [p.strip() for p in parts if "#" in p.strip()]
+
+
 def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) -> int:
     count = 0
     try:
@@ -112,6 +119,7 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
         col_title   = _find_col(headers, ["act title", "title", "act_title"])
         col_url     = _find_col(headers, ["url", "act_url", "link"])
         col_pillar  = _find_col(headers, ["pillar", "pillar.name"])
+        col_refs    = _find_col(headers, ["references", "reference"])
 
         for row in rows:
             if not any(row):
@@ -120,6 +128,10 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
             row_pillar  = str(row[col_pillar]  or "").strip() if col_pillar  is not None else ""
             row_url     = str(row[col_url]     or "").strip() if col_url     is not None else ""
             row_title   = str(row[col_title]   or "").strip() if col_title   is not None else ""
+            row_refs    = str(row[col_refs]    or "").strip() if col_refs    is not None else ""
+            # Fallback: col index 7 is the References column per spec
+            if not row_refs and len(row) > 7:
+                row_refs = str(row[7] or "").strip()
 
             if _normalise_economy(row_economy) != economy_iso:
                 continue
@@ -132,6 +144,10 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
             count += 1
             if row_title:
                 seed.known_titles.add(normalise_title(row_title))
+
+            # Anchor-level provision URLs from References column
+            for anchor_url in _extract_anchor_urls(row_refs):
+                seed.known_provisions.add(normalise_url(anchor_url))
 
         wb.close()
     except Exception as exc:
@@ -163,11 +179,14 @@ def _load_sample_csv(path: str, economy_iso: str, pillar: str, seed: SeedData) -
                     continue
 
                 refs_raw = str(row.get(refs_col or "", "") or "").strip()
-                for raw_url in refs_raw.split(";"):
+                for raw_url in re.split(r"[;\n]", refs_raw):
                     raw_url = raw_url.strip()
-                    if raw_url and raw_url.lower().startswith("http"):
-                        seed.known_urls.add(normalise_url(raw_url))
-                        count += 1
+                    if not raw_url or not raw_url.lower().startswith("http"):
+                        continue
+                    seed.known_urls.add(normalise_url(raw_url))
+                    count += 1
+                    if "#" in raw_url:
+                        seed.known_provisions.add(normalise_url(raw_url))
 
                 if title_col:
                     raw_title = str(row.get(title_col, "") or "").strip()

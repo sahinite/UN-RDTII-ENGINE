@@ -50,9 +50,32 @@ def test_verbatim_assertion_passes_for_exact_match():
     assert reason is None
 
 
-def test_verbatim_assertion_fails_and_flags_for_review():
+def test_verbatim_assertion_fails_hard_discard():
+    """Decision 8: failed verbatim assertion → hard discard (empty results)."""
     from src.mapping.parser import parse_llm_response
 
+    hallucinated_json = """{
+      "found": true,
+      "provisions": [{
+        "article": "Section 26",
+        "verbatim_snippet": "This text does not appear in any chunk at all — hallucinated!",
+        "mapping_rationale": "Maps to P6-I1.",
+        "confidence": 0.90,
+        "location_reference": "Page 34",
+        "non_consecutive": false
+      }]
+    }"""
+    response = make_llm_response(hallucinated_json)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
+    assert results == []
+
+
+def test_verbatim_assertion_fails_allow_unverified_flag(monkeypatch):
+    """Decision 8: ALLOW_UNVERIFIED_SNIPPETS=true → retain row with flag_for_review=True."""
+    import os
+    from src.mapping.parser import parse_llm_response
+
+    monkeypatch.setenv("ALLOW_UNVERIFIED_SNIPPETS", "true")
     hallucinated_json = """{
       "found": true,
       "provisions": [{
@@ -128,13 +151,13 @@ def test_non_consecutive_provisions_expanded_to_two_rows():
         text=(
             "26. Restriction on transfer of personal data outside Singapore\n"
             "An organisation shall not transfer. "
-            "31. Section 31 applies to recipients of transferred data."
+            "Section 31 applies to recipients of transferred data."
         )
     )
     non_consec_json = """{
       "found": true,
       "provisions": [{
-        "article": "Section 26 and Section 31",
+        "article": "Section 26(1) and Section 31(2)",
         "verbatim_snippet": "An organisation shall not transfer. Section 31 applies to recipients of transferred data.",
         "mapping_rationale": "Both sections together establish P6-I1.",
         "confidence": 0.88,
@@ -147,8 +170,8 @@ def test_non_consecutive_provisions_expanded_to_two_rows():
     expanded = expand_non_consecutive(results)
     assert len(expanded) == 2
     articles = [r.article for r in expanded]
-    assert "Section 26" in articles
-    assert "Section 31" in articles
+    assert "Section 26(1)" in articles
+    assert "Section 31(2)" in articles
 
 
 def test_empty_article_and_snippet_discarded():
@@ -169,7 +192,7 @@ def test_confidence_none_when_missing():
     no_conf_json = """{
       "found": true,
       "provisions": [{
-        "article": "Section 26",
+        "article": "Section 26(1)",
         "verbatim_snippet": "An organisation shall not transfer personal data of an individual to a country or territory outside Singapore",
         "mapping_rationale": "Maps to P6-I1.",
         "non_consecutive": false
@@ -179,7 +202,50 @@ def test_confidence_none_when_missing():
     results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], DOC_METADATA)
     assert len(results) == 1
     assert results[0].confidence is None
-    assert results[0].flag_for_review is False  # no confidence means no flagging
+    # No confidence-based flag — article has sub-paragraph so no article_missing_paragraph either
+    assert "low_confidence" not in (results[0].flag_reason or "")
+
+
+def test_provision_tag_from_known_provisions():
+    """Seam 3a: provision URL+anchor in known_provisions → tag 'KNOWN' even with KNOWN doc."""
+    from src.mapping.parser import parse_llm_response
+    from src.crawler.crawler import _normalise_url as normalise_url
+
+    # Build a known_provisions set with the PDPA section 26 anchor
+    known = {normalise_url("https://sso.agc.gov.sg/Act/PDPA2012#pr26-")}
+    doc_meta = {**DOC_METADATA, "discovery_tag": "KNOWN"}
+
+    response = make_llm_response(VALID_LLM_JSON)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], doc_meta, known)
+    assert len(results) == 1
+    assert results[0].discovery_tag == "KNOWN"
+
+
+def test_provision_tag_new_when_anchor_absent():
+    """Seam 3b: KNOWN doc but anchor not in known_provisions → tag 'NEW'."""
+    from src.mapping.parser import parse_llm_response
+
+    known: set = set()  # empty — no known anchor provisions
+    doc_meta = {**DOC_METADATA, "discovery_tag": "KNOWN"}
+
+    response = make_llm_response(VALID_LLM_JSON)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], doc_meta, known)
+    assert len(results) == 1
+    assert results[0].discovery_tag == "NEW"
+
+
+def test_provision_tag_new_doc_always_new():
+    """Seam 3c: NEW doc → provision always tagged NEW regardless of known_provisions."""
+    from src.mapping.parser import parse_llm_response
+    from src.crawler.crawler import _normalise_url as normalise_url
+
+    known = {normalise_url("https://sso.agc.gov.sg/Act/PDPA2012#pr26-")}
+    doc_meta = {**DOC_METADATA, "discovery_tag": "NEW"}
+
+    response = make_llm_response(VALID_LLM_JSON)
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], doc_meta, known)
+    assert len(results) == 1
+    assert results[0].discovery_tag == "NEW"
 
 
 def test_extraction_result_validate_catches_bad_indicator():

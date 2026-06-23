@@ -138,6 +138,29 @@ class TestValidateRecord:
         rec = _make_output_record(confidence=None)
         assert validate_record(rec) == []
 
+    def test_pdf_source_without_location_reference_flagged(self):
+        """Decision 9: PDF doc type + blank location_reference → violation."""
+        rec = _make_output_record(location_reference=None, doc_type="TEXT_PDF")
+        viols = validate_record(rec)
+        assert any("location_reference" in v for v in viols)
+
+    def test_pdf_scanned_without_location_reference_flagged(self):
+        rec = _make_output_record(location_reference="", doc_type="SCANNED_PDF")
+        viols = validate_record(rec)
+        assert any("location_reference" in v for v in viols)
+
+    def test_html_without_location_reference_not_flagged(self):
+        """HTML sources do not require location_reference."""
+        rec = _make_output_record(location_reference=None, doc_type="HTML")
+        viols = validate_record(rec)
+        assert not any("location_reference required for PDF" in v for v in viols)
+
+    def test_no_doc_type_no_location_reference_not_flagged(self):
+        """When doc_type is unknown/None, no PDF-specific violation."""
+        rec = _make_output_record(location_reference=None, doc_type=None)
+        viols = validate_record(rec)
+        assert not any("location_reference required for PDF" in v for v in viols)
+
 
 # ── AC1: CSV Column Order ──────────────────────────────────────────────────────
 

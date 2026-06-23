@@ -51,6 +51,7 @@ def _get_economy_names() -> dict[str, str]:
 def extract_provisions(
     rag_results,
     doc,
+    known_provisions: "set[str] | None" = None,
 ) -> tuple[list[ExtractionResult], LLMCostEntry]:
     """
     Main entry point called by the pipeline orchestrator.
@@ -59,6 +60,7 @@ def extract_provisions(
         rag_results: list of objects with .indicator_id and .top_chunks
                      OR dict[str, list[RetrievedChunk]] from retrieve_batch
         doc: FetchedDocument or TranslatedDocument
+        known_provisions: anchor-level URL set from SeedData.known_provisions
 
     Returns:
         (list[ExtractionResult], LLMCostEntry)
@@ -121,7 +123,10 @@ def extract_provisions(
         elapsed = (time.time() - t0) * 1000
         cost_entry.add_call(response, indicator_id, elapsed)
 
-        provisions = parse_llm_response(response, indicator_id, top_chunks, doc_metadata)
+        provisions = parse_llm_response(
+            response, indicator_id, top_chunks, doc_metadata,
+            known_provisions=known_provisions or set(),
+        )
         provisions = expand_non_consecutive(provisions)
         all_results.extend(provisions)
 
@@ -151,6 +156,9 @@ def extract_provisions(
 def _build_doc_metadata(doc) -> dict:
     economy_iso = getattr(doc, "economy", "")
     economy_name = _official_un_name(economy_iso)
+    # doc_type: FetchedDocument has it directly; TranslatedDocument wraps it in .fetched
+    fetched = getattr(doc, "fetched", doc)
+    doc_type = getattr(fetched, "doc_type", None)
 
     return {
         "economy": economy_name,
@@ -160,14 +168,18 @@ def _build_doc_metadata(doc) -> dict:
         "source_url": getattr(doc, "source_url", ""),
         "discovery_tag": getattr(doc, "discovery_tag", "KNOWN"),
         "verbatim_original": getattr(doc, "verbatim_original", None),
+        "doc_type": doc_type,
     }
 
 
 def _official_un_name(iso_code: str) -> str:
     name = _get_economy_names().get(iso_code.upper() if iso_code else "")
     if name is None:
-        logger.warning({"event": "unknown_economy_iso", "iso_code": iso_code})
-        return iso_code
+        raise ConfigError(
+            f"Unknown economy ISO code '{iso_code}'. "
+            "Add a YAML file under economies/ with iso_code and un_name fields. "
+            "See economies/README.md for the format."
+        )
     return name
 
 
