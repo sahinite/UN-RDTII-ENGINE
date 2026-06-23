@@ -172,7 +172,9 @@ def test_extra_yaml_field_rejected():
 def test_unknown_economy_raises_named_error():
     with pytest.raises(UnknownEconomyError) as exc_info:
         load_economy("narnia")
-    assert "narnia" in str(exc_info.value).lower()
+    msg = str(exc_info.value)
+    assert "not supported yet" in msg
+    assert "Adding a new economy" in msg
 
 
 # ── Fuzzy economy name matching ───────────────────────────────────────────────

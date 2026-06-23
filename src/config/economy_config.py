@@ -32,11 +32,18 @@ class UnknownEconomyError(Exception):
 
     def __init__(self, name: str, suggestion: str = "") -> None:
         self.name = name
-        hint = f" Did you mean: {suggestion}?" if suggestion else ""
-        super().__init__(
-            f"Unknown economy '{name}'.{hint} "
-            f"Expected file: economies/{name.lower()}.yaml"
-        )
+        if suggestion:
+            msg = (
+                f"Unknown economy '{name}'. Did you mean: {suggestion}? "
+                f"Expected file: economies/{name.lower()}.yaml"
+            )
+        else:
+            msg = (
+                f"Economy '{name}' is not supported yet. "
+                f"To add it, create economies/{name.lower()}.yaml — "
+                f"see '## Adding a new economy' in README for the required fields."
+            )
+        super().__init__(msg)
 
 
 class InvalidEconomyConfigError(Exception):
