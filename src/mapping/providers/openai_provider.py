@@ -14,10 +14,18 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-OPENAI_MODEL = "gpt-4o"
+OPENAI_MODEL_DEFAULT = "gpt-4o"
 
+# Cost per 1K tokens — approximate; accurate only for gpt-4o.
+# The hackathon cost logger reads actual usage from the API response,
+# so this is only used as a fallback estimate when the model is unknown.
 OPENAI_INPUT_COST_PER_1K = 0.005
 OPENAI_OUTPUT_COST_PER_1K = 0.015
+
+
+def _resolve_model() -> str:
+    """Returns LLM_MODEL from env if set, else the default."""
+    return os.environ.get("LLM_MODEL", "").strip() or OPENAI_MODEL_DEFAULT
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -27,7 +35,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     @property
     def model(self) -> str:
-        return OPENAI_MODEL
+        return _resolve_model()
 
     def is_available(self) -> bool:
         return bool(os.environ.get("OPENAI_API_KEY", "").strip())
@@ -42,11 +50,12 @@ class OpenAIProvider(BaseLLMProvider):
         if openai is None:
             raise ProviderAPIError("openai", "openai package not installed")
 
+        model = _resolve_model()
         client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         t0 = time.time()
         try:
             resp = client.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=[
@@ -72,7 +81,7 @@ class OpenAIProvider(BaseLLMProvider):
             text=resp.choices[0].message.content,
             input_tokens=usage.prompt_tokens,
             output_tokens=usage.completion_tokens,
-            model=OPENAI_MODEL,
+            model=model,
             provider="openai",
             latency_ms=latency_ms,
             cost_usd=cost,

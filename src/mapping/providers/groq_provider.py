@@ -14,8 +14,13 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-GROQ_MODEL = "qwen3-32b"
+GROQ_MODEL_DEFAULT = "qwen3-32b"
 GROQ_MODEL_FALLBACK = "qwen3.6-27b"
+
+
+def _resolve_model() -> str:
+    """Returns LLM_MODEL from env if set, else the default."""
+    return os.environ.get("LLM_MODEL", "").strip() or GROQ_MODEL_DEFAULT
 
 
 class GroqProvider(BaseLLMProvider):
@@ -25,7 +30,7 @@ class GroqProvider(BaseLLMProvider):
 
     @property
     def model(self) -> str:
-        return GROQ_MODEL
+        return _resolve_model()
 
     def is_available(self) -> bool:
         return bool(os.environ.get("GROQ_API_KEY", "").strip())
@@ -42,7 +47,7 @@ class GroqProvider(BaseLLMProvider):
 
         client = Groq(api_key=os.environ["GROQ_API_KEY"])
         t0 = time.time()
-        model_to_use = GROQ_MODEL
+        model_to_use = _resolve_model()
         try:
             resp = client.chat.completions.create(
                 model=model_to_use,

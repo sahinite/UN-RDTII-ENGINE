@@ -31,7 +31,7 @@ from src.crawler.crawler import _normalise_url as normalise_url
 from src.crawler.currency import CurrencyResult
 from src.crawler.seed_loader import SeedData, normalise_title
 from src.fetcher.translator import translate_text as _shared_translate_text
-from src.mapping.providers.groq_provider import GROQ_MODEL, GROQ_MODEL_FALLBACK
+from src.mapping.providers.groq_provider import GROQ_MODEL_DEFAULT as GROQ_MODEL, GROQ_MODEL_FALLBACK
 from src.mapping.providers.ollama_provider import OLLAMA_MODELS
 
 logger = logging.getLogger(__name__)

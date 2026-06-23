@@ -20,10 +20,22 @@ from pathlib import Path
 
 
 def _run_ocr_stage(pdf_path: Path, economy_name: str, cost_logger) -> tuple[str, float | None]:
-    """Run Stage-1 OCR on the PDF and record cost. Returns (extracted_text, cer)."""
+    """Run OCR on the PDF and record cost. Returns (extracted_text, cer).
+
+    Cascade: Tesseract/PaddleOCR → pdfplumber (text-layer PDF) → LLM vision OCR.
+    Mirrors the production fallback in extract_ocr_stage1 so cost figures are accurate
+    regardless of whether setup.py was run.
+    """
+    import os
+
     from src.config.economy_config import load_economy
-    from src.fetcher.extractors.ocr_stage1 import assemble_pages, pdf_to_images
-    from src.fetcher.extractors.ocr_stage1 import run_paddleocr, run_tesseract
+    from src.fetcher.extractors.ocr_stage1 import (
+        DependencyError,
+        assemble_pages,
+        pdf_to_images,
+        run_paddleocr,
+        run_tesseract,
+    )
 
     economy = load_economy(economy_name)
     raw_bytes = pdf_path.read_bytes()
@@ -34,24 +46,77 @@ def _run_ocr_stage(pdf_path: Path, economy_name: str, cost_logger) -> tuple[str,
 
     page_texts: list[str] = []
     last_cer: float | None = None
+    engine_used = economy.ocr_engine
 
-    # Primary non-English language for PaddleOCR lang param
     non_en = [l for l in (economy.languages or ["en"]) if l != "en"]
     paddle_lang = non_en[0] if non_en else "en"
 
+    ocr_failed_with: Exception | None = None
+
     for img_bytes in images:
-        if economy.ocr_engine == "tesseract":
-            page_text, page_cer = run_tesseract(img_bytes)
-        else:
-            page_text, page_cer = run_paddleocr(img_bytes, lang=paddle_lang)
-        page_texts.append(page_text)
-        last_cer = page_cer
+        try:
+            if economy.ocr_engine == "tesseract":
+                page_text, page_cer = run_tesseract(img_bytes)
+            else:
+                page_text, page_cer = run_paddleocr(img_bytes, lang=paddle_lang)
+            page_texts.append(page_text)
+            last_cer = page_cer
+        except DependencyError as exc:
+            ocr_failed_with = exc
+            break
+
+    # Fallback 1: pdfplumber (text-layer PDFs, no system install needed)
+    if ocr_failed_with is not None:
+        print(f"  [{economy.ocr_engine} not installed] falling back to pdfplumber...", flush=True)
+        try:
+            import io
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+                page_texts = [p.extract_text() or "" for p in pdf.pages]
+                last_cer = 0.0
+            engine_used = "pdfplumber"
+            ocr_failed_with = None
+        except Exception:
+            pass  # pdfplumber also failed — continue to LLM fallback
+
+    # Fallback 2: LLM vision OCR (uses provider from .env)
+    if ocr_failed_with is not None:
+        from src.fetcher.extractors.llm_ocr import LLMOCRUnavailableError, run_llm_ocr
+        provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+        model = os.environ.get("LLM_MODEL", "").strip() or "unknown"
+        print(f"  [pdfplumber failed] falling back to LLM vision OCR ({provider}/{model})...", flush=True)
+        page_texts = []
+        total_in_tok = 0
+        total_out_tok = 0
+        try:
+            for img_bytes in images:
+                page_text, page_cer, in_tok, out_tok = run_llm_ocr(img_bytes)
+                page_texts.append(page_text)
+                last_cer = page_cer
+                total_in_tok += in_tok
+                total_out_tok += out_tok
+            engine_used = "llm_ocr"
+        except LLMOCRUnavailableError as llm_err:
+            print(f"  LLM vision OCR unavailable: {llm_err}", file=sys.stderr)
+            print("  Run setup.py to install the OCR engine.", file=sys.stderr)
+
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        if engine_used == "llm_ocr":
+            cost_logger.record_llm_ocr_page(
+                provider=provider,
+                model=model,
+                input_tokens=total_in_tok,
+                output_tokens=total_out_tok,
+                pages=pages,
+                latency_ms=elapsed_ms,
+            )
+        text = assemble_pages(page_texts)
+        return text, last_cer
 
     text = assemble_pages(page_texts)
     elapsed_ms = (time.monotonic() - t0) * 1000
-
     cost_logger.record_ocr_page(
-        engine=economy.ocr_engine,
+        engine=engine_used,
         pages=pages,
         latency_ms=elapsed_ms,
     )
@@ -213,7 +278,10 @@ def main() -> None:
     print(f"  Processing time  : {report['processing_time_seconds']:.1f}s")
     print(f"  {'─'*46}")
     c = report["components"]
-    print(f"  OCR cost         : ${c['ocr']['cost_usd']:.6f}  ({c['ocr']['pages_processed']} pages)")
+    ocr_note = f"{c['ocr']['pages_processed']} pages"
+    if c['ocr'].get('input_tokens', 0) > 0:
+        ocr_note += f", llm_ocr {c['ocr']['input_tokens']}+{c['ocr']['output_tokens']} tokens"
+    print(f"  OCR cost         : ${c['ocr']['cost_usd']:.6f}  ({ocr_note})")
     print(f"  Embedding cost   : ${c['embedding']['cost_usd']:.6f}  (local model)")
     print(f"  LLM cost         : ${c['llm']['cost_usd']:.6f}  ({c['llm']['input_tokens']}+{c['llm']['output_tokens']} tokens)")
     print(f"  Crawling cost    : ${c['crawling']['cost_usd']:.6f}  (Crawl4AI, free)")

@@ -14,10 +14,15 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"  # PINNED — do NOT change without explicit instruction
+ANTHROPIC_MODEL_DEFAULT = "claude-sonnet-4-20250514"
 
 ANTHROPIC_INPUT_COST_PER_1K = 0.003   # $3 per 1M input tokens
 ANTHROPIC_OUTPUT_COST_PER_1K = 0.015  # $15 per 1M output tokens
+
+
+def _resolve_model() -> str:
+    """Returns LLM_MODEL from env if set, else the default."""
+    return os.environ.get("LLM_MODEL", "").strip() or ANTHROPIC_MODEL_DEFAULT
 
 
 class AnthropicProvider(BaseLLMProvider):
@@ -30,7 +35,7 @@ class AnthropicProvider(BaseLLMProvider):
 
     @property
     def model(self) -> str:
-        return ANTHROPIC_MODEL
+        return _resolve_model()
 
     def is_available(self) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
@@ -48,10 +53,11 @@ class AnthropicProvider(BaseLLMProvider):
         if self._client is None:
             self._client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
+        model = _resolve_model()
         t0 = time.time()
         try:
             msg = self._client.messages.create(
-                model=ANTHROPIC_MODEL,
+                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system=system_prompt,
@@ -76,7 +82,7 @@ class AnthropicProvider(BaseLLMProvider):
             text=msg.content[0].text,
             input_tokens=input_tok,
             output_tokens=output_tok,
-            model=ANTHROPIC_MODEL,
+            model=model,
             provider="anthropic",
             latency_ms=latency_ms,
             cost_usd=cost,

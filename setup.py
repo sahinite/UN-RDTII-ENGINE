@@ -42,7 +42,49 @@ def _os() -> str:
     return "windows"
 
 
-# ── Phase 1: gather choices ───────────────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────────
+
+_OLLAMA_MODELS = ["qwen2.5:7b", "granite3-dense:8b"]
+# Hard constraint: never pull any Llama variant — non-Apache 2.0 license.
+_LLAMA_BLOCKLIST = ["llama", "llama3", "llama3.3", "llama-3"]
+
+
+# ── Phase 1: pre-flight detection ────────────────────────────────────────────
+
+def _detect_tesseract() -> bool:
+    return bool(shutil.which("tesseract"))
+
+
+def _detect_playwright() -> bool:
+    """True if Chromium binary is already downloaded by Playwright."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "--dry-run", "chromium"],
+            capture_output=True, text=True, check=False,
+        )
+        return "already installed" in (result.stdout + result.stderr).lower()
+    except Exception:
+        return False
+
+
+def _detect_embedder() -> bool:
+    import os
+    cache_dir = os.path.join(
+        os.path.expanduser("~"), ".cache", "torch", "sentence_transformers",
+        "sentence-transformers_all-MiniLM-L6-v2",
+    )
+    return os.path.isdir(cache_dir)
+
+
+def _detect_ollama() -> bool:
+    if not shutil.which("ollama"):
+        return False
+    result = subprocess.run(
+        ["ollama", "list"], capture_output=True, text=True, check=False
+    )
+    listing = result.stdout
+    return all(m.split(":")[0] in listing for m in _OLLAMA_MODELS)
+
 
 def _ask(prompt: str, default_yes: bool = False) -> bool:
     hint = "[Y/n]" if default_yes else "[y/N]"
@@ -57,46 +99,94 @@ def gather_choices() -> dict:
     print("=============================================")
     print(" RDTII Extraction Engine — Setup")
     print("=============================================")
-    print("This script will install system prerequisites.")
-    print("Answer the questions below, then installation will begin.")
+    print("Scanning for already-installed components...")
     print()
 
-    want_embedder = _ask(
-        "[1/2] Pre-download sentence-transformers embedding model\n"
-        "      (all-MiniLM-L6-v2, ~90MB)?\n"
-        "      Skipping means first engine run will download it automatically."
-    )
+    already_tesseract  = _detect_tesseract()
+    already_playwright = _detect_playwright()
+    already_embedder   = _detect_embedder()
+    already_ollama     = _detect_ollama()
+
+    # Show what was found
+    print("Current status:")
+    print(f"  {'[✓]' if already_tesseract  else '[ ]'} Tesseract")
+    print(f"  {'[✓]' if already_playwright else '[ ]'} Playwright Chromium")
+    print(f"  {'[✓]' if already_embedder   else '[ ]'} Embedding model (all-MiniLM-L6-v2)")
+    print(f"  {'[✓]' if already_ollama     else '[ ]'} Ollama + models")
     print()
 
-    want_ollama = _ask(
-        "[2/2] Install Ollama for offline mode\n"
-        "      (qwen2.5:7b + granite3-dense:8b, ~9GB)?\n"
-        "      Only needed if you have NO ANTHROPIC_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY."
-    )
-    print()
+    # Only ask about what is missing
+    q_num = 0
+
+    # Required components — no questions, just inform if they will be installed
+    if not already_tesseract:
+        print("[!] Tesseract is required and will be installed automatically.")
+        print()
+    if not already_playwright:
+        print("[!] Playwright Chromium is required and will be installed automatically.")
+        print()
+
+    want_playwright = True  # always install if missing, no prompt
+
+    want_embedder = already_embedder
+    if not already_embedder:
+        q_num += 1
+        want_embedder = _ask(
+            f"[{q_num}] Pre-download sentence-transformers embedding model\n"
+            "      (all-MiniLM-L6-v2, ~90MB)?\n"
+            "      Skipping means first engine run will download it automatically."
+        )
+        print()
+
+    want_ollama = already_ollama
+    if not already_ollama:
+        q_num += 1
+        want_ollama = _ask(
+            f"[{q_num}] Install Ollama for offline mode\n"
+            "      (qwen2.5:7b + granite3-dense:8b, ~9GB)?\n"
+            "      Only needed if you have NO ANTHROPIC_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY."
+        )
+        print()
+
+    if q_num == 0:
+        print("All components are already installed. Nothing to do.")
+        return {
+            "want_embedder": False,
+            "want_ollama": False,
+            "want_playwright": False,
+            "proceed": False,
+            "all_done": True,
+        }
 
     # Plan summary
     print("─────────────────────────────────────────────")
     print("Installation plan:")
-    print("  [✓] Tesseract          (required)")
-    if want_embedder:
-        print("  [✓] all-MiniLM-L6-v2  (you selected yes)")
-    else:
-        print("  [✗] all-MiniLM-L6-v2  (skipped)")
-    if want_ollama:
-        print("  [✓] Ollama + models    (you selected yes)")
-    else:
-        print("  [✗] Ollama             (skipped)")
+    _plan_line("Tesseract            (required)", not already_tesseract, already_tesseract)
+    _plan_line("Playwright Chromium  (required)", not already_playwright, already_playwright)
+    _plan_line("all-MiniLM-L6-v2    (optional)", want_embedder, already_embedder)
+    _plan_line("Ollama + models      (optional)", want_ollama, already_ollama)
     print()
 
     proceed = _ask("Proceed?", default_yes=True)
     print("─────────────────────────────────────────────")
 
     return {
-        "want_embedder": want_embedder,
-        "want_ollama": want_ollama,
+        "want_embedder": want_embedder and not already_embedder,
+        "want_ollama": want_ollama and not already_ollama,
+        "want_playwright": want_playwright and not already_playwright,
+        "install_tesseract": not already_tesseract,
         "proceed": proceed,
+        "all_done": False,
     }
+
+
+def _plan_line(label: str, will_install: bool, already_done: bool) -> None:
+    if already_done:
+        print(f"  [✓] {label:<25} already installed")
+    elif will_install:
+        print(f"  [→] {label:<25} will install")
+    else:
+        print(f"  [✗] {label:<25} skipped")
 
 
 # ── Phase 2: execution ────────────────────────────────────────────────────────
@@ -163,11 +253,62 @@ def _verify_tesseract() -> None:
 
 # ── sentence-transformers model ───────────────────────────────────────────────
 
+# ── Playwright ────────────────────────────────────────────────────────────────
+
+def install_playwright() -> None:
+    print()
+    print("Installing Playwright Chromium browser...")
+
+    # Check if playwright package is available
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore  # noqa: F401
+    except ImportError:
+        warn(
+            "playwright package not installed yet — "
+            "run pip install -r requirements.txt first, then re-run setup.py"
+        )
+        return
+
+    # Check if Chromium binary already exists
+    try:
+        import subprocess as sp
+        result = sp.run(
+            [sys.executable, "-m", "playwright", "install", "--dry-run", "chromium"],
+            capture_output=True, text=True, check=False
+        )
+        # If dry-run output says "chromium" is already installed, skip
+        if "already installed" in (result.stdout + result.stderr).lower():
+            ok("Playwright Chromium already installed — skipping")
+            return
+    except Exception:
+        pass  # dry-run not supported in all versions — proceed with install
+
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        check=False,
+    )
+    if result.returncode != 0:
+        fail("Playwright Chromium install failed — see error above")
+        sys.exit(1)
+    ok("Playwright Chromium installed")
+
+
 def download_embedder() -> None:
     print()
     print("Pre-downloading sentence-transformers model (all-MiniLM-L6-v2)...")
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
+
+        # Check if model is already cached
+        import os
+        cache_dir = os.path.join(
+            os.path.expanduser("~"), ".cache", "torch", "sentence_transformers",
+            "sentence-transformers_all-MiniLM-L6-v2"
+        )
+        if os.path.isdir(cache_dir):
+            ok("all-MiniLM-L6-v2 already cached — skipping download")
+            return
+
         SentenceTransformer("all-MiniLM-L6-v2")
         ok("all-MiniLM-L6-v2 downloaded")
     except ImportError:
@@ -178,11 +319,6 @@ def download_embedder() -> None:
 
 
 # ── Ollama ────────────────────────────────────────────────────────────────────
-
-_OLLAMA_MODELS = ["qwen2.5:7b", "granite3-dense:8b"]
-# Hard constraint: never pull any Llama variant — non-Apache 2.0 license.
-_LLAMA_BLOCKLIST = ["llama", "llama3", "llama3.3", "llama-3"]
-
 
 def install_ollama(os_name: str) -> None:
     print()
@@ -258,13 +394,20 @@ def _pull_ollama_models() -> None:
 def main() -> None:
     choices = gather_choices()
 
+    if choices.get("all_done"):
+        sys.exit(0)
+
     if not choices["proceed"]:
         print("Aborted — nothing installed.")
         sys.exit(0)
 
     os_name = _os()
 
-    install_tesseract(os_name)
+    if choices.get("install_tesseract", True):
+        install_tesseract(os_name)
+
+    if choices["want_playwright"]:
+        install_playwright()
 
     if choices["want_embedder"]:
         download_embedder()
@@ -273,7 +416,11 @@ def main() -> None:
         install_ollama(os_name)
 
     print()
-    print("Setup complete. Next step: cp .env.example .env and fill in your API keys.")
+    print("Setup complete. Next steps:")
+    print("  1. cp .env.example .env  (if not done already)")
+    print("  2. Fill in your API keys in .env")
+    print("  3. pip install -r requirements.txt")
+    print("  4. python main.py --economy Singapore --pillar 7")
 
 
 if __name__ == "__main__":

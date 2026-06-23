@@ -121,11 +121,38 @@ class CostLogger:
         elif engine in ("mistral_ocr", "mistral"):
             cost = pages * _MISTRAL_OCR_PRICE_PER_PAGE
         else:
-            cost = 0.0  # tesseract / paddleocr are free
+            cost = 0.0  # tesseract / paddleocr / pdfplumber are free
         self._ocr.pages_processed += pages
         self._ocr.cost_usd += cost
         self._ocr.calls += 1
         self._ocr.latency_ms += latency_ms
+
+    def record_llm_ocr_page(
+        self,
+        provider: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        pages: int = 1,
+        latency_ms: float = 0.0,
+    ) -> None:
+        """Record LLM vision OCR cost — billed as LLM tokens, tracked under OCR component."""
+        cost = compute_llm_cost(provider, input_tokens, output_tokens)
+        self._ocr.pages_processed += pages
+        self._ocr.input_tokens += input_tokens
+        self._ocr.output_tokens += output_tokens
+        self._ocr.cost_usd += cost
+        self._ocr.calls += 1
+        self._ocr.latency_ms += latency_ms
+        logger.debug({
+            "event": "llm_ocr_cost_recorded",
+            "provider": provider,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": cost,
+            "pages": pages,
+        })
 
     def record_embedding(
         self,
@@ -181,6 +208,8 @@ class CostLogger:
                     "calls": self._ocr.calls,
                     "cost_usd": round(self._ocr.cost_usd, 6),
                     "latency_ms": round(self._ocr.latency_ms, 1),
+                    "input_tokens": self._ocr.input_tokens,
+                    "output_tokens": self._ocr.output_tokens,
                 },
                 "embedding": {
                     "calls": self._embedding.calls,
