@@ -125,11 +125,18 @@ def write_csv(records: list[OutputRecord], path: Path) -> Path:
 
 # ── ST2: JSON Envelope Writer ──────────────────────────────────────────────────
 
+_DOC_LEVEL_FIELDS = {
+    "economy", "law_name", "source_url", "source_pdf_path",
+    "ocr_quality_cer", "processing_time", "model_version", "discovery_tag",
+}
+
+
 def write_json(records: list[OutputRecord], path: Path) -> Path:
     """
-    Write JSON envelope: records grouped by source_url (per-document).
-    Includes all 6 extended metadata fields populated with real values.
-    Post-write: re-reads and verifies extended fields are present.
+    Write JSON envelope with PDF-specified document-level shape.
+
+    Each document object has document-level metadata at the top and
+    provisions in a 'provisions' array, per the hackathon spec (slides 15-16).
 
     Returns the written path.
     Raises OutputWriteError on any failure.
@@ -137,22 +144,31 @@ def write_json(records: list[OutputRecord], path: Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Group by source_url (per-document)
-    doc_groups: dict[str, list[dict]] = defaultdict(list)
+    # Group by source_url, preserving insertion order
+    doc_groups: dict[str, list[OutputRecord]] = defaultdict(list)
     for rec in records:
-        doc_groups[rec.source_url].append(rec.as_json_dict())
+        doc_groups[rec.source_url].append(rec)
+
+    documents = []
+    for url, recs in doc_groups.items():
+        first = recs[0]
+        doc_obj = {
+            "economy": first.economy,
+            "law_name": first.law_name,
+            "source_url": url,
+            "source_pdf_path": first.source_pdf_path,
+            "ocr_quality_cer": first.ocr_quality_cer,
+            "processing_time": first.processing_time,
+            "model_version": first.model_version,
+            "discovery_tag": first.discovery_tag,
+            "provisions": [r.as_provision_dict() for r in recs],
+        }
+        documents.append(doc_obj)
 
     envelope = {
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         "total_records": len(records),
-        "documents": [
-            {
-                "source_url": url,
-                "record_count": len(rows),
-                "records": rows,
-            }
-            for url, rows in doc_groups.items()
-        ],
+        "documents": documents,
     }
 
     try:
@@ -160,25 +176,18 @@ def write_json(records: list[OutputRecord], path: Path) -> Path:
     except OSError as exc:
         raise OutputWriteError(f"Failed to write JSON to {path}: {exc}") from exc
 
-    # Post-write extended field verification
-    _EXTENDED_FIELDS = {
-        "ocr_quality_cer",
-        "processing_time_seconds",
-        "model_version",
-        "raw_context_before",
-        "raw_context_after",
-        "verbatim_original",
-        "archive_url",
-    }
+    # Post-write verification: check document-level keys and provisions array
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("documents"):
-            first_rec = data["documents"][0]["records"][0]
-            missing = _EXTENDED_FIELDS - set(first_rec.keys())
-            if missing:
+            first_doc = data["documents"][0]
+            missing_doc = _DOC_LEVEL_FIELDS - set(first_doc.keys())
+            if missing_doc:
                 raise OutputWriteError(
-                    f"Post-write JSON missing extended fields: {missing}"
+                    f"Post-write JSON missing document-level fields: {missing_doc}"
                 )
+            if "provisions" not in first_doc:
+                raise OutputWriteError("Post-write JSON missing 'provisions' array")
     except (json.JSONDecodeError, KeyError, IndexError) as exc:
         raise OutputWriteError(f"Post-write JSON verification failed: {exc}") from exc
 
@@ -302,7 +311,8 @@ def build_output_record(
     validated_result,
     *,
     ocr_quality_cer: Optional[float] = None,
-    processing_time_seconds: Optional[float] = None,
+    processing_time: Optional[int] = None,
+    source_pdf_path: Optional[str] = None,
 ) -> OutputRecord:
     """
     Build an OutputRecord from a ValidatedResult (Z2-5) + optional OCR/timing metadata.
@@ -324,10 +334,11 @@ def build_output_record(
         source_url=rec.source_url,
         confidence=rec.confidence,
         notes=rec.notes,
-        # 6 JSON extended fields
+        # JSON extended fields
         ocr_quality_cer=ocr_quality_cer,
-        processing_time_seconds=processing_time_seconds,
+        processing_time=processing_time,
         model_version=rec.model_used,
+        source_pdf_path=source_pdf_path,
         raw_context_before=rec.raw_context_before,
         raw_context_after=rec.raw_context_after,
         verbatim_original=rec.verbatim_original,

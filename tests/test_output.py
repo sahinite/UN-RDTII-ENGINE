@@ -71,7 +71,7 @@ def test_csv_matches_output_template_column_order(tmp_path):
         archive_url="",
         validated_at="2026-06-22T00:00:00+00:00",
     )
-    record = build_output_record(vr, ocr_quality_cer=0.01, processing_time_seconds=5.0)
+    record = build_output_record(vr, ocr_quality_cer=0.01, processing_time=5)
 
     summary = write_outputs([record], tmp_path, "Singapore", 7)
 

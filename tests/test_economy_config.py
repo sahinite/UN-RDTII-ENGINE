@@ -172,7 +172,35 @@ def test_extra_yaml_field_rejected():
 def test_unknown_economy_raises_named_error():
     with pytest.raises(UnknownEconomyError) as exc_info:
         load_economy("narnia")
-    assert "narnia" in str(exc_info.value)
+    assert "narnia" in str(exc_info.value).lower()
+
+
+# ── Fuzzy economy name matching ───────────────────────────────────────────────
+
+
+def test_misspelled_economy_suggests_correction():
+    """load_economy('singpore') should suggest 'Singapore' in the error message."""
+    with pytest.raises(UnknownEconomyError) as exc_info:
+        load_economy("singpore")
+    assert "Did you mean: Singapore" in str(exc_info.value)
+
+
+def test_whitespace_stripped_before_lookup():
+    """load_economy('  singapore  ') should resolve correctly."""
+    cfg = load_economy("  singapore  ")
+    assert cfg.economy_name == "Singapore"
+
+
+def test_uppercase_economy_resolves():
+    """load_economy('SINGAPORE') should resolve correctly."""
+    cfg = load_economy("SINGAPORE")
+    assert cfg.economy_name == "Singapore"
+
+
+def test_trailing_whitespace_malaysia_resolves():
+    """load_economy('malaysia ') should resolve correctly."""
+    cfg = load_economy("malaysia ")
+    assert cfg.economy_name == "Malaysia"
 
 
 # ── Portal type field (added Z1-2) ─────────────────────────────────────────────

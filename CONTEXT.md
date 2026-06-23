@@ -583,3 +583,42 @@ All LLM implementation stays in `src/mapping/llm_client.py` (ADR-021). `src/llm/
 2. No Python code changes needed
 
 **Final state:** 507 passed, 2 skipped across full test suite (no regressions).
+
+---
+
+### ✅ Completed: [86ey16a85] PDF Spec Compliance — JSON Envelope, README, Edge-case Handling
+
+**Problem:** Four spec-compliance gaps vs. the hackathon orientation PDF (Dr. Witada A., 1 June 2026):
+1. JSON envelope shape mismatched spec (wrong key names, wrong structure)
+2. Misspelled economy name crashed the engine with no suggestion
+3. README missing `## Pinned versions` and `## Open-source fallback` mandatory sections
+4. `discovery_tag` propagation risk for bilingual documents
+
+**Files changed:**
+- `src/output/models.py` — renamed `processing_time_seconds: float` → `processing_time: int`; added `source_pdf_path: Optional[str]`; added `as_provision_dict()` returning only provision-level fields
+- `src/output/writer.py` — restructured `write_json()` to emit PDF-specified envelope: document-level fields (`economy`, `law_name`, `source_url`, `source_pdf_path`, `ocr_quality_cer`, `processing_time`, `model_version`, `discovery_tag`) at top of each document object; provisions in `"provisions"` array; updated post-write verification; renamed `build_output_record()` parameter `processing_time_seconds` → `processing_time`, added `source_pdf_path` param
+- `src/mapping/llm_client.py` — extended `get_active_model_version(ocr_engine="")`: when `ocr_engine` provided, returns `"{llm} + {ocr_engine}"` combined string
+- `src/config/economy_config.py` — `load_economy()` now normalises input with `.strip().title()`, uses `difflib.get_close_matches()` to suggest correct spelling on failure; `UnknownEconomyError` includes "Did you mean: X?" hint; added `_available_economy_names()` helper
+- `main.py` — updated `build_output_record()` call: `processing_time_seconds=elapsed` → `processing_time=int(elapsed)`
+- `README.md` — added `## Pinned versions` section (full version table, "no latest tags" statement) and `## Open-source fallback (if commercial API)` section (Ollama instructions)
+- `tests/test_z2_6_output.py` — updated fixtures and tests for new JSON structure; added tests asserting document-level keys, `"provisions"` array, absence of `"processing_time_seconds"`, integer `processing_time`
+- `tests/test_economy_config.py` — added 4 fuzzy matching tests: misspelled name suggests correction, whitespace stripped, uppercase resolved, trailing whitespace resolved
+- `tests/test_z2_4_cascade.py` — added 4 tests for `get_active_model_version(ocr_engine=...)`
+- `tests/test_output.py` — updated `build_output_record()` call to use `processing_time=5`
+
+**JSON envelope shape (new):**
+```json
+{
+  "economy": "Singapore",
+  "law_name": "PDPA 2012",
+  "source_url": "https://...",
+  "source_pdf_path": "outputs/cache/pdpa_sg.pdf",
+  "ocr_quality_cer": 0.012,
+  "processing_time": 43,
+  "model_version": "anthropic/claude-sonnet-4-20250514 + tesseract-5.3",
+  "discovery_tag": "KNOWN",
+  "provisions": [{ "indicator_id": "P7-I1", ... }]
+}
+```
+
+**Final state:** 523 passed, 2 skipped across full test suite (no regressions).

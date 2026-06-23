@@ -169,8 +169,18 @@ def _call_with_retry(
         return provider.complete(system, user, max_tok, temp)
 
 
-def get_active_model_version() -> str:
-    """Returns '{provider}/{model}' string for JSON output envelope."""
+def get_active_model_version(ocr_engine: str = "") -> str:
+    """
+    Returns model version string for the JSON output envelope.
+
+    When ocr_engine is provided, combines LLM and OCR identifiers:
+      e.g. "claude-sonnet-4-20250514 + tesseract-5.3"
+    Without ocr_engine, returns '{provider}/{model}'.
+    """
     if _SESSION_PROVIDER is None:
-        return "unknown/unknown"
-    return f"{_SESSION_PROVIDER.provider_name}/{_SESSION_PROVIDER.model}"
+        llm_version = "unknown/unknown"
+    else:
+        llm_version = f"{_SESSION_PROVIDER.provider_name}/{_SESSION_PROVIDER.model}"
+    if ocr_engine:
+        return f"{llm_version} + {ocr_engine}"
+    return llm_version

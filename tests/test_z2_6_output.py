@@ -46,8 +46,9 @@ def _make_output_record(**overrides) -> OutputRecord:
         confidence=0.92,
         notes=None,
         ocr_quality_cer=0.02,
-        processing_time_seconds=12.5,
-        model_version="claude-sonnet-4-20250514",
+        processing_time=12,
+        model_version="claude-sonnet-4-20250514 + tesseract-5.3",
+        source_pdf_path="outputs/cache/pdpa_sg.pdf",
         raw_context_before="23. Accuracy Obligation.",
         raw_context_after="25. Retention Limitation Obligation.",
         verbatim_original=None,
@@ -201,46 +202,98 @@ class TestWriteCSV:
         assert path.exists()
 
 
-# ── AC2: JSON Extended Fields ──────────────────────────────────────────────────
+# ── AC2: JSON Envelope Shape ───────────────────────────────────────────────────
 
 class TestWriteJSON:
-    _EXTENDED_FIELDS = {
-        "ocr_quality_cer",
-        "processing_time_seconds",
-        "model_version",
-        "raw_context_before",
-        "raw_context_after",
-        "verbatim_original",
-        "archive_url",
+    _DOC_LEVEL_FIELDS = {
+        "economy", "law_name", "source_url", "source_pdf_path",
+        "ocr_quality_cer", "processing_time", "model_version", "discovery_tag",
+    }
+    _PROVISION_FIELDS = {
+        "indicator_id", "article", "verbatim_snippet", "mapping_rationale",
+        "location_reference", "confidence", "notes",
     }
 
-    def test_json_extended_fields_present(self, tmp_path):
-        """AC2: JSON output includes all 6 extended metadata fields."""
+    def test_json_document_level_fields_present(self, tmp_path):
+        """AC2: JSON document object has all spec-required top-level keys."""
         records = [_make_output_record()]
         path = write_json(records, tmp_path / "out.json")
         data = json.loads(path.read_text(encoding="utf-8"))
-        first_rec = data["documents"][0]["records"][0]
-        for field in self._EXTENDED_FIELDS:
-            assert field in first_rec, f"Missing extended field: {field}"
+        doc = data["documents"][0]
+        for field in self._DOC_LEVEL_FIELDS:
+            assert field in doc, f"Missing document-level field: {field}"
+
+    def test_json_provisions_array_keyed_correctly(self, tmp_path):
+        """AC2: Provisions array is keyed 'provisions', not 'records'."""
+        records = [_make_output_record()]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        doc = data["documents"][0]
+        assert "provisions" in doc, "Expected 'provisions' key in document object"
+        assert "records" not in doc, "'records' key must not appear (renamed to 'provisions')"
+
+    def test_json_no_processing_time_seconds_in_provisions(self, tmp_path):
+        """AC2: 'processing_time_seconds' must not appear anywhere in output."""
+        records = [_make_output_record()]
+        path = write_json(records, tmp_path / "out.json")
+        raw = path.read_text(encoding="utf-8")
+        assert "processing_time_seconds" not in raw
+
+    def test_json_processing_time_is_int_at_doc_level(self, tmp_path):
+        """AC2: 'processing_time' is an integer at the document level."""
+        records = [_make_output_record(processing_time=43)]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        doc = data["documents"][0]
+        assert isinstance(doc["processing_time"], int)
+        assert doc["processing_time"] == 43
+
+    def test_json_source_pdf_path_at_doc_level(self, tmp_path):
+        """AC2: source_pdf_path present at document level."""
+        records = [_make_output_record(source_pdf_path="outputs/cache/pdpa.pdf")]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["documents"][0]["source_pdf_path"] == "outputs/cache/pdpa.pdf"
+
+    def test_json_model_version_combined_at_doc_level(self, tmp_path):
+        """AC2: model_version combines LLM + OCR string at document level."""
+        records = [_make_output_record(model_version="anthropic/claude-sonnet-4-20250514 + tesseract-5.3")]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        mv = data["documents"][0]["model_version"]
+        assert "+" in mv
+
+    def test_json_discovery_tag_at_doc_level(self, tmp_path):
+        """AC2: discovery_tag is at document level, not only inside provisions."""
+        records = [_make_output_record(discovery_tag="NEW")]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["documents"][0]["discovery_tag"] == "NEW"
+
+    def test_json_provision_fields_present(self, tmp_path):
+        """AC2: Each provision in 'provisions' has the spec-required fields."""
+        records = [_make_output_record()]
+        path = write_json(records, tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        provision = data["documents"][0]["provisions"][0]
+        for field in self._PROVISION_FIELDS:
+            assert field in provision, f"Missing provision field: {field}"
 
     def test_json_extended_fields_populated(self, tmp_path):
-        """AC2: Extended fields are real values, not None/empty where expected."""
+        """AC2: Document-level extended fields are real values, not None where expected."""
         records = [_make_output_record(
             ocr_quality_cer=0.02,
-            processing_time_seconds=12.5,
-            model_version="claude-sonnet-4-20250514",
-            raw_context_before="23. Accuracy.",
-            raw_context_after="25. Retention.",
-            archive_url="https://web.archive.org/web/20240101/https://example.com",
+            processing_time=12,
+            model_version="claude-sonnet-4-20250514 + tesseract-5.3",
+            source_pdf_path="outputs/cache/pdpa.pdf",
         )]
         path = write_json(records, tmp_path / "out.json")
         data = json.loads(path.read_text(encoding="utf-8"))
-        rec = data["documents"][0]["records"][0]
-        assert rec["ocr_quality_cer"] == pytest.approx(0.02)
-        assert rec["processing_time_seconds"] == pytest.approx(12.5)
-        assert rec["model_version"] == "claude-sonnet-4-20250514"
-        assert rec["raw_context_before"] == "23. Accuracy."
-        assert "web.archive.org" in rec["archive_url"]
+        doc = data["documents"][0]
+        assert doc["ocr_quality_cer"] == pytest.approx(0.02)
+        assert doc["processing_time"] == 12
+        assert doc["model_version"] == "claude-sonnet-4-20250514 + tesseract-5.3"
+        assert doc["source_pdf_path"] == "outputs/cache/pdpa.pdf"
 
     def test_json_per_document_grouping(self, tmp_path):
         records = [
@@ -253,7 +306,7 @@ class TestWriteJSON:
         assert data["total_records"] == 3
         assert len(data["documents"]) == 2
         url1_doc = next(d for d in data["documents"] if d["source_url"] == "https://url1.com")
-        assert url1_doc["record_count"] == 2
+        assert len(url1_doc["provisions"]) == 2
 
     def test_json_envelope_has_metadata(self, tmp_path):
         records = [_make_output_record()]
@@ -263,12 +316,12 @@ class TestWriteJSON:
         assert "total_records" in data
         assert data["total_records"] == 1
 
-    def test_json_confidence_is_numeric(self, tmp_path):
+    def test_json_confidence_is_numeric_in_provision(self, tmp_path):
         records = [_make_output_record(confidence=0.92)]
         path = write_json(records, tmp_path / "out.json")
         data = json.loads(path.read_text(encoding="utf-8"))
-        rec = data["documents"][0]["records"][0]
-        assert isinstance(rec["confidence"], float)
+        provision = data["documents"][0]["provisions"][0]
+        assert isinstance(provision["confidence"], float)
 
 
 # ── AC3: Cost Logger ───────────────────────────────────────────────────────────
@@ -418,12 +471,13 @@ class TestWriteOutputs:
 class TestBuildOutputRecord:
     def test_build_from_validated_result(self):
         vr = _make_validated_result(archive_url="https://web.archive.org/test")
-        rec = build_output_record(vr, ocr_quality_cer=0.03, processing_time_seconds=8.0)
+        rec = build_output_record(vr, ocr_quality_cer=0.03, processing_time=8, source_pdf_path="outputs/cache/pdpa.pdf")
         assert rec.economy == "Singapore"
         assert rec.indicator_id == "P7-I1"
         assert rec.archive_url == "https://web.archive.org/test"
         assert rec.ocr_quality_cer == pytest.approx(0.03)
-        assert rec.processing_time_seconds == pytest.approx(8.0)
+        assert rec.processing_time == 8
+        assert rec.source_pdf_path == "outputs/cache/pdpa.pdf"
         assert rec.model_version == "claude-sonnet-4-20250514"
 
     def test_build_preserves_context_fields(self):
@@ -444,10 +498,24 @@ class TestOutputRecordMethods:
     def test_as_json_dict_includes_extended_fields(self):
         rec = _make_output_record()
         d = rec.as_json_dict()
-        for field in ("ocr_quality_cer", "processing_time_seconds", "model_version",
-                      "raw_context_before", "raw_context_after", "verbatim_original",
-                      "archive_url"):
+        for field in ("ocr_quality_cer", "processing_time", "model_version",
+                      "source_pdf_path", "raw_context_before", "raw_context_after",
+                      "verbatim_original", "archive_url"):
             assert field in d
+
+    def test_as_provision_dict_has_required_fields(self):
+        rec = _make_output_record()
+        d = rec.as_provision_dict()
+        for field in ("indicator_id", "article", "verbatim_snippet",
+                      "mapping_rationale", "location_reference", "confidence", "notes"):
+            assert field in d
+
+    def test_as_provision_dict_excludes_doc_level_fields(self):
+        rec = _make_output_record()
+        d = rec.as_provision_dict()
+        for field in ("economy", "law_name", "processing_time", "model_version",
+                      "ocr_quality_cer", "source_pdf_path", "discovery_tag"):
+            assert field not in d
 
 
 # ── Error path coverage ────────────────────────────────────────────────────────
@@ -487,5 +555,6 @@ class TestErrorPaths:
         )
         rec = build_output_record(vr)
         assert rec.ocr_quality_cer is None
-        assert rec.processing_time_seconds is None
+        assert rec.processing_time is None
+        assert rec.source_pdf_path is None
         assert rec.archive_url == ""

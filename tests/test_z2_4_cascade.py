@@ -129,6 +129,35 @@ def test_get_active_model_version_unknown_when_not_pinned():
     assert client.get_active_model_version() == "unknown/unknown"
 
 
+def test_get_active_model_version_with_ocr_engine():
+    """get_active_model_version(ocr_engine=...) returns combined LLM + OCR string."""
+    import src.mapping.llm_client as client
+    client._SESSION_PROVIDER = _make_provider("anthropic")
+    client._SESSION_PROVIDER.model = "claude-sonnet-4-20250514"
+    version = client.get_active_model_version(ocr_engine="tesseract-5.3")
+    assert "+" in version
+    assert "tesseract-5.3" in version
+    assert "anthropic" in version
+
+
+def test_get_active_model_version_no_ocr_engine_no_plus():
+    """get_active_model_version() without ocr_engine returns simple version string."""
+    import src.mapping.llm_client as client
+    client._SESSION_PROVIDER = _make_provider("anthropic")
+    client._SESSION_PROVIDER.model = "claude-sonnet-4-20250514"
+    version = client.get_active_model_version()
+    assert "+" not in version
+
+
+def test_get_active_model_version_none_provider_with_ocr():
+    """Handles None session provider gracefully even with ocr_engine."""
+    import src.mapping.llm_client as client
+    client._SESSION_PROVIDER = None
+    version = client.get_active_model_version(ocr_engine="tesseract-5.3")
+    assert "tesseract-5.3" in version
+    assert "+" in version
+
+
 def test_pinned_provider_tried_first_even_if_not_first_in_cascade():
     """Session-pinned provider is always tried first in attempt order."""
     anthropic_mock = _make_provider("anthropic")

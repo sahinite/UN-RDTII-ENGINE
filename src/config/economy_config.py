@@ -12,6 +12,7 @@ Usage:
 
 from __future__ import annotations
 
+import difflib
 import re
 from pathlib import Path
 from typing import Literal
@@ -29,10 +30,11 @@ _ECONOMIES_DIR = Path(__file__).parent.parent.parent / "economies"
 class UnknownEconomyError(Exception):
     """Raised when no YAML file exists for the requested economy name."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, suggestion: str = "") -> None:
         self.name = name
+        hint = f" Did you mean: {suggestion}?" if suggestion else ""
         super().__init__(
-            f"No economy config found for '{name}'. "
+            f"Unknown economy '{name}'.{hint} "
             f"Expected file: economies/{name.lower()}.yaml"
         )
 
@@ -148,9 +150,22 @@ class EconomyConfig(BaseModel):
 # ── Loader ─────────────────────────────────────────────────────────────────────
 
 
+def _available_economy_names() -> list[str]:
+    """Return title-cased economy names from all YAML files in the economies dir."""
+    return [
+        p.stem.title()
+        for p in _ECONOMIES_DIR.glob("*.yaml")
+        if p.stem.lower() != "readme"
+    ]
+
+
 def load_economy(name: str) -> EconomyConfig:
     """
     Load and validate an economy config by name.
+
+    Normalises input with .strip().title() before lookup so "singapore" and
+    "  Singapore  " both resolve correctly.  On failure, uses difflib to suggest
+    the closest matching economy name in the error message.
 
     Looks for  economies/{name.lower()}.yaml  relative to the project root.
 
@@ -158,20 +173,24 @@ def load_economy(name: str) -> EconomyConfig:
         UnknownEconomyError   — file does not exist
         InvalidEconomyConfigError — file exists but fails schema validation
     """
-    yaml_path = _ECONOMIES_DIR / f"{name.lower()}.yaml"
+    normalised = name.strip().title()
+    yaml_path = _ECONOMIES_DIR / f"{normalised.lower()}.yaml"
 
     if not yaml_path.exists():
-        raise UnknownEconomyError(name)
+        available = _available_economy_names()
+        matches = difflib.get_close_matches(normalised, available, n=1, cutoff=0.6)
+        suggestion = matches[0] if matches else ""
+        raise UnknownEconomyError(normalised, suggestion)
 
     try:
         raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
-        raise InvalidEconomyConfigError(name, f"YAML parse error: {exc}") from exc
+        raise InvalidEconomyConfigError(normalised, f"YAML parse error: {exc}") from exc
 
     try:
         return EconomyConfig.model_validate(raw)
     except ValidationError as exc:
-        raise InvalidEconomyConfigError(name, str(exc)) from exc
+        raise InvalidEconomyConfigError(normalised, str(exc)) from exc
 
 
 def load_economy_by_iso(iso_code: str) -> EconomyConfig | None:

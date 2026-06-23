@@ -190,7 +190,7 @@ def run_pipeline(
                 record = build_output_record(
                     vr,
                     ocr_quality_cer=cer,
-                    processing_time_seconds=elapsed,
+                    processing_time=int(elapsed),
                 )
                 all_records.append(record)
 

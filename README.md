@@ -238,6 +238,44 @@ The pipeline will auto-derive the OCR engine from `script_type`, pick up the UN 
 
 ---
 
+## Pinned versions
+
+No `latest` tags are used anywhere in this project. All versions are pinned:
+
+| Component | Pinned version |
+|-----------|---------------|
+| LLM (primary) | `claude-sonnet-4-20250514` |
+| LLM (fallback 2) | `gpt-4o` |
+| LLM (fallback 3) | `qwen3-32b` via Groq |
+| LLM (offline 4) | `qwen2.5:7b` (Ollama, Apache 2.0) |
+| LLM (offline 5) | `granite3-dense:8b` (Ollama, Apache 2.0) |
+| OCR (Latin scripts) | Tesseract 5.x |
+| OCR (Asian scripts) | PaddleOCR 2.x |
+
+Key library versions are pinned in `requirements.txt`. Run `pip install -r requirements.txt` to reproduce the exact environment.
+
+---
+
+## Open-source fallback (if commercial API)
+
+To run the engine fully offline without any API keys:
+
+```bash
+# 1. Pull the offline models
+ollama pull qwen2.5:7b
+ollama pull granite3-dense:8b
+
+# 2. Pin the engine to Ollama
+export LLM_PROVIDER=ollama
+
+# 3. Run as normal — no ANTHROPIC_API_KEY or OPENAI_API_KEY required
+python main.py --economy Singapore --pillar 7
+```
+
+The Ollama cascade uses `qwen2.5:7b` (tier 4) first, then `granite3-dense:8b` (tier 5) on failure. Both models are Apache 2.0 licensed. OCR (Tesseract / PaddleOCR) and embeddings are always local and require no API key.
+
+---
+
 ## Build order (ClickUp story sequence)
 
 All stories completed: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]` → `[Z2-86ey0q56f]` (audit/integration fixes).
