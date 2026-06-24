@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Union
 
+from src.cli.progress import substep
 from src.mapping.exceptions import AllProvidersExhaustedError, ConfigError, PDPAGateError
 from src.mapping.llm_client import call_llm_with_cascade, get_active_model_version
 from src.mapping.models import ExtractionResult, LLMCostEntry
@@ -75,9 +76,11 @@ def extract_provisions(
     else:
         items = rag_results
 
-    for rag_result in items:
+    total_items = len(items)
+    for idx, rag_result in enumerate(items, 1):
         indicator_id = rag_result.indicator_id
         top_chunks = rag_result.top_chunks
+        substep(f"LLM call {indicator_id} ({idx}/{total_items})")
 
         if not top_chunks:
             logger.warning({

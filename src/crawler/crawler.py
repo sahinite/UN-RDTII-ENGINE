@@ -21,10 +21,12 @@ import httpx
 import tldextract
 from bs4 import BeautifulSoup
 
+from src.cli.progress import substep
 from src.config.economy_config import EconomyConfig, Portal
 from src.crawler.crawl4ai_runner import (
     SSO_TIMEOUT_MS as _SSO_TIMEOUT_MS,
     SSO_WAIT_FOR as _SSO_WAIT_FOR,
+    close_shared_crawler as _close_shared_crawler,
     fetch_with_playwright as _fetch_with_playwright,
     is_js_portal as _is_js_portal,
 )
@@ -40,6 +42,10 @@ _CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
 _CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "5"))
 _MAX_CONCURRENT_CRAWLS = int(os.getenv("MAX_CONCURRENT_CRAWLS", "3"))
 _CRAWL_JITTER_MS = int(os.getenv("CRAWL_JITTER_MS", "400"))
+# Pass 1 seeds straight from the Round 1 DB (already-known act URLs). We only need
+# to confirm them, not BFS-expand every cross-reference — so it runs at depth 0 and
+# the seed list is deduped (by base URL, fragments/anchors stripped) and capped.
+_CRAWL_KNOWN_MAX_SEEDS = int(os.getenv("CRAWL_KNOWN_MAX_SEEDS", "20"))
 
 _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -105,6 +111,36 @@ def _is_skip_url(url: str) -> bool:
 
 def _make_absolute(href: str, base_url: str) -> str:
     return urllib.parse.urljoin(base_url, href)
+
+
+def _short_url(url: str, max_len: int = 70) -> str:
+    """Trim a URL for single-line terminal display."""
+    if len(url) <= max_len:
+        return url
+    return url[: max_len - 1] + "…"
+
+
+def _dedupe_seed_urls(urls: list[str], cap: int) -> list[str]:
+    """Collapse known-act URLs to their base page (drop #fragment and trailing
+    separators), de-duplicate, and cap the count.
+
+    The Round 1 DB lists many anchor-level provision URLs (…/Act/PDPA2012#pr26-)
+    that all resolve to the same act page; without this we'd fetch the same page
+    dozens of times.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        parsed = urllib.parse.urlparse(u)
+        base = parsed._replace(fragment="").geturl().rstrip("/;,")
+        key = _normalise_url(base)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(base)
+        if len(out) >= cap:
+            break
+    return out
 
 
 def _economy_iso(economy_config: EconomyConfig) -> str:
@@ -284,8 +320,10 @@ async def _crawl_bfs(
     queue: list[tuple[str, int]] = [(u, 0) for u in start_urls]
     acts_found: list[dict] = []
     pages_crawled = 0
+    page_budget = _CRAWL_MAX_PAGES * len(start_urls)
+    engine_tag = "playwright" if is_js else "httpx"
 
-    while queue and pages_crawled < _CRAWL_MAX_PAGES * len(start_urls):
+    while queue and pages_crawled < page_budget:
         url, depth = queue.pop(0)
         norm = _normalise_url(url)
 
@@ -299,6 +337,16 @@ async def _crawl_bfs(
 
         session.seen_urls.add(norm)
         start_ms = time.monotonic()
+
+        # Per-URL visibility: surface to spinner substep + logs which URL is live.
+        substep(
+            f"Pass {pass_num} [{engine_tag}] {pages_crawled + 1}/{page_budget} d{depth} "
+            f"· {_short_url(url)}"
+        )
+        logger.info(
+            "[CRAWL] pass=%d depth=%d (%s) GET %s",
+            pass_num, depth, engine_tag, url,
+        )
 
         try:
             await _jitter()
@@ -319,13 +367,20 @@ async def _crawl_bfs(
 
         if status in (0,):
             session.log_page(url, "error", depth, 0, pass_num, elapsed_ms)
+            logger.info("[CRAWL] pass=%d no response (%dms) · %s", pass_num, elapsed_ms, _short_url(url))
             continue
         if status in (403, 429):
             session.log_page(url, f"http_{status}", depth, 0, pass_num, elapsed_ms)
+            substep(f"Pass {pass_num} HTTP {status} blocked · {_short_url(url)}")
+            logger.info("[CRAWL] pass=%d HTTP %d blocked · %s", pass_num, status, _short_url(url))
             continue
 
         page_acts = _extract_act_links(html, url, portal_domain)
         session.log_page(url, "ok", depth, len(page_acts), pass_num, elapsed_ms)
+        logger.info(
+            "[CRAWL] pass=%d 200 OK (%dms) %d link(s) · %s",
+            pass_num, elapsed_ms, len(page_acts), _short_url(url),
+        )
         acts_found.extend(page_acts)
         pages_crawled += 1
 
@@ -431,10 +486,13 @@ async def run_crawler(
             seed = [u for u in known_urls if _registered_domain(u) == portal_domain]
             if not seed:
                 continue
+            seed = _dedupe_seed_urls(seed, _CRAWL_KNOWN_MAX_SEEDS)
+            logger.info("[CRAWL] Pass 1 %s: %d known seed URL(s) after dedupe", portal_domain, len(seed))
             portal_cfg = _lookup_portal_cfg(portal.url, economy_config)
             async with semaphore:
                 try:
-                    acts = await _crawl_bfs(seed, portal.url, 1, session, client, portal_cfg)
+                    # depth 0: confirm the known act pages; don't BFS-expand them
+                    acts = await _crawl_bfs(seed, portal.url, 1, session, client, portal_cfg, max_depth=0)
                 except Exception as exc:
                     logger.error("Pass 1 error on %s: %s", portal.url, exc)
                     session._errors += 1
@@ -489,6 +547,9 @@ async def run_crawler(
                     pass_number=2,
                 ))
                 pass1_norm.add(norm)
+
+    # Both passes done — release the reused Chromium.
+    await _close_shared_crawler()
 
     elapsed = time.monotonic() - t0
     known_count = sum(1 for c in candidates if c.discovery_tag == "KNOWN")

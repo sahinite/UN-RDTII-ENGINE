@@ -35,6 +35,34 @@ _USER_AGENT = (
 )
 
 
+# ── Portal strategy helpers ────────────────────────────────────────────────────
+
+def _find_portal_for_url(url: str, economy_config: "EconomyConfig"):
+    """Return the Portal config whose URL domain matches the given URL, or None."""
+    import tldextract
+    def _reg_domain(u: str) -> str:
+        ext = tldextract.extract(u)
+        return getattr(ext, "top_domain_under_public_suffix", None) or ext.registered_domain
+
+    url_domain = _reg_domain(url)
+    for portal in economy_config.portals:
+        if _reg_domain(str(portal.url)) == url_domain:
+            return portal
+    return None
+
+
+def _rewrite_to_pdf_url(url: str, pdf_view_suffix: str) -> str:
+    """Append pdf_view_suffix to the URL, preserving existing query params."""
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    # Strip any existing fragment; append suffix as query param extension
+    if parsed.query:
+        new_url = f"{url}{pdf_view_suffix.replace('?', '&', 1)}"
+    else:
+        new_url = f"{url}{pdf_view_suffix}"
+    return new_url
+
+
 # ── Custom exceptions ──────────────────────────────────────────────────────────
 
 class DownloadError(Exception):
@@ -217,8 +245,28 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     """
     Download + detect + extract. Returns a single FetchedDocument,
     or a list when a consolidated volume is split into segments.
+
+    Honors fetch: pdf_endpoint — rewrites the act URL to its PDF view before
+    downloading, routing to the existing TEXT_PDF → pdfplumber path (no OCR).
     """
-    raw_bytes, content_type, resolved_url = download(zone1_result.url)
+    # ── pdf_endpoint rewrite: act URL → PDF print endpoint ────────────────────
+    fetch_url = zone1_result.url
+    portal = _find_portal_for_url(fetch_url, economy_config)
+    if portal is not None:
+        fetch_strategy = getattr(portal, "fetch", "TBD")
+        pdf_suffix = getattr(portal, "pdf_view_suffix", None)
+        if fetch_strategy == "pdf_endpoint" and pdf_suffix:
+            rewritten = _rewrite_to_pdf_url(fetch_url, pdf_suffix)
+            logger.info({
+                "event": "pdf_endpoint_rewrite",
+                "original_url": fetch_url,
+                "pdf_url": rewritten,
+                "portal": portal.name,
+                "economy": zone1_result.economy,
+            })
+            fetch_url = rewritten
+
+    raw_bytes, content_type, resolved_url = download(fetch_url)
 
     # Patch resolved_url back into zone1_result for downstream use
     zone1_result_resolved = Zone1Result(

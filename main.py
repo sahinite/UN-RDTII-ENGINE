@@ -21,6 +21,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()  # load .env before any provider/config imports read os.environ
 
+from src.cli.progress import Progress
 from src.config.economy_config import InvalidEconomyConfigError, UnknownEconomyError, load_economy
 from src.crawler.exceptions import ConfigError
 from src.crawler.probe import load_taxonomy, validate_taxonomy
@@ -90,29 +91,36 @@ def run_pipeline(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    from src.cli.progress import set_progress
+    p = Progress()
+    set_progress(p)
+
     # ── Load economy config ─────────────────────────────────────────────────────
+    p.step(f"Loading economy config — {economy}")
     try:
         economy_config = load_economy(economy)
     except UnknownEconomyError as exc:
-        print(f"[ERROR] Unknown economy: {exc}", file=sys.stderr)
+        p.fail(f"Unknown economy: {exc}")
         sys.exit(1)
     except InvalidEconomyConfigError as exc:
-        print(f"[ERROR] Invalid economy config: {exc}", file=sys.stderr)
+        p.fail(f"Invalid economy config: {exc}")
         sys.exit(1)
-
     economy_iso = economy_config.iso_code
+    p.done(f"Economy config — {economy} ({economy_iso})")
 
     # ── Pin LLM provider once ───────────────────────────────────────────────────
+    p.step("Connecting to LLM provider")
     try:
         pinned = pin_active_provider()
-        print(f"LLM provider: {pinned.provider_name}/{pinned.model}")
+        p.done(f"LLM provider — {pinned.provider_name}/{pinned.model}")
     except Exception as exc:
-        print(f"[ERROR] No LLM provider available: {exc}", file=sys.stderr)
+        p.fail(f"No LLM provider available: {exc}")
         sys.exit(1)
 
-    # ── Load seed data once at startup (for provision-level KNOWN fingerprints) ──
+    # ── Load seed data ──────────────────────────────────────────────────────────
     from src.crawler.seed_loader import load_seed_data as _load_seed
     _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+    p.step("Loading Round 1 seed data")
     try:
         _seed = _load_seed(
             economy_iso=economy_iso,
@@ -120,21 +128,24 @@ def run_pipeline(
             round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
         )
         known_provisions = _seed.known_provisions
+        p.done(f"Seed data — {len(_seed.known_titles)} known acts, {len(known_provisions)} provisions")
     except Exception as exc:
-        logger.warning({"event": "seed_load_failed", "error": str(exc)})
+        p.warn(f"Seed data unavailable ({exc}) — continuing without")
         known_provisions = set()
 
     # ── Zone 1: Evidence Discovery OR single-PDF mode ──────────────────────────
     if pdf_path:
+        p.step(f"Loading PDF — {pdf_path}")
         zone1_results = _build_zone1_from_pdf(pdf_path, economy_iso)
+        p.done(f"PDF loaded — {zone1_results[0].act_title}")
     else:
-        zone1_results = _run_zone1(economy, pillar, economy_config)
+        zone1_results = _run_zone1(economy, pillar, economy_config, p)
 
     if not zone1_results:
-        print("[ERROR] Zone 1 produced no documents.", file=sys.stderr)
+        p.fail("Zone 1 produced no documents")
         sys.exit(1)
 
-    print(f"Zone 1: {len(zone1_results)} document(s) to process")
+    p.info(f"Zone 1 complete — {len(zone1_results)} document(s) to process")
 
     # ── Zone 2: Intelligent Mapping ─────────────────────────────────────────────
     cost_logger = CostLogger(economy=economy, pillar=pillar, pdf_path=pdf_path or "")
@@ -143,74 +154,70 @@ def run_pipeline(
         if e.indicator_id.startswith(f"P{pillar}-")
     ]
     if not indicator_ids:
-        print(f"[ERROR] No indicators found in taxonomy.json for pillar {pillar}.", file=sys.stderr)
+        p.fail(f"No indicators found in taxonomy.json for pillar {pillar}")
         sys.exit(1)
+
     all_records: list[OutputRecord] = []
+    n = len(zone1_results)
 
     for i, z1 in enumerate(zone1_results):
-        print(f"  [{i+1}/{len(zone1_results)}] {z1.act_title} ({z1.url})")
-        t_doc = time.monotonic()
+        title = z1.act_title or z1.url
+        prefix = f"[{i+1}/{n}]"
 
-        # Fetch + route
+        p.step(f"{prefix} Fetching — {title}")
         try:
             fetched = route(z1, economy_config)
         except Exception as exc:
-            print(f"    Fetch/route failed: {exc}", file=sys.stderr)
+            p.fail(f"{prefix} Fetch failed — {exc}")
             continue
-
         docs = fetched if isinstance(fetched, list) else [fetched]
+        p.done(f"{prefix} Fetched — {title}")
 
         for doc in docs:
-            # Translate if needed
+            p.step(f"{prefix} Translating")
             try:
                 translated = translate_document(doc, economy_config)
+                p.done(f"{prefix} Translation done")
             except Exception as exc:
-                logger.error({
-                    "event": "translation_failed",
-                    "url": getattr(doc, "source_url", ""),
-                    "error": str(exc),
-                })
+                p.warn(f"{prefix} Translation failed — using raw text")
                 doc.flag_for_review = True
-                print(
-                    f"    [WARN] Translation failed for {getattr(doc, 'source_url', '')}: {exc}. "
-                    "Downstream extraction will use raw (possibly non-Latin) text.",
-                    file=sys.stderr,
-                )
                 translated = doc
 
-            # RAG
+            p.step(f"{prefix} RAG retrieval — {len(indicator_ids)} indicators")
             try:
                 rag_results = retrieve_batch(indicator_ids, translated)
+                p.done(f"{prefix} RAG retrieval done")
             except Exception as exc:
-                print(f"    RAG failed: {exc}", file=sys.stderr)
+                p.fail(f"{prefix} RAG failed — {exc}")
                 continue
 
-            # LLM extraction
+            p.step(f"{prefix} LLM extraction — {pinned.provider_name}/{pinned.model}")
             try:
                 results, llm_cost = extract_provisions(rag_results, translated, known_provisions)
+                found = sum(1 for r in results if getattr(r, "found", False))
+                p.done(f"{prefix} LLM extraction — {found}/{len(indicator_ids)} indicators matched")
             except Exception as exc:
-                print(f"    LLM extraction failed: {exc}", file=sys.stderr)
+                p.fail(f"{prefix} LLM extraction failed — {exc}")
                 continue
 
-            # Validate + archive + confidence flag
+            p.step(f"{prefix} Validating output")
             try:
                 validated = validate_and_flag(results)
+                p.done(f"{prefix} Validation — {len(validated)} records")
             except Exception as exc:
-                print(f"    Validation failed: {exc}", file=sys.stderr)
+                p.warn(f"{prefix} Validation failed — {exc}")
                 validated = []
 
-            elapsed = time.monotonic() - t_doc
             cer = getattr(doc, "cer_score", None)
-
+            t_doc = time.monotonic()
             for vr in validated:
                 record = build_output_record(
                     vr,
                     ocr_quality_cer=cer,
-                    processing_time=int(elapsed),
+                    processing_time=int(time.monotonic() - t_doc),
                 )
                 all_records.append(record)
 
-            # Record LLM cost
             for _, call_data in llm_cost.per_indicator.items():
                 cost_logger.record_llm_call(
                     provider=call_data.get("provider", "unknown"),
@@ -222,21 +229,31 @@ def run_pipeline(
 
     # ── PDPA gate (Singapore only) ──────────────────────────────────────────────
     if economy_iso == "SG" and pillar == 7:
+        p.step("PDPA compliance gate check")
         try:
             check_pdpa_gate(economy_iso, all_records)
+            p.done("PDPA gate passed")
         except PDPAGateError as exc:
-            print(f"[ERROR] PDPA gate failed: {exc}", file=sys.stderr)
+            p.fail(f"PDPA gate failed: {exc}")
             sys.exit(1)
 
     # ── Write outputs ───────────────────────────────────────────────────────────
+    p.step("Writing outputs")
     cost_logger.save(log_dir=Path("logs"))
-
     summary = write_outputs(
         records=all_records,
         output_dir=output_dir,
         economy=economy,
         pillar=pillar,
         skip_invalid=True,
+    )
+    p.done(f"Outputs written — {summary.get('written', 0)} records → {output_dir}/")
+
+    from src.output.cost_logger import CostLogger as _CL
+    report = cost_logger.to_report()
+    p.summary(
+        records=summary.get("written", 0),
+        cost_usd=report.get("total_cost_usd", 0.0),
     )
 
     return summary
@@ -260,109 +277,65 @@ def _build_zone1_from_pdf(pdf_path: str, economy_iso: str) -> list:
     )]
 
 
-def _run_zone1(economy: str, pillar: int, economy_config) -> list:
-    """Run Zone 1 pipeline: probe → crawl → currency check → rank."""
-    from src.fetcher.models import Zone1Result
+def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" = None) -> list:
+    """
+    Run Zone 1 via the pillar-agnostic per-portal strategy.
 
+    Replaces the old probe → BFS crawl → currency → rank pipeline with a
+    single discover() step driven by strategy fields in economies/*.yaml.
+    Falls back to KNOWN seed URLs if all discovery fails.
+    """
     try:
-        from src.crawler.probe import run_probe
-        from src.crawler.crawler import run_crawler, load_known_urls
-        from src.crawler.currency import run_currency_check
-        from src.crawler.ranker import run_ranker
+        from src.crawler.discover import discover
         from src.crawler.seed_loader import load_seed_data
     except ImportError as exc:
         print(f"[WARN] Zone 1 module not available ({exc}), using empty document list.")
         return []
 
+    def _p_step(msg: str) -> None:
+        if p: p.step(msg)
+    def _p_done(msg: str) -> None:
+        if p: p.done(msg)
+    def _p_warn(msg: str) -> None:
+        if p: p.warn(msg)
+
     economy_iso = economy_config.iso_code
     taxonomy = load_taxonomy("taxonomy.json")
-
     _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
 
-    # Probe portals
-    probe_results = []
-    try:
-        probe_results = asyncio.run(run_probe(economy_config, taxonomy))
-    except Exception as exc:
-        print(f"[WARN] Probe failed: {exc}", file=sys.stderr)
-        print("[INFO] Falling back to known seed URLs from Round 1 DB.", file=sys.stderr)
-
-    # If probe failed or returned nothing, fall back to seed known_urls directly
-    if not probe_results:
-        try:
-            from src.crawler.seed_loader import load_seed_data
-            from src.fetcher.models import Zone1Result
-            seed = load_seed_data(
-                economy_iso=economy_iso,
-                pillar=f"P{pillar}",
-                round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
-            )
-            if seed.known_urls:
-                print(f"[INFO] Using {len(seed.known_urls)} known URLs from seed data.", file=sys.stderr)
-                return [
-                    Zone1Result(
-                        url=url,
-                        economy=economy_iso,
-                        act_title="",
-                        discovery_tag="KNOWN",
-                        archive_url="",
-                    )
-                    for url in seed.known_urls
-                ]
-        except Exception as seed_exc:
-            print(f"[WARN] Seed fallback also failed: {seed_exc}", file=sys.stderr)
-        return []
-
-    active_probes = [p for p in probe_results if p.is_active]
-    if not active_probes:
-        print(f"[WARN] No active portals found for {economy}.", file=sys.stderr)
-        return []
-
-    # Load known URLs for Pass 1 seeding
-    known_urls = load_known_urls(_ROUND1_DB, economy_name=economy)
-
-    # Crawl for candidate acts (Pass 1 KNOWN + Pass 2 NEW)
-    try:
-        candidate_acts = asyncio.run(
-            run_crawler(probe_results, economy_config, taxonomy, known_urls)
-        )
-    except Exception as exc:
-        print(f"[WARN] Crawler failed: {exc}", file=sys.stderr)
-        return []
-
-    # Currency check
-    try:
-        currency_results = asyncio.run(run_currency_check(candidate_acts))
-    except Exception as exc:
-        print(f"[WARN] Currency check failed: {exc}", file=sys.stderr)
-        currency_results = candidate_acts  # use raw candidates as fallback
-
-    # Load seed data + rank
+    # Load Round 1 known URLs for this pillar (seed for merge + KNOWN tag)
+    _p_step(f"Zone 1 — Loading seed data for {economy} P{pillar}")
     try:
         seed_data = load_seed_data(
             economy_iso=economy_iso,
             pillar=f"P{pillar}",
-            round1_db_path=_ROUND1_DB,
+            round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
         )
-        ranked = run_ranker(currency_results, seed_data, taxonomy, economy_config, output_dir="logs")
+        known_urls = seed_data.known_urls
+        _p_done(f"Zone 1 — Seed loaded — {len(known_urls)} known URL(s)")
     except Exception as exc:
-        print(f"[WARN] Ranker failed: {exc}", file=sys.stderr)
-        ranked = currency_results  # fall back to all currency results
+        _p_warn(f"Zone 1 — Seed load failed ({exc}) — continuing with empty seed")
+        known_urls = set()
 
-    # Convert to Zone1Result
-    zone1_results = []
-    for act in ranked:
-        url = getattr(act, "act_url", None) or getattr(act, "url", "")
-        title = getattr(act, "act_title", "") or getattr(act, "title", "Unknown")
-        tag = getattr(act, "discovery_tag", "KNOWN")
-        archive = getattr(act, "archive_url", "")
-        zone1_results.append(Zone1Result(
-            url=url,
-            economy=economy_iso,
-            act_title=title,
-            discovery_tag=tag,
-            archive_url=archive or "",
-        ))
+    # Discover acts via portal strategy
+    _p_step(f"Zone 1 — Discovering acts for {economy} P{pillar} via portal strategy")
+    try:
+        zone1_results = asyncio.run(
+            discover(economy_config, pillar, taxonomy, known_urls)
+        )
+        known_count = sum(1 for z in zone1_results if z.discovery_tag == "KNOWN")
+        new_count   = sum(1 for z in zone1_results if z.discovery_tag == "NEW")
+        _p_done(
+            f"Zone 1 — Discovery complete — {len(zone1_results)} act(s) "
+            f"({known_count} KNOWN, {new_count} NEW)"
+        )
+    except Exception as exc:
+        _p_warn(f"Zone 1 — Discovery failed ({exc}) — falling back to seed URLs")
+        from src.fetcher.models import Zone1Result
+        zone1_results = [
+            Zone1Result(url=u, economy=economy_iso, act_title="", discovery_tag="KNOWN", archive_url="")
+            for u in known_urls
+        ]
 
     return zone1_results
 

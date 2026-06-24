@@ -643,6 +643,11 @@ async def run_probe(
         )
         all_results.append(result)
 
+    # Release the shared Chromium started by probe_js_page — the crawler stage
+    # runs in a separate event loop and must start its own browser.
+    from src.crawler.crawl4ai_runner import close_shared_crawler  # noqa: PLC0415
+    await close_shared_crawler()
+
     _write_probe_logs(all_results, economy_config.economy_name, output_dir)
 
     ranked = _rank_portals(all_results)

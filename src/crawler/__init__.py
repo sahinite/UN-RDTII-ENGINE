@@ -8,6 +8,8 @@ Public API:
     run_crawler(probes, econ, pillar) -> list[CandidateAct]  — BFS crawl discovered URLs
     run_currency_check(acts) -> list[CurrencyResult] — validate act URLs + Wayback archive
     run_ranker(currency, seed, tax, econ, output_dir) -> list[RankedAct]  — score + gate
+    discover(economy_config, pillar, taxonomy, known_urls) -> list[Zone1Result] — strategy-driven discovery
+    build_pillar_keywords(taxonomy, pillar) -> list[str]    — pillar-scoped keyword set
 
 Models:
     ProbeResult, CandidateAct, CurrencyResult, RankedAct, SeedData
@@ -27,6 +29,7 @@ from src.crawler.currency import run_currency_check
 from src.crawler.ranker import RankedAct, RankerError, run_ranker
 from src.crawler.seed_loader import SeedData, load_seed_data
 from src.crawler.exceptions import ConfigError, CrawlerError, ProbeError
+from src.crawler.discover import ZONE2_MAX_ACTS, build_pillar_keywords, discover
 
 __all__ = [
     # Taxonomy
@@ -37,6 +40,11 @@ __all__ = [
     "run_crawler",
     "run_currency_check",
     "run_ranker",
+    "discover",
+    # Pillar scoping
+    "build_pillar_keywords",
+    # Caps
+    "ZONE2_MAX_ACTS",
     # Seed data
     "load_seed_data",
     # Models

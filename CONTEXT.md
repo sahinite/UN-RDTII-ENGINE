@@ -672,3 +672,84 @@ Default `false` for production. Set `true` only for scanned-PDF runs where OCR c
 Before: `engine_indicators - known_indicators` always empty (all 10 indicators are in the kit). After: rows with `discovery_tag=="NEW"` whose `(law_name, article)` doesn't match the kit's anchor-parsed provision keys. Score: `min(count * 4, 20)`.
 
 **Final state:** 556 passed, 2 skipped across full test suite (no regressions).
+
+---
+
+## CLI Progress Display + Anti-Blocking Crawler
+
+**Goal:** Give the operator live visibility into every pipeline step/sub-step, and let the crawler get through bot-detection on JS gov portals (Singapore SSO) instead of hanging on repeated 403s + Playwright `wait_for` timeouts.
+
+**New module — `src/cli/progress.py`:**
+- `Progress` — ANSI spinner with a primary step line (`⠋ label  2.1s / 5.3s total`) and an optional **substep** line below it (`└─ …`). Background thread redraws at 10 Hz; clears prior lines so the display stays in place. Falls back to plain `→ label` lines when stdout is not a TTY.
+- API: `step()`, `substep()`, `done()`, `warn()`, `fail()`, `info()`, `summary(records, cost_usd)`.
+- **Global singleton** so deep modules report sub-steps without signature changes: `set_progress(p)` (called once in `main.py run_pipeline`) and module-level `substep(text)` (no-op when no progress instance is set — safe in tests / cost_logger).
+
+**Substep wiring (live "what's happening now"):**
+- `src/fetcher/extractors/ocr_stage1.py` — `OCR page N/total (engine)` in the main loop; `LLM vision OCR page N/total` in the `_llm_ocr_fallback` loop.
+- `src/retrieval/rag.py` (`retrieve_batch`) — `Building FAISS index — N chunks`, `Building BM25 index — N chunks`, then `RAG retrieve <indicator> (i/total)` per indicator.
+- `src/mapping/mapper.py` (`extract_provisions`) — `LLM call <indicator> (i/total)` per indicator.
+- `src/crawler/crawler.py` (`_crawl_bfs`) — `Pass P [engine] page/budget dDEPTH · <url>` per URL fetched, plus `HTTP 403 blocked · <url>` on blocks.
+
+**Anti-blocking crawler — `src/crawler/crawl4ai_runner.py` (rewritten):**
+- `_stealth_browser_config()` — `BrowserConfig(enable_stealth=True, …)` with a realistic desktop-Chrome UA + full `Sec-Fetch-*`/`Accept-Language` headers (headless Chromium's default `HeadlessChrome` UA is what SSO blocks).
+- `_build_run_config(wait_for, timeout_ms)` — `CrawlerRunConfig(magic=True, simulate_user=True, override_navigator=True, …)`; `wait_for` is optional.
+- `fetch_with_playwright()` — now **two attempts**: (1) with the `wait_for` Act-link selector; (2) on timeout/failure, retry once **without** the selector and return whatever rendered (avoids burning the full `page_timeout` on blocked/empty pages, and still lets the caller inspect HTML / detect a block). Each `arun` wrapped in `asyncio.wait_for(timeout_ms/1000 + 10)` hard ceiling so a single fetch can never hang forever.
+- `probe_js_page()` — also routed through stealth config so the probe stage isn't blocked.
+- Crawl4AI `verbose=False` everywhere — kills the earlier `INIT Crawl4AI` / `HTTP 403` stdout spam.
+
+**Per-URL crawl logging:** `_crawl_bfs` now logs `[CRAWL] pass=… GET <url>` / `200 OK (Nms) K link(s)` / `HTTP 403 blocked` via the module logger (INFO; dropped from console by default, so the spinner stays clean) — and every URL+status is already persisted to `logs/crawl_<iso>_<ts>.jsonl`. Live on-screen view comes from the substep line.
+
+**Entry points** (`main.py`, `evaluate.py`, `batch_run.py`, `tools/cost_logger.py`) call `load_dotenv()` before any provider/config import so `.env` `LLM_PROVIDER` / `LLM_MODEL` / API keys are honoured.
+
+**Tests:** `tests/test_crawler.py` (28) green — `_fetch_with_playwright` mock signature `(url, wait_for, timeout_ms)` preserved.
+
+---
+
+### ✅ Completed: [86ey22k30] Pillar-Agnostic Per-Economy Portal Strategy (Singapore first)
+
+**Problem:** `python main.py --economy Singapore --pillar 7` hangs 30+ minutes because (a) Zone 1 probed SSO with the full P6+P7 keyword set regardless of `--pillar`; (b) SSO's configured search URL (`Search?SearchAct={keyword}`) opens a blank JS SPA form that silently fails; (c) there was no per-economy declaration of how to reach, discover, and fetch from each portal.
+
+**Files created:**
+- `src/crawler/transport.py` — transport ladder: rung 1 plain httpx → rung 2 httpx+browser headers → rung 3 Playwright stealth. `_is_real_response()` detects 403/JS-shell. Rung 1 skipped for `anti_bot != "none"` portals; rung 3 only when `transport_fallback == "playwright_stealth"`.
+- `src/crawler/discover.py` — single `discover()` entry point replacing probe→crawl→currency→rank. `build_pillar_keywords()` filters taxonomy by `P{pillar}-` prefix. `_discover_index()` fetches `index_urls`, parses `/Act/` and `/SL/` hrefs, BM25-ranks vs pillar keywords. `_seed_fallback()` returns KNOWN URLs on failure. KNOWN results always included; NEW above `NEW_SCORE_THRESHOLD` fill remaining slots up to `ZONE2_MAX_ACTS`.
+- `tests/test_portal_strategy.py` — 36 tests (all passing): Portal model fields, transport ladder, pillar scoping, index discovery, pdf_endpoint routing, graceful degradation.
+- `tests/fixtures/sso_browse_index.html` — minimal SSO index fixture for tests.
+- `docs/prd/sg_portal_findings.md` — live-validated evidence behind each SG strategy declaration.
+
+**Files changed:**
+- `src/config/economy_config.py` — `Portal` model extended with 6 new fields (backward-compatible defaults): `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`.
+- `economies/singapore.yaml` — fully updated: SSO gets `anti_bot: header_spoof`, `discovery: index`, two `index_urls` (Acts + SL browse indexes), `fetch: pdf_endpoint`, `pdf_view_suffix: "?ViewType=Pdf"`, `transport_fallback: playwright_stealth`. Gazette gets `discovery: TBD`, `fetch: TBD`.
+- `main.py` — `_run_zone1()` replaced: now calls `asyncio.run(discover(...))` with seed data; falls back to raw KNOWN URLs on exception.
+- `src/fetcher/router.py` — added `_find_portal_for_url()`, `_rewrite_to_pdf_url()`; `route()` rewrites act URLs to PDF view before download when `fetch: pdf_endpoint`.
+- `src/crawler/__init__.py` — exports `discover`, `build_pillar_keywords`, `ZONE2_MAX_ACTS`.
+
+**Key constants (env-configurable):**
+- `ZONE2_MAX_ACTS` (default 5) — maximum acts sent to Zone 2
+- `DISCOVER_BUDGET_S` (default 120.0) — wall-clock deadline for discover()
+- `NEW_SCORE_THRESHOLD` (default 0.05) — minimum BM25 score for NEW acts; below threshold acts are dropped, not padded
+
+**ADR-037 — Zone 1 is now a single `discover()` step, not a 4-stage pipeline**
+The old `probe → BFS crawl → currency → rank` pipeline is replaced by `discover()`. The probe was silently failing on SSO's JS search; the BFS crawl was expanding into hundreds of cross-reference pages; there was no pillar scoping. `discover()` is strategy-driven (reads YAML), budget-bounded, and pillar-scoped. The old pipeline steps (`run_probe`, `run_crawler`, `run_currency_check`, `run_ranker`) remain importable for backward compatibility but are no longer called by `main.py`.
+
+**ADR-038 — `transport.py` ladder stops at first real 200, never retries all rungs**
+Rung 1 (plain httpx) is skipped entirely for portals with `anti_bot != "none"` because those portals are known to block plain requests — no wasted attempt. Rung 3 (Playwright) is only invoked when `portal.transport_fallback == "playwright_stealth"` — most portals never start a browser. `_is_real_response()` combines HTTP status, body length, and JS-shell detection so a 200 with a 50-char JS wrapper doesn't fool the ladder.
+
+**ADR-039 — KNOWN seeds are never truncated by `ZONE2_MAX_ACTS`**
+`discover()` merges KNOWN results first (always kept), then appends NEW results above threshold until the total reaches `ZONE2_MAX_ACTS`. If there are more KNOWN results than the cap, all are kept (soft limit). This ensures Round 1 seed acts are never dropped for relevance ordering reasons.
+
+**ADR-040 — `pdf_endpoint` routing rewrites the act URL before download, not after**
+`_find_portal_for_url()` matches by registered domain (via `tldextract`). If the portal has `fetch: pdf_endpoint` and a `pdf_view_suffix`, the URL is rewritten in `route()` before `download()` is called. The existing TEXT_PDF→pdfplumber path handles the result with no OCR. This avoids adding a new extractor and reuses the proven Zone 2 PDF path.
+
+**Final state:** 36 new tests pass; 551 pre-existing tests pass; 4 pre-existing failures confirmed pre-existing (not regressions).
+
+---
+
+### Crawl performance — the 30-minute hang fix
+
+Symptom: Pass 1 sat at "Crawling 2 portal(s)" for 30+ min, slowly ticking page 5→6→…→35 of a **310-page** budget. Three compounding causes, all fixed:
+
+1. **Fresh Chromium per URL.** `fetch_with_playwright` launched a new browser on every call (~3-8s cold start each). Now a **single shared browser** is started once (`_get_shared_crawler`) and reused for every `arun()`; `close_shared_crawler()` tears it down. Called at the end of `run_crawler` (after both passes) **and** at the end of `run_probe` — the probe and crawl run in separate `asyncio.run()` loops, so the probe's browser must be released before the crawler opens its own (a browser is bound to the loop that created it).
+2. **Pass 1 BFS-expanding known acts.** Pass 1 seeds from the Round 1 DB (URLs we already know are the acts) but was recursing `_CRAWL_MAX_DEPTH=2` into every cross-reference link → the 310-page explosion. Pass 1 now runs at **`max_depth=0`** (confirm the seed pages, don't expand). Seeds are also **deduped to their base page** (`_dedupe_seed_urls` strips `#fragment` so the dozens of `…/Act/PDPA2012#pr26-` anchor URLs collapse to one) and **capped** at `CRAWL_KNOWN_MAX_SEEDS` (default 20).
+3. **Synthetic per-page delay.** Dropped `simulate_user` + `mean_delay=0.4` from the run config — `magic=True` already covers anti-bot; the extra synthetic mouse-movement added seconds per page across the BFS.
+
+New env knob: `CRAWL_KNOWN_MAX_SEEDS` (default 20). Existing `CRAWL_MAX_PAGES` / `CRAWL_MAX_DEPTH` still apply to Pass 2 (NEW discovery).

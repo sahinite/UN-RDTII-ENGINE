@@ -6,10 +6,16 @@ Extracted from crawler.py so it can be imported, swapped, or mocked independentl
 
 Chosen over Scrapy/custom crawler for JS-rendering support — see
 RDTII_Engine_Technical_Plan_v2.docx §6 Technology Stack.
+
+Anti-blocking: government portals (notably Singapore SSO) fingerprint headless
+browsers and return 403 / serve an empty shell. We counter with Crawl4AI's
+stealth + "magic" mode (patches navigator.webdriver, simulates a real user,
+realistic UA + headers). See _stealth_browser_config / _build_run_config.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -25,12 +31,102 @@ logger = logging.getLogger(__name__)
 SSO_WAIT_FOR = "css:a[href*='/Act/']"
 SSO_TIMEOUT_MS = 20000
 
+# A realistic desktop Chrome fingerprint. Headless Chromium's default UA leaks
+# "HeadlessChrome", which several gov portals block outright.
+_REAL_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_REAL_HEADERS = {
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
+
 
 # ── Portal type detection ──────────────────────────────────────────────────────
 
 def is_js_portal(portal: "Portal") -> bool:
     """Return True when the Portal's YAML config declares js_required=true."""
     return portal.js_required
+
+
+# ── Config builders (stealth / anti-bot) ───────────────────────────────────────
+
+def _stealth_browser_config(headless: bool = True):
+    """BrowserConfig tuned to look like a real desktop Chrome session."""
+    from crawl4ai import BrowserConfig  # type: ignore[import]
+
+    return BrowserConfig(
+        headless=headless,
+        enable_stealth=True,            # patch navigator.webdriver, plugins, etc.
+        user_agent=_REAL_USER_AGENT,
+        headers=_REAL_HEADERS,
+        viewport_width=1366,
+        viewport_height=900,
+        ignore_https_errors=True,
+    )
+
+
+def _build_run_config(wait_for: str | None, timeout_ms: int):
+    """CrawlerRunConfig with magic mode (anti-bot) and optional wait selector.
+
+    NOTE: ``magic=True`` already bundles user-simulation and navigator spoofing.
+    We deliberately omit ``simulate_user`` / ``mean_delay`` here — those add
+    several seconds of synthetic mouse movement per page, which on a multi-URL
+    BFS turns a 1-minute crawl into 30+ minutes.
+    """
+    from crawl4ai import CacheMode, CrawlerRunConfig  # type: ignore[import]
+
+    kwargs = dict(
+        cache_mode=CacheMode.BYPASS,
+        page_timeout=timeout_ms,
+        magic=True,                 # bundle of anti-detection tricks
+        override_navigator=True,    # spoof navigator props
+        verbose=False,
+    )
+    if wait_for:
+        kwargs["wait_for"] = wait_for
+    return CrawlerRunConfig(**kwargs)
+
+
+# ── Shared browser (reused across the whole crawl) ──────────────────────────────
+#
+# Launching a fresh Chromium per URL costs ~3-8s each — across a BFS of dozens of
+# pages that alone is the bulk of a "stuck" crawl. We keep ONE browser open for
+# the duration of run_crawler and reuse it for every arun(). run_crawler must call
+# close_shared_crawler() in a finally to release it.
+
+_shared_crawler = None  # type: ignore[var-annotated]
+
+
+async def _get_shared_crawler():
+    global _shared_crawler
+    if _shared_crawler is None:
+        from crawl4ai import AsyncWebCrawler  # type: ignore[import]
+        _shared_crawler = AsyncWebCrawler(config=_stealth_browser_config())
+        await _shared_crawler.start()
+        logger.info("[CRAWL] shared Chromium started (reused for all URLs)")
+    return _shared_crawler
+
+
+async def close_shared_crawler() -> None:
+    """Tear down the reused browser. Safe to call when none was started."""
+    global _shared_crawler
+    if _shared_crawler is not None:
+        try:
+            await _shared_crawler.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _shared_crawler = None
+        logger.info("[CRAWL] shared Chromium closed")
 
 
 # ── Crawl4AI page fetch ────────────────────────────────────────────────────────
@@ -40,22 +136,27 @@ async def probe_js_page(url: str) -> tuple[str, bool]:
     Minimal Crawl4AI fetch for portal probing (no wait selector, no scroll JS).
 
     Used by probe.py to check hit counts on JS-rendered search pages.
-    Returns ``(html_content, success)``.
+    Returns ``(html_content, success)``. Uses stealth mode so probes are not
+    blocked by bot-detection on the target portal.
     """
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 
     try:
-        from crawl4ai import AsyncWebCrawler  # type: ignore[import]
+        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
     except ImportError as exc:
         raise CrawlerError(
             "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"
         ) from exc
 
     try:
-        async with AsyncWebCrawler(headless=True) as crawler:
-            result = await crawler.arun(url=url)
-        html = getattr(result, "html", "") or ""
-        return html, result.success
+        crawler = await _get_shared_crawler()
+        run_cfg = _build_run_config(wait_for=None, timeout_ms=SSO_TIMEOUT_MS)
+        result = await asyncio.wait_for(
+            crawler.arun(url=url, config=run_cfg),
+            timeout=(SSO_TIMEOUT_MS / 1000) + 10,
+        )
+        html = getattr(result, "html", "") or getattr(result, "cleaned_html", "") or ""
+        return html, bool(getattr(result, "success", False))
     except Exception as exc:
         logger.warning("Playwright probe failed for %s: %s", url, exc)
         return "", False
@@ -67,36 +168,54 @@ async def fetch_with_playwright(
     timeout_ms: int,
 ) -> tuple[str, int]:
     """
-    Fetch a JS-rendered URL via Crawl4AI + Playwright.
+    Fetch a JS-rendered URL via Crawl4AI + Playwright, in stealth/magic mode,
+    reusing the shared browser instance.
 
     Returns ``(html_content, http_status)``.
     Status codes: 200 = success, 503 = Crawl4AI reported failure, 0 = exception/timeout.
+
+    Single attempt with the ``wait_for`` selector; on timeout/failure we retry
+    once WITHOUT the selector so a blocked/empty page returns fast and the caller
+    can still inspect whatever rendered.
     """
-    # Deferred import to keep startup fast and allow test mocking of the module name
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 
     try:
-        from crawl4ai import AsyncWebCrawler, CacheMode, CrawlerRunConfig  # type: ignore[import]
+        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
     except ImportError as exc:
         raise CrawlerError(
             "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"
         ) from exc
 
-    try:
-        config = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            wait_for=wait_for,
-            page_timeout=timeout_ms,
-            verbose=False,
-            js_code="window.scrollTo(0, document.body.scrollHeight);",
+    hard_ceiling = (timeout_ms / 1000) + 10
+
+    async def _attempt(sel: str | None) -> tuple[str, int]:
+        crawler = await _get_shared_crawler()
+        run_cfg = _build_run_config(wait_for=sel, timeout_ms=timeout_ms)
+        result = await asyncio.wait_for(
+            crawler.arun(url=url, config=run_cfg),
+            timeout=hard_ceiling,
         )
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(url=url, config=config)
-            if result.success:
-                return result.html or result.cleaned_html or "", 200
-            return "", 503
-    except Exception as exc:
+        if getattr(result, "success", False):
+            return (result.html or result.cleaned_html or ""), 200
+        return "", 503
+
+    # Attempt 1: with wait selector
+    try:
+        html, status = await _attempt(wait_for)
+        if status == 200 and html:
+            return html, status
+    except asyncio.TimeoutError:
+        logger.info("Playwright wait_for timed out for %s — retrying without selector", url)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Playwright wait_for attempt failed for %s: %s", url, exc)
+
+    # Attempt 2: no wait selector — grab whatever rendered
+    try:
+        return await _attempt(None)
+    except asyncio.TimeoutError:
+        logger.info("SSO_LOAD_TIMEOUT: %s", url)
+        return "", 0
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Playwright fetch failed for %s: %s", url, exc)
-        if "SSO_LOAD_TIMEOUT" in str(exc) or "timeout" in str(exc).lower():
-            logger.info("SSO_LOAD_TIMEOUT: %s", url)
         return "", 0

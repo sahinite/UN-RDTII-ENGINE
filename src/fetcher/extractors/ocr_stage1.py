@@ -12,6 +12,7 @@ import io
 import time
 from typing import TYPE_CHECKING, Literal
 
+from src.cli.progress import substep
 from src.fetcher.extractors.llm_ocr import LLMOCRUnavailableError, run_llm_ocr
 from src.fetcher.extractors.pdf_text import ReclassifyToScannedError, extract_text_pdf
 from src.fetcher.logger import get_logger
@@ -246,7 +247,9 @@ def _llm_ocr_fallback(
     page_texts: list[str] = []
     page_cers: list[float] = []
 
+    total_pages = len(raw_bytes)
     for i, img in enumerate(raw_bytes):
+        substep(f"LLM vision OCR page {i + 1}/{total_pages}")
         try:
             text, cer, _in_tok, _out_tok = run_llm_ocr(img)
             page_texts.append(text)
@@ -331,6 +334,7 @@ def extract_ocr_stage1(
 
     for i, image_bytes in enumerate(images):
         page_start = time.monotonic()
+        substep(f"OCR page {i + 1}/{page_count} ({engine})")
 
         try:
             if engine == "tesseract":

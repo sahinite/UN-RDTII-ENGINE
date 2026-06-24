@@ -19,6 +19,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Union
 
+from src.cli.progress import substep
 from src.retrieval.bm25_index import build_bm25
 from src.retrieval.chunker import chunk_document
 from src.retrieval.config import (
@@ -119,11 +120,15 @@ def retrieve_batch(
     if not chunks:
         return {iid: [] for iid in indicator_ids}
 
+    substep(f"Building FAISS index — {len(chunks)} chunks")
     emb_index = build_index(chunks)
+    substep(f"Building BM25 index — {len(chunks)} chunks")
     bm25_idx = build_bm25(chunks)
 
     results: dict[str, list[RetrievedChunk]] = {}
-    for iid in indicator_ids:
+    total_iids = len(indicator_ids)
+    for i, iid in enumerate(indicator_ids, 1):
+        substep(f"RAG retrieve {iid} ({i}/{total_iids})")
         try:
             indicator = get_indicator(iid)
         except KeyError:

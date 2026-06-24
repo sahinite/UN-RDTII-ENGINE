@@ -10,12 +10,23 @@ portals:
   - name: Singapore Statutes Online
     url: https://sso.agc.gov.sg
     type: primary
-    search_url_pattern: "https://sso.agc.gov.sg/Search?SearchAct={keyword}"
-    js_required: true
-    playwright_wait_for: "css:a[href*='/Act/']"
-    playwright_timeout_ms: 20000
-    follow_pagination: true
+    # Strategy: browser-like headers bypass SSO's 403 bot-block (plain httpx → 403, headers → 200)
+    anti_bot: header_spoof
+    # Discover acts from the server-rendered in-force browse indexes (not the JS search SPA)
+    discovery: index
+    index_urls:
+      - "https://sso.agc.gov.sg/Browse/Act/Current/All?PageSize=500&SortBy=Title&SortOrder=ASC"
+      - "https://sso.agc.gov.sg/Browse/SL/Current/All?PageSize=500&SortBy=Title&SortOrder=ASC"
+    # Fetch complete act text via the PDF print endpoint (text-layer PDF, no OCR needed)
+    fetch: pdf_endpoint
+    pdf_view_suffix: "?ViewType=Pdf"
+    # Escalate to stealth Playwright only if header_spoof is also blocked
+    transport_fallback: playwright_stealth
   - name: Singapore Government Gazette
     url: https://www.egazette.gov.sg
     type: secondary
+    anti_bot: none
+    # Discovery and fetch strategy TBD — implemented after SSO is verified
+    discovery: TBD
+    fetch: TBD
 llm_override: null   # uses global 5-tier cascade from .env

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, HttpUrl, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -76,11 +76,25 @@ class Portal(BaseModel):
     type: Literal["primary", "secondary"] = "primary"
     search_url_pattern: str | None = None
 
-    # Playwright / JS-rendering config (all optional — static portals omit these)
+    # Playwright / JS-rendering config (retained for compatibility, off the SSO hot path)
     js_required: bool = False               # set True when portal needs JS rendering
     playwright_wait_for: str | None = None  # CSS/XPath selector to wait for before parsing
     playwright_timeout_ms: int | None = None  # page-load timeout; None → module default
     follow_pagination: bool = False         # True → follow "Next" links at same BFS depth
+
+    # ── Per-economy portal strategy fields ────────────────────────────────────
+    # How to reach the portal without bot-blocks
+    anti_bot: Literal["none", "header_spoof", "playwright_stealth"] = "none"
+    # How to find pillar-relevant instruments
+    discovery: Literal["index", "search", "search_js", "seed_only", "TBD"] = "TBD"
+    # How to obtain complete document text
+    fetch: Literal["pdf_endpoint", "html", "html_wholedoc", "html_js", "pdf_link", "TBD"] = "TBD"
+    # URLs of in-force browse indexes (used when discovery: index)
+    index_urls: list[str] = Field(default_factory=list)
+    # Query-string suffix to rewrite act URL to its PDF view (used when fetch: pdf_endpoint)
+    pdf_view_suffix: str | None = None
+    # Escalation target when httpx-based fetch is blocked
+    transport_fallback: Literal["playwright_stealth"] | None = None
 
 
 # ── EconomyConfig ──────────────────────────────────────────────────────────────
