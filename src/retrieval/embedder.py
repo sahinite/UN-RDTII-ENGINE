@@ -26,9 +26,24 @@ logger = logging.getLogger("retrieval.embedder")
 _model = None
 
 
+def quiet_hf_hub() -> None:
+    """Silence the benign 'unauthenticated requests to the HF Hub' notice.
+
+    Local model weights are cached, so no token is needed — this just hides the
+    rate-limit reminder huggingface_hub prints on load. Shared by the embedder
+    and reranker model loaders.
+    """
+    import logging as _logging
+    import os as _os
+    _os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
+
+
 def _get_model():
     global _model
     if _model is None:
+        quiet_hf_hub()
         from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
         logger.info({"event": "embedding_model_loaded", "model": "all-MiniLM-L6-v2"})

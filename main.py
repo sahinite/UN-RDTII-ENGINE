@@ -312,7 +312,11 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
             round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
         )
         known_urls = seed_data.known_urls
-        _p_done(f"Zone 1 — Seed loaded — {len(known_urls)} known URL(s)")
+        _match_mode = "by title" if not known_urls else "by url+title"
+        _p_done(
+            f"Zone 1 — Seed loaded — {len(seed_data.known_titles)} known act(s), "
+            f"{len(known_urls)} URL(s) (matching {_match_mode})"
+        )
     except Exception as exc:
         _p_warn(f"Zone 1 — Seed load failed ({exc}) — continuing with empty seed")
         known_urls = set()

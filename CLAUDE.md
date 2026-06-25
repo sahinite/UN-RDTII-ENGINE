@@ -44,35 +44,57 @@ pytest tests/test_economy_config.py
 
 Two zones wired together in `main.py`:
 
-### Zone 1 — Evidence Discovery
-- `src/config/economy_config.py` — Pydantic `EconomyConfig` loader; reads `economies/{name}.yaml`
-- `src/crawler/probe.py` — auto-probes government portals for document links
-- `src/crawler/crawl4ai_runner.py` — Crawl4AI + Playwright-based document fetcher
-- `src/crawler/currency.py` — checks document freshness/currency
-- `src/crawler/ranker.py` — ranks fetched documents by relevance
+### Zone 1 — Evidence Discovery (strategy-driven)
+- `src/config/economy_config.py` — Pydantic `EconomyConfig` + `Portal` loader; reads `economies/{name}.yaml`
+- `src/crawler/discover.py` — **primary entry point**: single `discover()` step driven by per-portal strategy fields in YAML (replaces old probe→crawl→currency→rank pipeline)
+- `src/crawler/transport.py` — transport ladder: plain httpx → httpx+browser headers → Playwright stealth
+- `src/crawler/seed_loader.py` — Round 1 DB xlsx + Sample CSV parser; builds KNOWN URL/title/provision sets
+- `src/crawler/crawl4ai_runner.py` — Crawl4AI + Playwright stealth browser (shared singleton)
+- `src/crawler/probe.py` — taxonomy loader + keyword probe (legacy; `discover.py` is the active path)
+- `src/crawler/crawler.py` — BFS crawler (legacy; used only if discover() falls back)
+- `src/crawler/currency.py` — currency/freshness check (legacy)
+- `src/crawler/ranker.py` — ranking + LLM gate (legacy)
 
 ### Zone 2 — Intelligent Mapping
-- `src/fetcher/router.py` — routes documents to PDF/HTML path; `segmenter.py` splits long docs
-- `src/ocr/processor.py` — two-stage OCR cascade (Tesseract for Latin, PaddleOCR for Asian scripts)
-- `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — chunk → embed → BM25+dense hybrid RAG
-- `src/llm/client.py` — 5-tier provider cascade (Anthropic → OpenAI → Groq → Ollama ×2); one provider pinned per run via `LLM_PROVIDER` env var, fallback only on runtime failure
-- `src/mapping/mapper.py` — maps retrieved passages to RDTII indicators
-- `src/output/writer.py` — CSV/JSON output; `validator.py` checks URLs/citations
+- `src/fetcher/router.py` — routes documents to PDF/HTML path; `segmenter.py` splits long docs; `pdf_endpoint` rewrite for portals with `fetch: pdf_endpoint`
+- `src/fetcher/extractors/pdf_text.py` — pdfplumber text extraction + `legislation_meta.py` (law_number_ref/last_amended)
+- `src/fetcher/extractors/ocr_stage1.py` — Tesseract/PaddleOCR with CER gate
+- `src/fetcher/extractors/html_extractor.py` — BeautifulSoup + anchor map extraction
+- `src/fetcher/extractors/llm_ocr.py` — LLM vision OCR fallback
+- `src/ocr/processor.py` — two-stage OCR cascade (Stage 1 local → Stage 2 Azure DI/Mistral on CER≥5%)
+- `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — chunk → embed → BM25+dense hybrid RAG with cross-encoder rerank
+- `src/mapping/mapper.py` — maps retrieved passages to RDTII indicators; provision-level KNOWN/NEW tagging
+- `src/mapping/llm_client.py` — 5-tier provider cascade; one provider pinned per run via `LLM_PROVIDER` env var
+- `src/mapping/parser.py` — LLM response parser with verbatim assertion + provision tag resolution
+- `src/mapping/prompts.py` — system/user prompt builder with Rules 1–9
+- `src/output/writer.py` — CSV (13-col UTF-8-BOM) + JSON (document-level + `provisions[]` envelope)
+- `src/output/validator.py` — URL validation + Wayback/local archiving (deduped per URL)
+- `src/output/cost_logger.py` — per-component cost accumulation → `logs/cost_report.json`
+- `src/cli/progress.py` — single-line ANSI spinner with substep reporting
 
 ### Economy Configs
-`economies/*.yaml` files declare per-economy: `script_type`, `languages`, `ocr_engine`, `portals` list (unlimited, no manual pillar tagging), and optional `llm_override`. Singapore (`sg.yaml`) is the reference. Thailand (`th.yaml`) is the second.
+`economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference. 11 economy files exist (SG, AU, MY, TH, VN, PH, KH, MM, LA, BN, ID).
 
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
 2. `openai` / `gpt-4o`
-3. `groq` / `qwen3-32b` (DeepSeek no longer on Groq as of June 2026; fallback: `qwen3.6-27b`)
+3. `groq` / `qwen3-32b` (fallback: `qwen3.6-27b`)
 4. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
 5. `ollama` / `granite3-8b` (offline, Apache 2.0)
 
 > Llama 3.3 is explicitly excluded — non-Apache 2.0 license.
 
+### Zone 1 Discovery Strategy (per-portal YAML-driven)
+Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies:
+- `discovery: index` — fetch browse index pages (`index_urls`), BM25-rank titles against pillar-scoped keywords, merge KNOWN seeds, apply taxonomy exclusions
+- `discovery: seed_only` — use only Round 1 KNOWN URLs
+- `discovery: TBD` — portal skipped (not yet implemented)
+- `fetch: pdf_endpoint` — rewrite act URL with `pdf_view_suffix` (e.g. `?ViewType=Pdf`) for text-layer PDF
+- `anti_bot: header_spoof` — browser-like headers bypass 403 bot blocks
+- `transport_fallback: playwright_stealth` — escalate to stealth Playwright if headers fail
+
 ### Cost Logging
-`tools/cost_logger.py` measures **actual** (not estimated) per-component costs (OCR / embedding / LLM / crawling) and writes `logs/cost_report.json`. Hackathon judges verify these numbers against the code.
+`src/output/cost_logger.py` accumulates **actual** per-component costs (OCR / embedding / LLM / crawling) and writes `logs/cost_report.json`. `tools/cost_logger.py` is a standalone CLI for benchmarking. Hackathon judges verify these numbers against the code.
 
 ## Key Data Paths
 - `data/sample_kit/` — Round 1 ground truth for evaluation
