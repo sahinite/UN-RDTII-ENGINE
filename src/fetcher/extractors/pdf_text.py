@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pdfplumber
 
+from src.fetcher.extractors.legislation_meta import extract_legislation_meta
 from src.fetcher.logger import get_logger
 from src.fetcher.models import CostLogEntry, FetchedDocument
 
@@ -149,6 +150,7 @@ def extract_text_pdf(
         })
 
     section_hierarchy = extract_section_hierarchy(full_text)
+    law_number_ref, last_amended = extract_legislation_meta(full_text, zone1_result.url)
 
     cost_log = CostLogEntry(
         engine="pdfplumber",
@@ -174,6 +176,8 @@ def extract_text_pdf(
         flag_for_review=len(full_text) < 100 and page_count > 1,
         flag_reason="low_text_yield" if len(full_text) < 100 and page_count > 1 else None,
         cost_log_entry=cost_log,
+        law_number_ref=law_number_ref,
+        last_amended=last_amended,
     )
     doc.validate()
 

@@ -365,19 +365,40 @@ class TestOcrStage1:
                 ocr_stage1.extract_ocr_stage1(scanned_pdf_bytes, sg_zone1, sg_config)
         assert exc_info.value.cer == pytest.approx(0.08)
 
-    def test_missing_tesseract_binary_raises_dependency_error(self, sg_zone1, sg_config):
+    def test_missing_tesseract_falls_back_to_pdfplumber(self, sg_zone1, sg_config):
+        """Missing OCR engine + text-layer PDF → cascade to pdfplumber (no raise)."""
         from src.fetcher.extractors import ocr_stage1
         from src.fetcher.extractors.ocr_stage1 import DependencyError
 
-        def _raise_not_found(*a, **kw):
-            raise DependencyError("tesseract not found; run: apt-get install tesseract-ocr")
-
+        sentinel = object()
         with (
             patch.object(ocr_stage1, "pdf_to_images", return_value=[b"PNG"]),
-            patch.object(ocr_stage1, "run_tesseract", side_effect=DependencyError("tesseract not found; run: apt-get install tesseract-ocr")),
+            patch.object(ocr_stage1, "run_tesseract",
+                         side_effect=DependencyError("tesseract not found; run: apt-get install tesseract-ocr")),
+            patch.object(ocr_stage1, "extract_text_pdf", return_value=sentinel) as mock_pdf,
         ):
-            with pytest.raises(DependencyError, match="tesseract not found"):
-                ocr_stage1.extract_ocr_stage1(b"%PDF-1.4", sg_zone1, sg_config)
+            result = ocr_stage1.extract_ocr_stage1(b"%PDF-1.4", sg_zone1, sg_config)
+        assert result is sentinel
+        mock_pdf.assert_called_once()
+
+    def test_missing_tesseract_scanned_pdf_falls_back_to_llm(self, sg_zone1, sg_config):
+        """Missing OCR engine + truly scanned PDF → cascade to LLM vision OCR."""
+        from src.fetcher.extractors import ocr_stage1
+        from src.fetcher.extractors.ocr_stage1 import DependencyError
+        from src.fetcher.extractors.pdf_text import ReclassifyToScannedError
+
+        sentinel = object()
+        with (
+            patch.object(ocr_stage1, "pdf_to_images", return_value=[b"PNG"]),
+            patch.object(ocr_stage1, "run_tesseract",
+                         side_effect=DependencyError("tesseract not found; run: apt-get install tesseract-ocr")),
+            patch.object(ocr_stage1, "extract_text_pdf",
+                         side_effect=ReclassifyToScannedError(sg_zone1.url, 0, 5)),
+            patch.object(ocr_stage1, "_llm_ocr_fallback", return_value=sentinel) as mock_llm,
+        ):
+            result = ocr_stage1.extract_ocr_stage1(b"%PDF-1.4", sg_zone1, sg_config)
+        assert result is sentinel
+        mock_llm.assert_called_once()
 
     def test_zero_page_pdf_raises_extraction_error(self, sg_zone1, sg_config):
         from src.fetcher.extractors import ocr_stage1

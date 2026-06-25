@@ -81,6 +81,10 @@ class FetchedDocument:
     # Cost tracking (required by hackathon rubric)
     cost_log_entry: Optional[CostLogEntry] = None
 
+    # Legislation citation metadata (parsed from the cover page + source URL)
+    law_number_ref: Optional[str] = None   # e.g. "Act 26 of 2012" / "2020 Rev. Ed."
+    last_amended: Optional[str] = None     # e.g. "2020" or "2026-05-29" (version date)
+
     def validate(self) -> None:
         if not self.raw_text:
             raise ValueError(f"raw_text is empty for {self.source_url}")
@@ -175,12 +179,12 @@ class TranslatedDocument:
         return self.fetched.raw_text
 
     @property
-    def law_number_ref(self) -> None:
-        return None
+    def law_number_ref(self) -> Optional[str]:
+        return self.fetched.law_number_ref
 
     @property
-    def last_amended_year(self) -> None:
-        return None
+    def last_amended_year(self) -> Optional[str]:
+        return self.fetched.last_amended
 
     @property
     def source_pdf_path(self) -> None:

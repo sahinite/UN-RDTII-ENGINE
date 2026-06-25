@@ -109,6 +109,7 @@ class OutputRecord:
         return {
             "indicator_id": self.indicator_id,
             "article": self.article,
+            "discovery_tag": self.discovery_tag,   # per-provision (UN slide 18 shape)
             "verbatim_snippet": self.verbatim_snippet,
             "mapping_rationale": self.mapping_rationale or "",
             "location_reference": self.location_reference or "",

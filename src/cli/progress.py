@@ -9,6 +9,7 @@ Singleton usage from deep modules:
 
 from __future__ import annotations
 
+import shutil
 import sys
 import threading
 import time
@@ -27,6 +28,13 @@ def _fmt(s: float) -> str:
     if s < 60:
         return f"{s:.1f}s"
     return f"{int(s // 60)}m {s % 60:.0f}s"
+
+
+def _term_width() -> int:
+    try:
+        return shutil.get_terminal_size((80, 24)).columns
+    except Exception:  # noqa: BLE001
+        return 80
 
 
 def _clear_lines(n: int) -> None:
@@ -133,39 +141,37 @@ class Progress:
         if self._thread:
             self._thread.join(timeout=0.5)
             self._thread = None
-        if self._tty and self._drawn > 0:
-            _clear_lines(self._drawn)
+        if self._tty:
+            # Clear the single status line in place (no cursor-up, so wrapped
+            # lines can never accumulate).
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
             self._drawn = 0
 
     def _spin(self) -> None:
         i = 0
         while self._running:
             with self._lock:
-                label   = self._label
-                sub     = self._substep
+                label = self._label
+                sub   = self._substep
             elapsed = time.monotonic() - self._step_t
             total   = time.monotonic() - self._run_t
             frame   = _SPINNER[i % len(_SPINNER)]
 
-            # Clear previously drawn lines
-            if self._drawn > 0:
-                _clear_lines(self._drawn)
-
-            # Line 1 — spinner + label + time
-            line1 = (
-                f"{_CYAN}{frame}{_RESET}  {label}"
-                f"  {_DIM}{_fmt(elapsed)} / {_fmt(total)} total{_RESET}"
-            )
-            sys.stdout.write(line1 + "\n")
-
-            # Line 2 — substep (if any)
+            # Compose ONE plain line, then truncate to terminal width so it can
+            # never wrap (wrapping was what produced the blank-line spam).
+            plain = f"{frame}  {label}  {_fmt(elapsed)} / {_fmt(total)} total"
             if sub:
-                sys.stdout.write(f"   {_DIM}└─ {sub}{_RESET}\n")
-                self._drawn = 2
-            else:
-                self._drawn = 1
+                plain += f"  · {sub}"
+            maxw = max(_term_width() - 1, 10)
+            if len(plain) > maxw:
+                plain = plain[: maxw - 1] + "…"
 
+            # Color only the leading frame; dim the remainder (transient status).
+            line = f"{_CYAN}{plain[0]}{_RESET}{_DIM}{plain[1:]}{_RESET}"
+            sys.stdout.write("\r\033[K" + line)
             sys.stdout.flush()
+
             time.sleep(0.1)
             i += 1
 

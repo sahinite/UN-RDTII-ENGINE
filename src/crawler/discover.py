@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from bs4 import BeautifulSoup
 
 from src.crawler.crawler import _normalise_url, _registered_domain
+from src.crawler.seed_loader import normalise_title
 from src.crawler.transport import fetch as transport_fetch
 from src.fetcher.models import Zone1Result
 
@@ -33,7 +34,31 @@ logger = logging.getLogger(__name__)
 ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "5"))
 _DISCOVER_BUDGET_S = float(os.getenv("DISCOVER_BUDGET_S", "120.0"))
 _INDEX_FETCH_TIMEOUT_S = float(os.getenv("INDEX_FETCH_TIMEOUT_S", "30.0"))
-_NEW_SCORE_THRESHOLD = float(os.getenv("NEW_SCORE_THRESHOLD", "0.05"))
+# Normalised BM25 title score a NEW (not-in-seed) act must clear to be kept.
+# Raised from 0.05 → 0.2: low values let acts that merely share a generic word
+# (e.g. "Personal" in "Personal Mobility Devices") rank as P7 matches.
+_NEW_SCORE_THRESHOLD = float(os.getenv("NEW_SCORE_THRESHOLD", "0.2"))
+
+
+# ── Pillar-scoped exclusion lists ──────────────────────────────────────────────
+
+def build_pillar_excludes(taxonomy: list[dict], pillar: int) -> tuple[set[str], set[str]]:
+    """
+    Gather exclude_act_titles and exclude_keywords for the pillar's indicators.
+
+    Returns (exclude_title_substrings, exclude_keywords) — both lowercased — used
+    to drop obviously-irrelevant acts (e.g. banking/tax acts) before they become
+    NEW candidates. KNOWN seed acts are never excluded.
+    """
+    prefix = f"P{pillar}-"
+    titles: set[str] = set()
+    keywords: set[str] = set()
+    for ind in taxonomy:
+        if not ind.get("indicator_id", "").startswith(prefix):
+            continue
+        titles.update(t.lower().strip() for t in ind.get("exclude_act_titles", []) if t.strip())
+        keywords.update(k.lower().strip() for k in ind.get("exclude_keywords", []) if k.strip())
+    return titles, keywords
 
 
 # ── Pillar-scoped keyword builder ──────────────────────────────────────────────
@@ -144,6 +169,7 @@ async def _discover_index(
     taxonomy: list[dict],
     known_urls: set[str],
     budget_deadline: float,
+    known_titles: set[str] | None = None,
 ) -> list[tuple[str, str, str]] | None:
     """
     Fetch portal index_urls and return (title, url, discovery_tag) triples.
@@ -156,6 +182,8 @@ async def _discover_index(
         return None
 
     known_norm = {_normalise_url(u) for u in known_urls}
+    known_titles_norm = {normalise_title(t) for t in (known_titles or set())}
+    exclude_titles, exclude_keywords = build_pillar_excludes(taxonomy, pillar)
     keywords = build_pillar_keywords(taxonomy, pillar)
     all_candidates: dict[str, tuple[str, str]] = {}  # norm_url → (title, abs_url)
 
@@ -190,10 +218,19 @@ async def _discover_index(
     results: list[tuple[str, str, str]] = []
     for score, title, url in scored:
         norm = _normalise_url(url)
-        is_known = norm in known_norm
+        # KNOWN if the URL OR the (normalised) title matches a Round 1 seed entry.
+        # Round 1 DB rows often carry titles but no act-level URL, so URL-only
+        # matching would mis-tag known acts (e.g. the PDPA) as NEW.
+        is_known = (norm in known_norm) or (normalise_title(title) in known_titles_norm)
         if is_known:
             results.append((title, url, "KNOWN"))
-        elif score >= _NEW_SCORE_THRESHOLD:
+            continue
+        # Drop obvious non-matches (banking/tax/etc.) before the threshold gate.
+        tl = title.lower()
+        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
+            logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
+            continue
+        if score >= _NEW_SCORE_THRESHOLD:
             results.append((title, url, "NEW"))
         # Below threshold and not KNOWN → dropped
 
@@ -229,6 +266,7 @@ async def discover(
     taxonomy: list[dict],
     known_urls: set[str],
     output_dir: str = "logs",
+    known_titles: set[str] | None = None,
 ) -> list[Zone1Result]:
     """
     Pillar-agnostic per-economy portal discovery.
@@ -261,7 +299,7 @@ async def discover(
         logger.info("[DISCOVER] portal=%s strategy=%s", portal_name, discovery_strategy)
 
         if discovery_strategy == "index":
-            raw = await _discover_index(portal, pillar, taxonomy, known_urls, budget_deadline)
+            raw = await _discover_index(portal, pillar, taxonomy, known_urls, budget_deadline, known_titles)
             if raw is None:
                 raw = _seed_fallback(portal, economy_iso, known_urls, "index discovery failed")
         elif discovery_strategy == "seed_only":

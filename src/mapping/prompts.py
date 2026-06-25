@@ -27,7 +27,8 @@ CRITICAL RULES — violations cause immediate disqualification of the row:
 5. CONFIDENCE: Score 0.00–1.00 reflecting how clearly the provision answers the indicator question. Below 0.80 means the mapping is uncertain.
 6. JSON OUTPUT ONLY: Return a valid JSON object. No prose, no markdown fences, no explanation outside the JSON.
 7. LAW NAME: If the act_title is abbreviated (all-caps acronym, under 20 characters, or ends without a year), expand it to the full official name including the enactment year. Example: expand "PDPA" to "Personal Data Protection Act 2012".
-8. RATIONALE FORMAT: Use exactly this structure: "This [Art./s./Reg. X(Y)] [prohibits / requires / permits / establishes] [what]. Maps to [indicator_id] because [one-sentence legal logic]." Do NOT describe what the article is about. Do NOT restate the verbatim_snippet. Name the legal mechanism.
+8. RATIONALE FORMAT: Use exactly this structure: "This [Art./s./Reg. X(Y)] [prohibits / requires / permits / establishes] [what]. Maps to [indicator_id] because [one-sentence legal logic]." Do NOT describe what the article is about. Do NOT restate the verbatim_snippet. Name the legal mechanism. You may add the indicator's short name in parentheses after the id, e.g. "Maps to P6-I1 (general restriction) because...".
+9. RATIONALE BLANK IF UNCERTAIN: If you cannot give confident one-sentence legal logic for why this provision maps to the indicator, set mapping_rationale to "" (empty string). A blank rationale is neutral; a wrong or vague one misleads reviewers. Never pad with filler.
 
 Output schema (return exactly this structure):
 {

@@ -753,3 +753,31 @@ Symptom: Pass 1 sat at "Crawling 2 portal(s)" for 30+ min, slowly ticking page 5
 3. **Synthetic per-page delay.** Dropped `simulate_user` + `mean_delay=0.4` from the run config — `magic=True` already covers anti-bot; the extra synthetic mouse-movement added seconds per page across the BFS.
 
 New env knob: `CRAWL_KNOWN_MAX_SEEDS` (default 20). Existing `CRAWL_MAX_PAGES` / `CRAWL_MAX_DEPTH` still apply to Pass 2 (NEW discovery).
+
+---
+
+## Post-verification fixes — Singapore P7 run (PRD 86ey22k30)
+
+After the first end-to-end Singapore P7 run (6m 50s, several accuracy gaps), six fixes:
+
+1. **Wayback dedupe + local-snapshot fallback** (`src/output/validator.py`). `validate_and_flag` now validates + archives **once per unique source URL** (was once per record → 10× redundant calls for the PDPA). `archive_source()` tries Wayback best-effort then falls back to `archive_local()` (saves the fetched bytes under `LOCAL_ARCHIVE_DIR`, default `outputs/archive`). Wayback retry wait cut 60s→2s. Env: `WAYBACK_BEST_EFFORT`, `LOCAL_ARCHIVE_FALLBACK`, `LOCAL_ARCHIVE_DIR`, `WAYBACK_RETRY_WAIT_S`. Cut validation from ~5 min to seconds.
+3. **No double-processing of single acts** (`src/fetcher/router.py`). `pdf_endpoint` fetches set `single_act_fetch=True` → consolidated-volume detection/segmentation skipped (the PDPA PDF was being mis-split into 2 segments and run through Zone 2 twice).
+4. **KNOWN-by-title discovery tag** (`src/crawler/discover.py`, `main.py`). `discover()` accepts `known_titles`; an act is tagged KNOWN if its URL **or normalised title** matches a Round 1 seed entry. Fixes the PDPA being tagged NEW when the seed has titles but no act-level URLs (the SG P7 case).
+5. **Taxonomy exclusion + threshold** (`src/crawler/discover.py`). `build_pillar_excludes()` applies each pillar's `exclude_act_titles`/`exclude_keywords`; `NEW_SCORE_THRESHOLD` default raised 0.05→0.2 (env-tunable). Drops false positives like "Active Mobility (Personal Mobility Devices)" that matched only on the word "personal".
+2. **Populate `law_number_ref` / `last_amended`** (`src/fetcher/extractors/legislation_meta.py`, new). Parses "Act N of YYYY" + revised-edition year from the PDF cover and the version date from the URL `?DocDate=YYYYMMDD`. `FetchedDocument` gained `law_number_ref`/`last_amended` fields; the `TranslatedDocument` wrapper now delegates to them (was hardcoded `None`). These columns were always blank before.
+6. **Single-line spinner** (`src/cli/progress.py`). The spinner now renders one terminal-width-truncated line cleared with `\r\033[K` instead of a multi-line redraw, eliminating the blank-line spam that appeared when a long substep wrapped during slow RAG steps.
+
+Tests: `test_portal_strategy.py` (+KNOWN-by-title, +exclude filter, +pdf_endpoint skips segmentation), `test_z2_5_validator.py` (+dedupe, +local fallback, +snapshot write), `test_legislation_meta.py` (new). Full suite: 601 passed, 2 skipped; 4 pre-existing unrelated failures (2 `test_probe`, 2 `test_z2_4_providers` anthropic).
+
+## Output-format compliance (README_template.md + UN slide 18)
+
+Authoritative spec is `docs/README_template.md` plus UN "slide 18". `data/output_schema_sample.json` was self-generated and **wrong** — it has been regenerated from the real `write_json` so it can no longer drift from actual output.
+
+- **CSV** — already compliant: the exact 13 columns in spec order, guarded by `write_csv` (raises on drift). No change.
+- **JSON shape** — the existing document-level + `provisions[]` envelope already matches slide 18 (NOT the `records`/flat shape of the old sample). Field-level additions to satisfy the README "extended metadata" list and slide 18:
+  - `pdf_is_scanned` (doc-level bool, derived from `doc_type == "SCANNED_PDF"`) and `retrieval_method` (doc-level constant string) added in `src/output/writer.py` (`_RETRIEVAL_METHOD`).
+  - `discovery_tag` now included **inside each provision** (`as_provision_dict`) per slide 18, in addition to the document level.
+  - Naming kept as `processing_time` (slide 18) — README prose says `processing_time_seconds`; the two UN sources conflict, slide spelling chosen (also enforced by an existing AC2 test).
+- **`mapping_rationale`** — SYSTEM_PROMPT Rule 8 already matched the format guide; added **Rule 9: leave blank if uncertain** (a blank rationale is neutral, a wrong one misleads reviewers) and the optional indicator short-name in parens. 300-char cap unchanged.
+
+Tests: `test_z2_6_output.py` (+`pdf_is_scanned`/`retrieval_method`, +per-provision `discovery_tag`; updated the exclusion test since `discovery_tag` is now intentionally in provisions). Full suite after all output + post-verification fixes: **603 passed, 2 skipped**; same 4 pre-existing unrelated failures.

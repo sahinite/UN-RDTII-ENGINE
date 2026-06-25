@@ -798,3 +798,71 @@ class TestRunOCRStage2:
 
         # Either stage1_text or placeholder used — text not empty
         assert doc.raw_text.strip() != ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Archive dedupe + local-snapshot fallback
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestArchiveDedupeAndFallback:
+    def test_archive_source_falls_back_to_local_when_wayback_fails(self):
+        """Wayback returns "" (520/network) → archive_source uses local snapshot."""
+        from src.output import validator
+
+        with (
+            patch.object(validator, "archive_wayback", return_value=""),
+            patch.object(validator, "archive_local", return_value="outputs/archive/Act_PDPA2012.pdf") as mock_local,
+        ):
+            result = validator.archive_source("https://sso.agc.gov.sg/Act/PDPA2012?ViewType=Pdf")
+
+        assert result == "outputs/archive/Act_PDPA2012.pdf"
+        mock_local.assert_called_once()
+
+    def test_archive_source_prefers_wayback_when_available(self):
+        """When Wayback succeeds, local snapshot is not taken."""
+        from src.output import validator
+
+        with (
+            patch.object(validator, "archive_wayback", return_value="https://web.archive.org/web/x"),
+            patch.object(validator, "archive_local", side_effect=AssertionError("local must not run")),
+        ):
+            result = validator.archive_source("https://sso.agc.gov.sg/Act/PDPA2012")
+
+        assert result == "https://web.archive.org/web/x"
+
+    def test_validate_and_flag_archives_each_url_once(self):
+        """10 records sharing one source URL → archive_source called once, not 10x."""
+        from src.output import validator
+        from src.output.validator import validate_and_flag
+
+        records = [_make_record(indicator_id=f"P7-I{i}") for i in range(10)]
+        assert len({r.source_url for r in records}) == 1  # all same URL
+
+        with (
+            patch.object(validator, "validate_url", return_value=("ok", 200)),
+            patch.object(validator, "archive_source", return_value="local/snap.pdf") as mock_arch,
+            patch.object(validator, "_sleep"),
+        ):
+            results = validate_and_flag(records, archive=True, wayback_rate_limit_s=0.0)
+
+        assert len(results) == 10
+        mock_arch.assert_called_once()  # deduped by URL
+        assert all(r.archive_url == "local/snap.pdf" for r in results)
+
+    def test_archive_local_saves_snapshot(self, tmp_path):
+        """archive_local downloads bytes and writes them to the archive dir."""
+        from src.output import validator
+
+        def handler(request):
+            return httpx.Response(200, content=b"%PDF-1.7 fake", headers={"content-type": "application/pdf"})
+
+        with respx.mock:
+            respx.get("https://sso.agc.gov.sg/Act/PDPA2012?ViewType=Pdf").mock(side_effect=handler)
+            path = validator.archive_local(
+                "https://sso.agc.gov.sg/Act/PDPA2012?ViewType=Pdf", dest_dir=str(tmp_path)
+            )
+
+        assert path
+        assert path.endswith(".pdf")
+        from pathlib import Path as _P
+        assert _P(path).read_bytes() == b"%PDF-1.7 fake"

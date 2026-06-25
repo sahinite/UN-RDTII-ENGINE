@@ -251,11 +251,15 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     """
     # ── pdf_endpoint rewrite: act URL → PDF print endpoint ────────────────────
     fetch_url = zone1_result.url
+    single_act_fetch = False
     portal = _find_portal_for_url(fetch_url, economy_config)
     if portal is not None:
         fetch_strategy = getattr(portal, "fetch", "TBD")
         pdf_suffix = getattr(portal, "pdf_view_suffix", None)
         if fetch_strategy == "pdf_endpoint" and pdf_suffix:
+            # We fetched exactly one act's PDF — it is NOT a consolidated volume,
+            # so skip volume detection/segmentation (avoids double-processing).
+            single_act_fetch = True
             rewritten = _rewrite_to_pdf_url(fetch_url, pdf_suffix)
             logger.info({
                 "event": "pdf_endpoint_rewrite",
@@ -288,9 +292,9 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     if doc_type == "IMAGE":
         return extract_ocr_stage1(raw_bytes, zone1_result_resolved, economy_config)
 
-    # PDF path — check consolidated volume first
+    # PDF path — check consolidated volume first (skipped for single-act fetches)
     if doc_type in ("TEXT_PDF", "SCANNED_PDF"):
-        if is_consolidated_volume(raw_bytes):
+        if not single_act_fetch and is_consolidated_volume(raw_bytes):
             logger.info({
                 "event": "consolidated_volume_detected",
                 "url": zone1_result.url,

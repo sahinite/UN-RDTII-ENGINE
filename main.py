@@ -321,7 +321,10 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
     _p_step(f"Zone 1 — Discovering acts for {economy} P{pillar} via portal strategy")
     try:
         zone1_results = asyncio.run(
-            discover(economy_config, pillar, taxonomy, known_urls)
+            discover(
+                economy_config, pillar, taxonomy, known_urls,
+                known_titles=getattr(seed_data, "known_titles", None),
+            )
         )
         known_count = sum(1 for z in zone1_results if z.discovery_tag == "KNOWN")
         new_count   = sum(1 for z in zone1_results if z.discovery_tag == "NEW")

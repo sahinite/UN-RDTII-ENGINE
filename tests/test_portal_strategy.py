@@ -476,6 +476,54 @@ class TestIndexDiscovery:
         assert not any("Road Traffic" in t for t in result_titles), \
             "Road Traffic Act is not relevant to P7 and should be dropped"
 
+    def test_discover_tags_known_by_title_when_no_seed_url(self):
+        """Round 1 seed often has titles but no act URL → match by title → KNOWN."""
+        from src.crawler.discover import discover
+        from src.crawler.seed_loader import normalise_title
+
+        # No known URLs at all — only a known title (the PDPA), as in SG P7.
+        known_urls: set[str] = set()
+        known_titles = {normalise_title("Personal Data Protection Act 2012")}
+
+        async def mock_fetch(url, portal):
+            return _SSO_INDEX_HTML, 200
+
+        with patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch):
+            results = asyncio.run(
+                discover(_SG_ECONOMY, 7, _MINI_TAXONOMY, known_urls, known_titles=known_titles)
+            )
+
+        pdpa = [z for z in results if "PDPA2012" in z.url]
+        assert pdpa, "PDPA must be discovered from the index"
+        assert pdpa[0].discovery_tag == "KNOWN", \
+            "PDPA matched by title must be tagged KNOWN, not NEW"
+
+    def test_discover_excludes_taxonomy_excluded_titles(self):
+        """Acts whose title matches exclude_act_titles are dropped (never NEW)."""
+        from src.crawler.discover import discover
+
+        # Taxonomy where P7 excludes the Banking Act (present in the fixture).
+        taxonomy = [
+            {
+                "indicator_id": "P7-I1",
+                "probe_keywords": ["personal data protection", "banking"],
+                "exclude_act_titles": ["banking act"],
+            },
+        ]
+        known_urls: set[str] = set()
+
+        async def mock_fetch(url, portal):
+            return _SSO_INDEX_HTML, 200
+
+        with patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch):
+            results = asyncio.run(
+                discover(_SG_ECONOMY, 7, taxonomy, known_urls)
+            )
+
+        titles = [z.act_title for z in results]
+        assert not any("Banking Act" in t for t in titles), \
+            "Banking Act is in exclude_act_titles and must be dropped"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. pdf_endpoint routing
@@ -550,6 +598,36 @@ class TestPdfEndpointRouting:
         assert "ViewType=Pdf" in downloaded_urls[0], \
             f"Expected ?ViewType=Pdf in downloaded URL, got: {downloaded_urls[0]}"
         assert isinstance(result, FetchedDocument)
+
+    def test_pdf_endpoint_skips_consolidated_volume_segmentation(self):
+        """A single act fetched via pdf_endpoint must NOT be segmented as a volume."""
+        from src.fetcher import router
+        from src.fetcher.models import FetchedDocument
+
+        zone1 = Zone1Result(
+            url="https://sso.agc.gov.sg/Act/PDPA2012",
+            economy="SG",
+            act_title="Personal Data Protection Act 2012",
+            discovery_tag="KNOWN",
+            archive_url="",
+        )
+        sg_config = self._sg_config_with_pdf_endpoint()
+        pdf_bytes = (FIXTURES / "z2_1" / "pdpa_sg_sample.pdf").read_bytes()
+
+        def mock_download(url, timeout=30):
+            return pdf_bytes, "application/pdf", url
+
+        with (
+            patch.object(router, "download", side_effect=mock_download),
+            # Even if detection WOULD say "volume", pdf_endpoint must bypass it.
+            patch.object(router, "is_consolidated_volume", return_value=True),
+            patch.object(router, "segment_volume",
+                         side_effect=AssertionError("segmentation must be skipped for pdf_endpoint")),
+        ):
+            result = router.route(zone1, sg_config)
+
+        assert isinstance(result, FetchedDocument), \
+            "Single-act pdf_endpoint fetch must return one document, not a segmented list"
 
     def test_route_no_pdf_endpoint_uses_original_url(self):
         """Without fetch:pdf_endpoint, the URL is not rewritten."""

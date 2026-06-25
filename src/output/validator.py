@@ -11,9 +11,13 @@ ST6 — Confidence Flagging + ValidatedResult dataclass + Orchestrator:
 
 from __future__ import annotations
 
+import os
+import re
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Optional
 
 import httpx
@@ -33,7 +37,12 @@ _URL_VALIDATE_TIMEOUT = 15
 _URL_MAX_RETRIES = 3
 _WAYBACK_SAVE_URL = "https://web.archive.org/save/{url}"
 _WAYBACK_TIMEOUT = 30
-_WAYBACK_RETRY_WAIT = 60.0
+# Wayback is flaky (429/520). Keep retries cheap and fall back to a local snapshot.
+_WAYBACK_RETRY_WAIT = float(os.getenv("WAYBACK_RETRY_WAIT_S", "2.0"))
+_WAYBACK_BEST_EFFORT = os.getenv("WAYBACK_BEST_EFFORT", "true").lower() in ("1", "true", "yes")
+# Local snapshot fallback: save the exact bytes we fetched when Wayback fails.
+_LOCAL_ARCHIVE_FALLBACK = os.getenv("LOCAL_ARCHIVE_FALLBACK", "true").lower() in ("1", "true", "yes")
+_LOCAL_ARCHIVE_DIR = os.getenv("LOCAL_ARCHIVE_DIR", "outputs/archive")
 
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -267,6 +276,79 @@ def archive_wayback(url: str) -> str:
     return ""
 
 
+# ── Local snapshot archive (Wayback fallback) ──────────────────────────────────
+
+def _safe_slug(url: str) -> str:
+    """Filesystem-safe filename derived from a URL's path + query."""
+    parsed = urllib.parse.urlparse(url)
+    raw = parsed.path + (f"_{parsed.query}" if parsed.query else "")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("_")
+    return (slug[:120] or "archive")
+
+
+def archive_local(url: str, dest_dir: str | None = None) -> str:
+    """
+    Download the source document once and save a local snapshot.
+
+    Returns the relative path to the saved file, or "" on failure. Used as a
+    fallback when the Wayback Machine is unavailable — a local copy of the exact
+    bytes we extracted from is stronger provenance than a best-effort web snapshot.
+    """
+    dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        with httpx.Client(timeout=_URL_VALIDATE_TIMEOUT, headers=headers, follow_redirects=True) as client:
+            resp = client.get(url)
+        if resp.status_code != 200 or not resp.content:
+            logger.warning({
+                "event": "local_archive_failed",
+                "url": url,
+                "http_status": resp.status_code,
+                "economy": "",
+            })
+            return ""
+        ctype = resp.headers.get("content-type", "").lower()
+        bare = url.lower().split("?")[0]
+        ext = ".pdf" if ("pdf" in ctype or bare.endswith(".pdf")) else (".html" if "html" in ctype else ".bin")
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(dest_dir) / f"{_safe_slug(url)}{ext}"
+        path.write_bytes(resp.content)
+        logger.info({
+            "event": "local_archive_saved",
+            "url": url,
+            "path": str(path),
+            "bytes": len(resp.content),
+            "economy": "",
+        })
+        return str(path)
+    except Exception as exc:  # noqa: BLE001 — best-effort archival, never fatal
+        logger.warning({
+            "event": "local_archive_error",
+            "url": url,
+            "error": str(exc),
+            "economy": "",
+        })
+        return ""
+
+
+def archive_source(url: str) -> str:
+    """
+    Archive one source URL: Wayback (best-effort) → local snapshot fallback.
+
+    Returns a Wayback URL when available, else a local snapshot path, else "".
+    """
+    archive_url = ""
+    if _WAYBACK_BEST_EFFORT:
+        archive_url = archive_wayback(url)
+    if not archive_url and _LOCAL_ARCHIVE_FALLBACK:
+        archive_url = archive_local(url)
+    return archive_url
+
+
 # ── ST6: Confidence Flagging ───────────────────────────────────────────────────
 
 _CONFIDENCE_THRESHOLD = 0.80
@@ -304,9 +386,17 @@ def validate_and_flag(
     results: list[ValidatedResult] = []
     now_iso = datetime.now(tz=timezone.utc).isoformat()
 
+    # Dedupe by source URL — many provisions share one act URL (e.g. all 10 PDPA
+    # records). Validate + archive each unique URL once, not once per record.
+    url_status_cache: dict[str, tuple[URLStatusType, Optional[int]]] = {}
+    archive_cache: dict[str, str] = {}
+
     for record in records:
-        # ST1: validate source URL
-        url_status, http_code = validate_url(record.source_url)
+        src = record.source_url
+        # ST1: validate source URL (cached per unique URL)
+        if src not in url_status_cache:
+            url_status_cache[src] = validate_url(src)
+        url_status, http_code = url_status_cache[src]
 
         if url_status == "broken":
             logger.warning({
@@ -328,13 +418,14 @@ def validate_and_flag(
         # ST6: confidence flagging (before archiving so note is in ValidatedResult)
         _flag_confidence(record)
 
-        # ST2: Wayback Machine archiving (only live URLs)
+        # ST2: archiving (only live URLs) — Wayback best-effort → local fallback,
+        # cached per unique URL so we don't re-archive the same act per provision.
         arch_url = ""
         if archive and url_status in ("ok", "redirected"):
-            arch_url = archive_wayback(record.source_url)
-            if arch_url and not record.notes:
-                pass  # archive_url stored in ValidatedResult; notes updated below if needed
-            _sleep(wayback_rate_limit_s)
+            if src not in archive_cache:
+                archive_cache[src] = archive_source(src)
+                _sleep(wayback_rate_limit_s)
+            arch_url = archive_cache[src]
 
         results.append(
             ValidatedResult(

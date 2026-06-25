@@ -231,11 +231,28 @@ class TestWriteJSON:
     _DOC_LEVEL_FIELDS = {
         "economy", "law_name", "source_url", "source_pdf_path",
         "ocr_quality_cer", "processing_time", "model_version", "discovery_tag",
+        "pdf_is_scanned", "retrieval_method",
     }
     _PROVISION_FIELDS = {
-        "indicator_id", "article", "verbatim_snippet", "mapping_rationale",
-        "location_reference", "confidence", "notes",
+        "indicator_id", "article", "discovery_tag", "verbatim_snippet",
+        "mapping_rationale", "location_reference", "confidence", "notes",
     }
+
+    def test_json_pdf_is_scanned_and_retrieval_method(self, tmp_path):
+        """README extended metadata: pdf_is_scanned + retrieval_method at doc level."""
+        scanned = _make_output_record(doc_type="SCANNED_PDF")
+        textpdf = _make_output_record(doc_type="TEXT_PDF", source_url="https://x/y")
+        d1 = json.loads(write_json([scanned], tmp_path / "a.json").read_text())
+        d2 = json.loads(write_json([textpdf], tmp_path / "b.json").read_text())
+        assert d1["documents"][0]["pdf_is_scanned"] is True
+        assert d2["documents"][0]["pdf_is_scanned"] is False
+        assert d1["documents"][0]["retrieval_method"]
+
+    def test_json_discovery_tag_in_provision(self, tmp_path):
+        """UN slide 18: discovery_tag also appears inside each provision."""
+        path = write_json([_make_output_record(discovery_tag="KNOWN")], tmp_path / "out.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["documents"][0]["provisions"][0]["discovery_tag"] == "KNOWN"
 
     def test_json_document_level_fields_present(self, tmp_path):
         """AC2: JSON document object has all spec-required top-level keys."""
@@ -536,8 +553,9 @@ class TestOutputRecordMethods:
     def test_as_provision_dict_excludes_doc_level_fields(self):
         rec = _make_output_record()
         d = rec.as_provision_dict()
+        # discovery_tag intentionally INCLUDED per UN slide 18 (per-provision).
         for field in ("economy", "law_name", "processing_time", "model_version",
-                      "ocr_quality_cer", "source_pdf_path", "discovery_tag"):
+                      "ocr_quality_cer", "source_pdf_path"):
             assert field not in d
 
 

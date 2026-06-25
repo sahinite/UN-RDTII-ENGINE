@@ -186,7 +186,12 @@ def write_csv(records: list[OutputRecord], path: Path) -> Path:
 _DOC_LEVEL_FIELDS = {
     "economy", "law_name", "source_url", "source_pdf_path",
     "ocr_quality_cer", "processing_time", "model_version", "discovery_tag",
+    "pdf_is_scanned", "retrieval_method",
 }
+
+# Constant: the engine always uses the same hybrid retrieval pipeline.
+# Surfaced per README "extended metadata" requirement (retrieval_method).
+_RETRIEVAL_METHOD = "hybrid BM25 + dense (RRF) + cross-encoder rerank"
 
 
 def write_json(records: list[OutputRecord], path: Path) -> Path:
@@ -219,6 +224,8 @@ def write_json(records: list[OutputRecord], path: Path) -> Path:
             "processing_time": first.processing_time,
             "model_version": first.model_version,
             "discovery_tag": first.discovery_tag,
+            "pdf_is_scanned": first.doc_type == "SCANNED_PDF",
+            "retrieval_method": _RETRIEVAL_METHOD,
             "provisions": [r.as_provision_dict() for r in recs],
         }
         documents.append(doc_obj)
