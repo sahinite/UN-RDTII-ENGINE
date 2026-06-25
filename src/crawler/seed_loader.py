@@ -143,7 +143,15 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
                 seed.known_urls.add(normalise_url(row_url))
                 count += 1
             if row_title:
-                seed.known_titles.add(normalise_title(row_title))
+                # Round 1 cells often pack several acts into one "act and/or
+                # practice" string joined by ';' (e.g. "Personal Data Protection
+                # Act 2012; Guide to ...; Advisory Guidelines ..."). Split so each
+                # act becomes its own matchable known title — otherwise the PDPA
+                # never matches a browse-index title.
+                for part in re.split(r"[;\n]", row_title):
+                    part = part.strip()
+                    if part:
+                        seed.known_titles.add(normalise_title(part))
                 if not has_url:
                     count += 1  # count title-only rows so we know seeds loaded
 
@@ -193,7 +201,10 @@ def _load_sample_csv(path: str, economy_iso: str, pillar: str, seed: SeedData) -
                 if title_col:
                     raw_title = str(row.get(title_col, "") or "").strip()
                     if raw_title:
-                        seed.known_titles.add(normalise_title(raw_title))
+                        for part in re.split(r"[;\n]", raw_title):
+                            part = part.strip()
+                            if part:
+                                seed.known_titles.add(normalise_title(part))
 
     except Exception as exc:
         logger.error("Failed to load Sample CSV from %s: %s", path, exc)

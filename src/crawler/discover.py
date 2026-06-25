@@ -218,17 +218,20 @@ async def _discover_index(
     results: list[tuple[str, str, str]] = []
     for score, title, url in scored:
         norm = _normalise_url(url)
+        tl = title.lower()
+        # Exclusion wins over everything — the pillar's exclude_act_titles are the
+        # curated "never relevant" list, and the Round 1 seed itself includes
+        # negative-example acts (banking/tax/companies/etc.) for SG P7. Applying
+        # the filter BEFORE the KNOWN check stops those from being mapped.
+        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
+            logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
+            continue
         # KNOWN if the URL OR the (normalised) title matches a Round 1 seed entry.
         # Round 1 DB rows often carry titles but no act-level URL, so URL-only
         # matching would mis-tag known acts (e.g. the PDPA) as NEW.
         is_known = (norm in known_norm) or (normalise_title(title) in known_titles_norm)
         if is_known:
             results.append((title, url, "KNOWN"))
-            continue
-        # Drop obvious non-matches (banking/tax/etc.) before the threshold gate.
-        tl = title.lower()
-        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
-            logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
             continue
         if score >= _NEW_SCORE_THRESHOLD:
             results.append((title, url, "NEW"))

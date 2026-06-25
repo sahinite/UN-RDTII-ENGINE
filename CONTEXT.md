@@ -781,3 +781,14 @@ Authoritative spec is `docs/README_template.md` plus UN "slide 18". `data/output
 - **`mapping_rationale`** — SYSTEM_PROMPT Rule 8 already matched the format guide; added **Rule 9: leave blank if uncertain** (a blank rationale is neutral, a wrong one misleads reviewers) and the optional indicator short-name in parens. 300-char cap unchanged.
 
 Tests: `test_z2_6_output.py` (+`pdf_is_scanned`/`retrieval_method`, +per-provision `discovery_tag`; updated the exclusion test since `discovery_tag` is now intentionally in provisions). Full suite after all output + post-verification fixes: **603 passed, 2 skipped**; same 4 pre-existing unrelated failures.
+
+## Taxonomy realignment to official RDTII methodology
+
+`taxonomy.json` was rebuilt against `docs/RDTII_methodology_and_scoring_criteria.csv` — the previous P6/P7 definitions used a GDPR / data-protection-law model that did NOT match the official RDTII indicators, so the engine was discovering and mapping the wrong concepts.
+
+- **Pillar 6 (Cross-border Data Policies)** → 6.1 ban/local-processing, 6.2 local storage, 6.3 infrastructure, 6.4 conditional flow regimes, 6.5 binding data-transfer agreements. (Was: GDPR transfer mechanisms — adequacy/SCCs/consent.)
+- **Pillar 7 (Domestic Data Protection & Privacy)** → 7.1 comprehensive framework, 7.2 **dedicated cybersecurity framework**, 7.3 minimum data retention, 7.4 DPIA/DPO, 7.5 government access to personal data. (Was: GDPR principles — lawful basis/purpose limitation/subject rights/breach notification/enforcement, which had no indicator for cybersecurity, retention, DPIA/DPO, or government access.)
+- Each indicator gained `rdtii_ref` (e.g. "7.2"), `category`, and a `scoring` block with the official 0/0.5/1 bands. The taxonomy loaders read via `.get()` so the extra fields are non-breaking. `IDs` and the 5-per-pillar count are unchanged, so `P{pillar}-I{n}` wiring is preserved.
+- Criminal Procedure Code removed from the P7 exclude list — government-access powers (7.5) live in criminal-procedure statutes.
+
+Companion discovery-tag fixes (same change set): `seed_loader.py` now **splits `;`/newline compound title cells** so the PDPA's Round-1 entry (a multi-act string) becomes a matchable known title; `discover.py` applies the **exclude filter before the KNOWN check** so Round-1 negative-example acts (banking/tax/companies) can't slip through as KNOWN. Without these, an SG P7 run discovered Banking/Companies/Income-Tax acts and dropped the PDPA entirely. Full suite: **604 passed, 2 skipped**; same 4 pre-existing unrelated failures.

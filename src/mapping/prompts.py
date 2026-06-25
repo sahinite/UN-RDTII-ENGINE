@@ -37,7 +37,7 @@ Output schema (return exactly this structure):
     {
       "article": "Section 26(2)",
       "verbatim_snippet": "Exact copied text from source...",
-      "mapping_rationale": "This section prohibits cross-border transfer of personal data. Maps to P6-I1 because it establishes a default restriction on overseas data transfer.",
+      "mapping_rationale": "This s.26 requires data to be processed only on local systems. Maps to P6-I1 because it imposes a local-processing requirement on personal data.",
       "confidence": 0.95,
       "location_reference": "Page 34 | https://url#anchor",
       "non_consecutive": false

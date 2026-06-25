@@ -1,324 +1,327 @@
 [
   {
     "indicator_id": "P6-I1",
-    "name": "General prohibition / restriction",
-    "legal_question": "Does the law restrict cross-border transfer of personal data as a default?",
+    "rdtii_ref": "6.1",
+    "name": "Ban / local processing requirement",
+    "category": "Cross-border Data Policies",
+    "legal_question": "Does the law ban cross-border transfer of data or require data to be processed locally?",
     "probe_keywords": [
-      "cross-border data transfer",
-      "personal data transfer restriction",
-      "transfer of personal data overseas",
-      "cross-border transfer prohibition",
-      "data localisation"
+      "data localisation",
+      "local processing requirement",
+      "prohibition cross-border data transfer",
+      "data must be processed within the country",
+      "ban on transfer of data overseas"
     ],
     "in_scope": [
-      "Default restriction on transferring personal data outside the jurisdiction",
-      "Requirement to keep data onshore / locally unless conditions met",
-      "Prohibition on sending personal data to foreign recipients"
+      "Outright ban on transferring (personal) data outside the jurisdiction",
+      "Requirement that data be processed only on domestic systems",
+      "Prohibition on transfer to a specific country"
     ],
     "out_of_scope": [
-      "Government data or national security exclusions applied to public agencies only",
-      "Financial/banking secrecy provisions (covered under different pillars)",
-      "Technical standards for data centres already established domestically"
+      "Data localisation measures applied only to government data (excluded by methodology)",
+      "Voluntary or commercial decisions to process data locally"
     ],
-    "negative_examples": ["Banking Act S.47", "tax records", "national intelligence data"],
-    "exclude_keywords": [
-      "banking secrecy",
-      "financial institution supervision",
-      "income tax assessment",
-      "customs tariff",
-      "immigration clearance"
-    ],
-    "exclude_act_titles": [
-      "banking act",
-      "income tax act",
-      "customs act",
-      "immigration act",
-      "companies act"
-    ]
+    "negative_examples": ["government data localisation", "national security data"],
+    "exclude_keywords": ["banking secrecy", "income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Ban and/or local processing requirement for all sectors or for personal data, OR more than one measure of the 0.5 category"},
+        {"score": 0.5, "criteria": "Ban and/or local processing requirement applied to a specific sector, specific data, non-personal data, or transfer prohibited to one country"},
+        {"score": 0, "criteria": "No requirement"}
+      ]
+    }
   },
   {
     "indicator_id": "P6-I2",
-    "name": "Adequacy standard",
-    "legal_question": "Can data be transferred to countries with adequate protection?",
+    "rdtii_ref": "6.2",
+    "name": "Local storage requirement",
+    "category": "Cross-border Data Policies",
+    "legal_question": "Does the law require data to be stored on servers located within the country?",
     "probe_keywords": [
-      "adequacy decision data transfer",
-      "comparable protection personal data",
-      "adequate level data protection",
-      "whitelist data transfer countries"
+      "local storage requirement",
+      "data must be stored within the country",
+      "onshore data storage",
+      "retain a copy of data locally",
+      "data residency requirement"
     ],
     "in_scope": [
-      "Transfer permitted to countries with comparable or adequate data protection",
-      "Whitelist or approved country list for outbound transfers",
-      "Adequacy assessment mechanism"
+      "Mandatory domestic storage of (personal) data",
+      "Requirement to keep a local copy of data held or transferred abroad",
+      "Server/storage location mandate"
     ],
     "out_of_scope": [
-      "Intra-group data sharing without adequacy assessment"
+      "Local storage measures applied only to government data (excluded by methodology)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "banking secrecy",
-      "financial institution supervision",
-      "income tax assessment",
-      "customs tariff"
-    ],
-    "exclude_act_titles": [
-      "banking act",
-      "income tax act",
-      "customs act",
-      "immigration act",
-      "companies act"
-    ]
+    "negative_examples": ["government records storage", "classified data"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Local storage requirement for all sectors or for personal data, OR more than one measure of the 0.5 category"},
+        {"score": 0.5, "criteria": "Local storage requirement applied to a specific sector, specific data or non-personal data"},
+        {"score": 0, "criteria": "No requirement"}
+      ]
+    }
   },
   {
     "indicator_id": "P6-I3",
-    "name": "Contractual safeguards",
-    "legal_question": "Are standard contractual clauses or BCRs accepted as transfer mechanisms?",
+    "rdtii_ref": "6.3",
+    "name": "Infrastructure requirement",
+    "category": "Cross-border Data Policies",
+    "legal_question": "Does the law require the use of local computing infrastructure (e.g. local servers or data centres) to handle data?",
     "probe_keywords": [
-      "standard contractual clauses data transfer",
-      "binding corporate rules personal data",
-      "data transfer agreement contract",
-      "contractual protection data overseas"
+      "local infrastructure requirement",
+      "use of local servers",
+      "data centre localisation",
+      "local computing facilities requirement",
+      "local data centre requirement"
     ],
     "in_scope": [
-      "SCCs or model clauses explicitly named as transfer mechanism",
-      "Binding corporate rules accepted as lawful transfer basis",
-      "Contractual obligations on recipient to maintain equivalent protection"
+      "Requirement to use locally located servers, data centres or computing facilities",
+      "Mandate to route or host services through domestic infrastructure"
     ],
     "out_of_scope": [
-      "General data processing agreements not related to cross-border transfer"
+      "Infrastructure measures applied only to government data (excluded by methodology)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "banking secrecy",
-      "financial institution supervision",
-      "income tax assessment"
-    ],
-    "exclude_act_titles": [
-      "banking act",
-      "income tax act",
-      "customs act",
-      "immigration act"
-    ]
+    "negative_examples": ["government cloud", "defence infrastructure"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Infrastructure requirement present"},
+        {"score": 0, "criteria": "No requirement"}
+      ]
+    }
   },
   {
     "indicator_id": "P6-I4",
-    "name": "Consent exception",
-    "legal_question": "Can transfer proceed with individual consent?",
+    "rdtii_ref": "6.4",
+    "name": "Conditional cross-border flow regime",
+    "category": "Cross-border Data Policies",
+    "legal_question": "Does the law permit cross-border data transfer only if certain conditions are met (consent, adequacy, contractual safeguards, approval)?",
     "probe_keywords": [
-      "consent personal data transfer",
-      "individual consent data overseas",
-      "explicit consent data transfer exception"
+      "conditions for cross-border data transfer",
+      "transfer subject to consent",
+      "adequate level of protection transfer",
+      "standard contractual clauses",
+      "binding corporate rules",
+      "prescribed conditions for overseas transfer"
     ],
     "in_scope": [
-      "Explicit individual consent as a basis for cross-border transfer",
-      "Informed consent allowing overseas data transfer"
+      "Transfer permitted only subject to conditions: consent, adequacy/comparable protection, contractual safeguards (SCCs/BCRs), certification or regulatory approval",
+      "Accountability conditions imposed on the transferring organisation"
     ],
     "out_of_scope": [
-      "Consent for data collection (not specifically for transfer)"
+      "Conditional-flow measures applied only to government data (excluded by methodology)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "banking secrecy",
-      "financial institution supervision",
-      "income tax assessment"
-    ],
-    "exclude_act_titles": [
-      "banking act",
-      "income tax act",
-      "customs act"
-    ]
+    "negative_examples": ["government data sharing agreement"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Conditions imposed for all sectors or for personal data"},
+        {"score": 0.5, "criteria": "Conditions imposed for specific data or non-personal data"},
+        {"score": 0, "criteria": "No condition"}
+      ]
+    }
   },
   {
     "indicator_id": "P6-I5",
-    "name": "Other exceptions",
-    "legal_question": "What other lawful bases permit cross-border transfer beyond consent and adequacy?",
+    "rdtii_ref": "6.5",
+    "name": "Binding international data-transfer commitments",
+    "category": "Cross-border Data Policies",
+    "legal_question": "Is the economy party to an international agreement with binding commitments on cross-border data flows?",
     "probe_keywords": [
-      "personal data transfer exceptions",
-      "vital interests data transfer",
-      "public interest data overseas",
-      "lawful basis data transfer",
-      "necessary data transfer exception"
+      "binding commitment on data flows",
+      "free flow of data agreement",
+      "digital economy partnership agreement",
+      "cross-border data flow trade agreement",
+      "commitment not to require data localisation"
     ],
     "in_scope": [
-      "Transfer necessary for contract performance with the data subject",
-      "Transfer for vital interests or life-safety situations",
-      "Transfer for legal claims or court proceedings",
-      "Public interest exception for transfers"
+      "Membership of / ratification of an agreement with binding cross-border data-flow commitments (e.g. CPTPP, DEPA, RCEP e-commerce chapter, bilateral digital economy agreements)"
     ],
     "out_of_scope": [
-      "Consent-based exceptions (covered under P6-I4)",
-      "Adequacy-based transfer (P6-I2)"
+      "Non-binding declarations or memoranda of understanding without enforceable data-flow commitments"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "banking secrecy",
-      "financial institution supervision",
-      "income tax assessment"
-    ],
-    "exclude_act_titles": [
-      "banking act",
-      "income tax act",
-      "customs act"
-    ]
+    "negative_examples": ["non-binding MOU", "soft-law declaration"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Not committed to any binding agreement on data flows"},
+        {"score": 0, "criteria": "Committed to a binding agreement on data flows"}
+      ]
+    }
   },
   {
     "indicator_id": "P7-I1",
-    "name": "Legal basis for processing",
-    "legal_question": "Does the law require a lawful basis for collecting or processing personal data?",
+    "rdtii_ref": "7.1",
+    "name": "Comprehensive data protection framework",
+    "category": "Domestic Data Protection & Privacy",
+    "legal_question": "Does the economy have a comprehensive (cross-sectoral) personal data protection law?",
     "probe_keywords": [
       "personal data protection act",
-      "lawful basis data processing",
-      "data collection consent",
-      "personal data collection purpose",
-      "data protection law"
+      "comprehensive data protection law",
+      "data protection framework",
+      "privacy act",
+      "protection of personal data"
     ],
     "in_scope": [
-      "Requirement for lawful basis before collecting or processing personal data",
-      "Enumeration of lawful bases (consent, contract, legal obligation, vital interests, public task, legitimate interests)",
-      "Prohibition on processing without a lawful basis"
+      "A comprehensive / horizontal personal data protection statute applying across sectors",
+      "Sectoral-only data protection laws (partial framework)",
+      "Establishment of a data protection authority/commission under such a law"
     ],
     "out_of_scope": [
-      "Government data or public sector exclusions",
-      "Employee data processed under employment law (unless explicitly covered)",
-      "National security / intelligence service exclusions"
+      "Cybersecurity-only legislation (scored under P7-I2)",
+      "Cross-border transfer mechanics (scored under Pillar 6)"
     ],
-    "negative_examples": ["government data only", "national security exclusion"],
-    "exclude_keywords": [
-      "criminal procedure",
-      "criminal law enforcement",
-      "immigration enforcement"
-    ],
-    "exclude_act_titles": [
-      "criminal procedure code",
-      "penal code",
-      "immigration act",
-      "companies act"
-    ]
+    "negative_examples": ["banking secrecy provision", "tax confidentiality"],
+    "exclude_keywords": ["income tax assessment", "customs tariff", "banking secrecy"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act", "companies act", "banking act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "No data protection legal framework"},
+        {"score": 0.5, "criteria": "Data protection legal framework only for specific sectors (sectoral law)"},
+        {"score": 0, "criteria": "Comprehensive data protection framework"}
+      ]
+    }
   },
   {
     "indicator_id": "P7-I2",
-    "name": "Purpose limitation",
-    "legal_question": "Is data restricted to the purpose for which it was collected?",
+    "rdtii_ref": "7.2",
+    "name": "Dedicated cybersecurity framework",
+    "category": "Domestic Data Protection & Privacy",
+    "legal_question": "Does the economy have a dedicated, horizontal cybersecurity law?",
     "probe_keywords": [
-      "purpose limitation personal data",
-      "data use restriction",
-      "personal data purpose specification",
-      "data processing purpose"
+      "cybersecurity act",
+      "critical information infrastructure",
+      "national cybersecurity agency",
+      "computer misuse and cybersecurity",
+      "cybersecurity legal framework"
     ],
     "in_scope": [
-      "Prohibition on using personal data for purposes other than the stated collection purpose",
-      "Requirement to disclose purpose at point of collection",
-      "Secondary use prohibition unless new consent obtained"
+      "A dedicated, horizontal cybersecurity statute",
+      "Critical information infrastructure (CII) protection obligations",
+      "Establishment of a national cybersecurity authority",
+      "Sectoral or non-dedicated cybersecurity provisions (partial framework)"
     ],
     "out_of_scope": [
-      "Data retention rules (covered under a separate indicator)",
-      "Data quality obligations"
+      "General personal data protection law without cybersecurity-specific obligations (scored under P7-I1)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "criminal procedure",
-      "criminal law enforcement"
-    ],
-    "exclude_act_titles": [
-      "criminal procedure code",
-      "penal code",
-      "income tax act",
-      "customs act"
-    ]
+    "negative_examples": ["physical security guards act", "general penal provisions"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act", "companies act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "No cybersecurity legal framework"},
+        {"score": 0.5, "criteria": "Non-dedicated cybersecurity framework and/or dedicated cybersecurity law only for specific sectors (sectoral law)"},
+        {"score": 0, "criteria": "Dedicated, horizontal cybersecurity legal framework"}
+      ]
+    }
   },
   {
     "indicator_id": "P7-I3",
-    "name": "Data subject rights",
-    "legal_question": "Do individuals have rights to access, correct, or delete their personal data?",
+    "rdtii_ref": "7.3",
+    "name": "Minimum data retention requirement",
+    "category": "Domestic Data Protection & Privacy",
+    "legal_question": "Does the law impose a minimum period for retaining personal or communications data?",
     "probe_keywords": [
-      "right to access personal data",
-      "data correction right",
-      "right to erasure personal data",
-      "data subject rights",
-      "individual rights data protection"
+      "minimum data retention period",
+      "data retention requirement",
+      "retain personal data for a period",
+      "mandatory retention of communications data",
+      "preservation of data requirement"
     ],
     "in_scope": [
-      "Right to request access to personal data held by an organisation",
-      "Right to correct inaccurate or incomplete personal data",
-      "Right to withdraw consent and have data deleted or processed no further",
-      "Right to data portability (transfer data to another organisation)"
+      "A mandatory minimum period for retaining personal or communications/traffic data",
+      "Statutory data-preservation obligations imposing a retention floor"
     ],
     "out_of_scope": [
-      "Rights of legal entities (not natural persons)",
-      "Exemptions for national security"
+      "Data retention measures applied only to government data (excluded by methodology)",
+      "Maximum retention limits / storage-limitation duties (these reduce, not impose, retention)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "criminal procedure",
-      "criminal law enforcement"
-    ],
-    "exclude_act_titles": [
-      "criminal procedure code",
-      "penal code",
-      "banking act",
-      "customs act"
-    ]
+    "negative_examples": ["storage limitation principle", "government records retention"],
+    "exclude_keywords": ["customs tariff"],
+    "exclude_act_titles": ["customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Minimum period of data retention requirement present"},
+        {"score": 0, "criteria": "No data retention requirement"}
+      ]
+    }
   },
   {
     "indicator_id": "P7-I4",
-    "name": "Data breach notification",
-    "legal_question": "Is there a mandatory data breach notification requirement?",
+    "rdtii_ref": "7.4",
+    "name": "DPIA / DPO requirement",
+    "category": "Domestic Data Protection & Privacy",
+    "legal_question": "Does the law require Data Protection Impact Assessments (DPIA) or the appointment of a Data Protection Officer (DPO)?",
     "probe_keywords": [
-      "data breach notification",
-      "personal data breach reporting",
-      "mandatory breach notification",
-      "security incident notification"
+      "data protection officer",
+      "data protection impact assessment",
+      "appoint a data protection officer",
+      "DPIA requirement",
+      "privacy impact assessment"
     ],
     "in_scope": [
-      "Mandatory notification to supervisory authority when a data breach occurs",
-      "Notification to affected individuals when breach is likely to cause harm",
-      "Specific timeframe for notification (e.g. 72 hours, 3 days)"
+      "Mandatory appointment of a Data Protection Officer (DPO)",
+      "Mandatory Data Protection Impact Assessment (DPIA) for processing"
     ],
     "out_of_scope": [
-      "Voluntary breach disclosure without legal obligation"
+      "Voluntary best-practice guidance not imposed by law"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "criminal procedure",
-      "income tax assessment"
-    ],
-    "exclude_act_titles": [
-      "criminal procedure code",
-      "penal code",
-      "income tax act",
-      "customs act"
-    ]
+    "negative_examples": ["voluntary guidance", "non-binding code of practice"],
+    "exclude_keywords": ["income tax assessment", "customs tariff"],
+    "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "DPO and DPIA, or only DPO requirement, applied to all sectors"},
+        {"score": 0.5, "criteria": "DPO and DPIA, or only DPO requirement, applied to a specific sector"},
+        {"score": 0, "criteria": "No requirement"}
+      ]
+    }
   },
   {
     "indicator_id": "P7-I5",
-    "name": "Enforcement & penalties",
-    "legal_question": "Is there a supervisory authority and penalty regime for data protection violations?",
+    "rdtii_ref": "7.5",
+    "name": "Government access to personal data",
+    "category": "Domestic Data Protection & Privacy",
+    "legal_question": "Does the law allow government authorities to access personal data, particularly without a court order?",
     "probe_keywords": [
-      "data protection authority",
-      "personal data penalty",
-      "data protection enforcement",
-      "supervisory authority personal data",
-      "privacy commissioner"
+      "government access to personal data",
+      "lawful interception of communications",
+      "disclosure of personal data to authorities",
+      "access to data without a warrant",
+      "power to require production of data"
     ],
     "in_scope": [
-      "Establishment of a data protection commissioner or supervisory body",
-      "Powers of the authority to investigate and enforce",
-      "Financial penalties or fines for violations",
-      "Criminal offences and imprisonment terms for serious breaches"
+      "Powers allowing authorities to access, intercept or compel disclosure of personal data",
+      "Access permitted without prior judicial authorisation (court order/warrant)"
     ],
     "out_of_scope": [
-      "Self-regulatory industry bodies without statutory powers"
+      "Access strictly conditioned on a judicial warrant with no exception",
+      "Routine data-subject access requests by individuals (scored under data protection principles, not here)"
     ],
-    "negative_examples": [],
-    "exclude_keywords": [
-      "criminal procedure",
-      "income tax assessment",
-      "customs tariff enforcement"
-    ],
-    "exclude_act_titles": [
-      "criminal procedure code",
-      "income tax act",
-      "customs act"
-    ]
+    "negative_examples": ["individual data subject access request"],
+    "exclude_keywords": ["customs tariff"],
+    "exclude_act_titles": ["customs act"],
+    "scoring": {
+      "scale": "0 = simplified / no barrier; 1 = heavily regulated",
+      "bands": [
+        {"score": 1, "criteria": "Any measure that allows government to access data without court orders"},
+        {"score": 0, "criteria": "No such measure (access only with a court order)"}
+      ]
+    }
   }
 ]

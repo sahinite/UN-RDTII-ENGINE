@@ -524,6 +524,34 @@ class TestIndexDiscovery:
         assert not any("Banking Act" in t for t in titles), \
             "Banking Act is in exclude_act_titles and must be dropped"
 
+    def test_discover_exclude_wins_over_known(self):
+        """An excluded act must be dropped even if it matches a seed known title.
+
+        Round 1's SG P7 seed lists negative-example acts (Banking/Income Tax/etc.);
+        the exclusion filter must run before the KNOWN check so they're not mapped.
+        """
+        from src.crawler.discover import discover
+        from src.crawler.seed_loader import normalise_title
+
+        taxonomy = [{
+            "indicator_id": "P7-I1",
+            "probe_keywords": ["personal data protection"],
+            "exclude_act_titles": ["banking act"],
+        }]
+        # Banking Act appears in the seed's known titles, yet is P7-excluded.
+        known_titles = {normalise_title("Banking Act 1970")}
+
+        async def mock_fetch(url, portal):
+            return _SSO_INDEX_HTML, 200
+
+        with patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch):
+            results = asyncio.run(
+                discover(_SG_ECONOMY, 7, taxonomy, set(), known_titles=known_titles)
+            )
+
+        assert not any("Banking Act" in z.act_title for z in results), \
+            "Excluded act must be dropped even when it matches a known title"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. pdf_endpoint routing
