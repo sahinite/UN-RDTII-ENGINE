@@ -80,5 +80,17 @@ Two zones wired together in `main.py`:
 - `outputs/` — CSV/JSON run outputs (gitignored)
 - `logs/` — run logs and cost reports (gitignored)
 
-### NOTE:
-- always update CONTEXT.md once you done implementation.
+### IMPORTANT RULES:
+- always update CONTEXT.md and remove any deprecated details from the file.
+
+## For Evidence and requirement confirmation:
+- always refer docs/README_template.md
+
+## For output format and RULES
+- for output values guides and rules always refer to docs/How_to_Complete_the_Output_Template.md 
+- for json output always refer data/output_schema_sample.json
+- for csv output always refer data/output_template/OUTPUT_TEMPLATE_31MAY.xlsx (Make sure to read it correctly)
+
+## For RDTII Complete pillar definition and score critiera
+- always refer to docs/RDTII_methodology_and_scoring_criteria.csv
+
