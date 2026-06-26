@@ -200,9 +200,7 @@ Each indicator has `rdtii_ref`, `category`, `scoring` (0/0.5/1 bands), `probe_ke
 
 ### Critical Discovery Fix (latest)
 
-Compound seed titles (e.g. "PDPA; Guide; Advisory...") split on `;`/newline in `seed_loader.py`.
-
-**KNOWN seed acts are ground truth and bypass the exclude filter** (`discover.py`). Round 1 lists Companies/Income-Tax/Banking acts as positive evidence (6.2 local storage, 7.3 retention, 7.1 secrecy) — so a seed-listed act is NEVER excluded; the exclude list only filters NEW (non-seed) noise. The discovery cap is split: keep ALL KNOWN up to `ZONE2_MAX_KNOWN` (12) + up to `ZONE2_MAX_ACTS` (3) NEW — KNOWN are no longer truncated by title-BM25 rank. This recovers Companies Act → SG P6 6.2 and Companies/Income-Tax → SG P7 7.3. **Trade-off:** more ground-truth acts processed (SG P7 ≈ 8 KNOWN + 3 NEW) → longer runs; use gpt-4.1 or lower `ZONE2_MAX_KNOWN` to stay near the 10-min budget.
+Compound seed titles (e.g. "PDPA; Guide; Advisory...") split on `;`/newline in `seed_loader.py`. Exclude filter in `discover.py` runs BEFORE KNOWN check — Round 1 negative-example acts (banking/tax/companies) no longer bypass exclusion as KNOWN.
 
 ### Retrieval recall — text quality + tuning
 

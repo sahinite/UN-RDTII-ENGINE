@@ -524,10 +524,11 @@ class TestIndexDiscovery:
         assert not any("Banking Act" in t for t in titles), \
             "Banking Act is in exclude_act_titles and must be dropped"
 
-    def test_discover_known_seed_bypasses_exclude(self):
-        """A Round 1 KNOWN seed act is ground truth and must be kept even when it
-        matches a pillar's exclude list (Companies/Income Tax/Banking carry real
-        storage/retention/secrecy provisions). Exclusion applies to NEW acts only.
+    def test_discover_exclude_wins_over_known(self):
+        """An excluded act must be dropped even if it matches a seed known title.
+
+        Round 1's SG P7 seed lists negative-example acts (Banking/Income Tax/etc.);
+        the exclusion filter must run before the KNOWN check so they're not mapped.
         """
         from src.crawler.discover import discover
         from src.crawler.seed_loader import normalise_title
@@ -537,7 +538,7 @@ class TestIndexDiscovery:
             "probe_keywords": ["personal data protection"],
             "exclude_act_titles": ["banking act"],
         }]
-        # Banking Act is BOTH in the exclude list AND a known seed act.
+        # Banking Act appears in the seed's known titles, yet is P7-excluded.
         known_titles = {normalise_title("Banking Act 1970")}
 
         async def mock_fetch(url, portal):
@@ -548,9 +549,8 @@ class TestIndexDiscovery:
                 discover(_SG_ECONOMY, 7, taxonomy, set(), known_titles=known_titles)
             )
 
-        banking = [z for z in results if "Banking Act" in z.act_title]
-        assert banking, "KNOWN seed act must be kept despite being in the exclude list"
-        assert banking[0].discovery_tag == "KNOWN"
+        assert not any("Banking Act" in z.act_title for z in results), \
+            "Excluded act must be dropped even when it matches a known title"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
