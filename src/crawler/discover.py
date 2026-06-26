@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 # ── Environment config ─────────────────────────────────────────────────────────
 
-ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "5"))
+ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "3"))  # NEW (discovered) acts cap
+# Round 1 KNOWN seed acts are ground truth (Companies/Income Tax/etc. carry real
+# storage/retention provisions) — keep all of them, bounded, rather than letting
+# the NEW cap truncate them by title-BM25 rank.
+ZONE2_MAX_KNOWN = int(os.getenv("ZONE2_MAX_KNOWN", "12"))
 _DISCOVER_BUDGET_S = float(os.getenv("DISCOVER_BUDGET_S", "120.0"))
 _INDEX_FETCH_TIMEOUT_S = float(os.getenv("INDEX_FETCH_TIMEOUT_S", "30.0"))
 # Normalised BM25 title score a NEW (not-in-seed) act must clear to be kept.
@@ -218,20 +222,19 @@ async def _discover_index(
     results: list[tuple[str, str, str]] = []
     for score, title, url in scored:
         norm = _normalise_url(url)
-        tl = title.lower()
-        # Exclusion wins over everything — the pillar's exclude_act_titles are the
-        # curated "never relevant" list, and the Round 1 seed itself includes
-        # negative-example acts (banking/tax/companies/etc.) for SG P7. Applying
-        # the filter BEFORE the KNOWN check stops those from being mapped.
-        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
-            logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
-            continue
         # KNOWN if the URL OR the (normalised) title matches a Round 1 seed entry.
-        # Round 1 DB rows often carry titles but no act-level URL, so URL-only
-        # matching would mis-tag known acts (e.g. the PDPA) as NEW.
+        # Round 1 KNOWN acts are ground truth — Companies/Income Tax/Banking carry
+        # real storage/retention/secrecy provisions (RDTII 6.2 / 7.3 / 7.1) — so
+        # they are NEVER excluded, even if they appear in a pillar's exclude list.
         is_known = (norm in known_norm) or (normalise_title(title) in known_titles_norm)
         if is_known:
             results.append((title, url, "KNOWN"))
+            continue
+        # Exclusion applies to NEW (non-seed) candidates only — drops noise such as
+        # an unrelated customs/immigration act matched on a generic keyword.
+        tl = title.lower()
+        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
+            logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
             continue
         if score >= _NEW_SCORE_THRESHOLD:
             results.append((title, url, "NEW"))
@@ -331,13 +334,13 @@ async def discover(
     known_results = [(t, u, tag) for t, u, tag in all_results if tag == "KNOWN"]
     new_results   = [(t, u, tag) for t, u, tag in all_results if tag == "NEW"]
 
-    # Cap at ZONE2_MAX_ACTS — KNOWN always included; NEW fills remaining slots
-    cap = ZONE2_MAX_ACTS
-    if len(known_results) >= cap:
-        combined = known_results[:cap]
-    else:
-        remaining = cap - len(known_results)
-        combined = known_results + new_results[:remaining]
+    # Keep ALL Round 1 KNOWN acts (up to ZONE2_MAX_KNOWN), then add up to
+    # ZONE2_MAX_ACTS NEW discoveries. KNOWN are ground truth and must not be
+    # truncated by the NEW cap.
+    known_keep = known_results[:ZONE2_MAX_KNOWN]
+    new_keep = new_results[:ZONE2_MAX_ACTS]
+    combined = known_keep + new_keep
+    cap = ZONE2_MAX_KNOWN
 
     logger.info(
         "[DISCOVER] %s P%d: %d KNOWN + %d NEW → %d acts (cap=%d)",
