@@ -37,6 +37,14 @@ class TestResolveProvisionTag:
         assert tag == "NEW"
         assert unresolvable is False
 
+    def test_pdf_view_suffix_does_not_break_known_match(self):
+        """The ?ViewType=Pdf render artefact must not prevent a KNOWN match."""
+        tag, unresolvable = resolve_provision_tag(
+            BASE_URL + "?ViewType=Pdf", "#pr26-", "KNOWN", KNOWN
+        )
+        assert tag == "KNOWN"
+        assert unresolvable is False
+
 
 class TestInferArticleAnchor:
     def test_section_number(self):

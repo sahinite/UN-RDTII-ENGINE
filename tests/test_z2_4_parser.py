@@ -50,6 +50,37 @@ def test_verbatim_assertion_passes_for_exact_match():
     assert reason is None
 
 
+def test_verbatim_assertion_tolerates_pdfplumber_missing_spaces():
+    """pdfplumber sometimes drops inter-word spaces; a correctly-spaced LLM
+    snippet must still verify (whitespace-insensitive match)."""
+    from src.mapping.parser import _assert_verbatim_in_context
+
+    # Source chunk as pdfplumber mangled it — words run together.
+    chunks = [make_retrieved_chunk(
+        text="(a) tooverseeandpromotethecybersecurityofcomputersandcomputersystemsinSingapore;"
+    )]
+    ok, reason = _assert_verbatim_in_context(
+        "(a) to oversee and promote the cybersecurity of computers and computer systems in Singapore;",
+        chunks,
+    )
+    assert ok is True, reason
+
+
+def test_verbatim_assertion_matches_across_chunk_boundary():
+    """A snippet that straddles two retrieved chunks still verifies."""
+    from src.mapping.parser import _assert_verbatim_in_context
+
+    chunks = [
+        make_retrieved_chunk(text="The Commissioner has the following duties and"),
+        make_retrieved_chunk(text="functions to protect critical information infrastructure."),
+    ]
+    ok, reason = _assert_verbatim_in_context(
+        "duties and functions to protect critical information infrastructure",
+        chunks,
+    )
+    assert ok is True, reason
+
+
 def test_verbatim_assertion_fails_hard_discard():
     """Decision 8: failed verbatim assertion → hard discard (empty results)."""
     from src.mapping.parser import parse_llm_response

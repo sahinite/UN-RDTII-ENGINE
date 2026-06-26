@@ -14,8 +14,8 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-GROQ_MODEL_DEFAULT = "qwen3-32b"
-GROQ_MODEL_FALLBACK = "qwen3.6-27b"
+GROQ_MODEL_DEFAULT = "qwen/qwen3-32b"
+GROQ_MODEL_FALLBACK = "qwen/qwen3.6-27b"
 
 
 def _resolve_model() -> str:

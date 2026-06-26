@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from typing import Optional
 
 from src.mapping.exceptions import ParseError
@@ -101,21 +102,46 @@ def _assert_verbatim_in_context(
     top_chunks: list[RetrievedChunk],
 ) -> tuple[bool, Optional[str]]:
     """
-    Verifies verbatim_snippet appears in at least one source chunk.
+    Verifies verbatim_snippet appears in the retrieved source chunks.
     Returns (True, None) on pass, (False, reason) on fail.
     Failed assertion discards the row unless ALLOW_UNVERIFIED_SNIPPETS=true.
+
+    Matching is tolerant of two extraction artefacts that do NOT mean the LLM
+    invented text:
+      - pdfplumber sometimes drops the spaces between words ("tooverseeand…"),
+        so we also compare with ALL whitespace removed.
+      - Unicode punctuation variants (curly quotes, en/em dashes, ligatures) are
+        normalised. We also match across the *joined* chunks so a snippet that
+        straddles a chunk boundary still verifies.
     """
-    def normalise(text: str) -> str:
-        return re.sub(r"\s+", " ", text.strip().lower())
+    def _norm(text: str) -> str:
+        t = unicodedata.normalize("NFKC", text)
+        for a, b in (
+            ("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"'),
+            ("–", "-"), ("—", "-"), ("…", "..."),
+            (" ", " "), ("­", ""),
+        ):
+            t = t.replace(a, b)
+        return t.lower()
 
-    norm_snippet = normalise(snippet)
+    def _collapse(text: str) -> str:
+        return re.sub(r"\s+", " ", _norm(text).strip())
 
-    for rc in top_chunks:
-        norm_chunk = normalise(rc.chunk.text)
-        if norm_snippet in norm_chunk:
-            return True, None
-        if len(norm_snippet) > 100 and norm_snippet[:80] in norm_chunk:
-            return True, None
+    def _stripped(text: str) -> str:
+        return re.sub(r"\s+", "", _norm(text))
+
+    joined = " ".join(rc.chunk.text for rc in top_chunks)
+    snip_collapse, hay_collapse = _collapse(snippet), _collapse(joined)
+    snip_strip, hay_strip = _stripped(snippet), _stripped(joined)
+
+    if snip_collapse and snip_collapse in hay_collapse:
+        return True, None
+    # Whitespace-insensitive — handles pdfplumber dropping inter-word spaces.
+    if snip_strip and snip_strip in hay_strip:
+        return True, None
+    # Long-snippet prefix fallback (snippet may run slightly past the chunk window).
+    if len(snip_strip) > 80 and snip_strip[:80] in hay_strip:
+        return True, None
 
     return False, f"verbatim_snippet not found in any of {len(top_chunks)} source chunks"
 
