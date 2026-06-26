@@ -1,14 +1,17 @@
 """
-5-tier auto-cascade LLM engine with session pinning. [Z2-4 ST1/ST2]
+7-tier auto-cascade LLM engine with session pinning. [Z2-4 ST1/ST2]
 
 PROVIDER_CASCADE order (DO NOT reorder):
   1. AnthropicProvider  — claude-sonnet-4-20250514 (pinned primary)
   2. OpenAIProvider     — gpt-4o
-  3. GroqProvider       — qwen3-32b (free tier; deepseek removed from Groq June 2026)
-  4. OllamaProvider(4) — qwen2.5:7b (Apache 2.0, offline)
-  5. OllamaProvider(5) — granite3-dense:8b (Apache 2.0, offline)
+  3. DeepSeekProvider   — deepseek-chat (V3, OpenAI-compatible; DEEPSEEK_API_KEY)
+  4. GroqProvider       — qwen/qwen3-32b (free tier; fallback qwen/qwen3.6-27b)
+  5. QwenProvider       — qwen-plus via DashScope (DASHSCOPE_API_KEY)
+  6. OllamaProvider(6) — qwen2.5:7b (Apache 2.0, offline)
+  7. OllamaProvider(7) — granite3-dense:8b (Apache 2.0, offline)
 
 Llama 3.3 is NOT in cascade — non-Apache 2.0 license.
+Pin a provider with LLM_PROVIDER env var: anthropic | openai | deepseek | groq | qwen | ollama
 """
 
 from __future__ import annotations
@@ -27,9 +30,11 @@ from src.mapping.exceptions import (
 )
 from src.mapping.models import LLMResponse
 from src.mapping.providers.anthropic_provider import AnthropicProvider
+from src.mapping.providers.deepseek_provider import DeepSeekProvider
 from src.mapping.providers.groq_provider import GroqProvider
 from src.mapping.providers.ollama_provider import OllamaProvider
 from src.mapping.providers.openai_provider import OpenAIProvider
+from src.mapping.providers.qwen_provider import QwenProvider
 
 logger = logging.getLogger("mapping.llm_client")
 
@@ -37,9 +42,11 @@ logger = logging.getLogger("mapping.llm_client")
 PROVIDER_CASCADE: list[BaseLLMProvider] = [
     AnthropicProvider(),   # 1 — claude-sonnet-4-20250514 (pinned)
     OpenAIProvider(),      # 2 — gpt-4o
-    GroqProvider(),        # 3 — qwen3-32b via Groq (qwen3.6-27b fallback)
-    OllamaProvider(4),     # 4 — qwen2.5:7b (Apache 2.0, offline)
-    OllamaProvider(5),     # 5 — granite3-dense:8b (Apache 2.0, offline)
+    DeepSeekProvider(),    # 3 — deepseek-chat V3 (DEEPSEEK_API_KEY)
+    GroqProvider(),        # 4 — qwen/qwen3-32b via Groq (qwen/qwen3.6-27b fallback)
+    QwenProvider(),        # 5 — qwen-plus via DashScope (DASHSCOPE_API_KEY)
+    OllamaProvider(6),     # 6 — qwen2.5:7b (Apache 2.0, offline)
+    OllamaProvider(7),     # 7 — granite3-dense:8b (Apache 2.0, offline)
 ]
 
 _SESSION_PROVIDER: BaseLLMProvider | None = None
@@ -90,10 +97,12 @@ def pin_active_provider() -> BaseLLMProvider:
 
         raise ConfigError(
             "No LLM provider is available. Configure at least one:\n"
-            "  ANTHROPIC_API_KEY=sk-ant-...  (Priority 1 — recommended)\n"
-            "  OPENAI_API_KEY=sk-...          (Priority 2)\n"
-            "  GROQ_API_KEY=gsk_...           (Priority 3 — free)\n"
-            "  Ollama: run 'ollama serve' + 'ollama pull qwen2.5:7b'  (Priority 4 — offline)"
+            "  ANTHROPIC_API_KEY=sk-ant-...    (Priority 1 — recommended)\n"
+            "  OPENAI_API_KEY=sk-...            (Priority 2)\n"
+            "  DEEPSEEK_API_KEY=...             (Priority 3 — deepseek-chat)\n"
+            "  GROQ_API_KEY=gsk_...             (Priority 4 — free)\n"
+            "  DASHSCOPE_API_KEY=...            (Priority 5 — Qwen via DashScope)\n"
+            "  Ollama: run 'ollama serve' + 'ollama pull qwen2.5:7b'  (Priority 6 — offline)"
         )
 
 

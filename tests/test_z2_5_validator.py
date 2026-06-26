@@ -175,60 +175,48 @@ class TestUrlValidator:
 
 class TestWaybackArchiver:
 
-    @respx.mock
     def test_successful_archive_returns_url(self):
-        respx.get("https://web.archive.org/save/https://sso.agc.gov.sg/Act/PDPA").mock(
-            return_value=httpx.Response(
-                200,
-                headers={"Content-Location": "/web/20240621120000/https://sso.agc.gov.sg/Act/PDPA"},
-                text="",
-            )
-        )
-        from src.output.validator import archive_wayback
-        result = archive_wayback("https://sso.agc.gov.sg/Act/PDPA")
+        mock_api = MagicMock()
+        mock_api.save.return_value = "https://web.archive.org/web/20240621120000/https://sso.agc.gov.sg/Act/PDPA"
+        with patch("src.output.validator._WaybackSaveAPI", return_value=mock_api):
+            from src.output.validator import archive_wayback
+            result = archive_wayback("https://sso.agc.gov.sg/Act/PDPA")
         assert "web.archive.org" in result
         assert "sso.agc.gov.sg" in result
 
-    @respx.mock
     def test_wayback_429_retries_with_wait(self):
         call_count = 0
 
-        def rate_limit_then_ok(request):
+        def rate_limit_then_ok():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return httpx.Response(429, text="Rate limited")
-            return httpx.Response(
-                200,
-                headers={"Content-Location": "/web/20240101/https://example.com/"},
-                text="",
-            )
+                raise Exception("429 Too Many Requests rate limited")
+            return "https://web.archive.org/web/20240101/https://example.com/"
 
-        respx.get("https://web.archive.org/save/https://example.com/act").mock(
-            side_effect=rate_limit_then_ok
-        )
-        with patch("src.output.validator._sleep") as mock_sleep:
-            from src.output.validator import archive_wayback
-            result = archive_wayback("https://example.com/act")
+        mock_api = MagicMock()
+        mock_api.save.side_effect = rate_limit_then_ok
+        with patch("src.output.validator._WaybackSaveAPI", return_value=mock_api):
+            with patch("src.output.validator._sleep") as mock_sleep:
+                from src.output.validator import archive_wayback
+                result = archive_wayback("https://example.com/act")
         mock_sleep.assert_called_once()
         assert result != ""
 
-    @respx.mock
     def test_wayback_failure_returns_empty_string(self):
-        respx.get("https://web.archive.org/save/https://example.com/act").mock(
-            return_value=httpx.Response(523, text="Service Unavailable")
-        )
-        from src.output.validator import archive_wayback
-        result = archive_wayback("https://example.com/act")
+        mock_api = MagicMock()
+        mock_api.save.side_effect = Exception("523 Service Unavailable")
+        with patch("src.output.validator._WaybackSaveAPI", return_value=mock_api):
+            from src.output.validator import archive_wayback
+            result = archive_wayback("https://example.com/act")
         assert result == ""
 
-    @respx.mock
     def test_wayback_network_error_returns_empty_string(self):
-        respx.get("https://web.archive.org/save/https://example.com/act").mock(
-            side_effect=httpx.ConnectError("Connection refused")
-        )
-        from src.output.validator import archive_wayback
-        result = archive_wayback("https://example.com/act")
+        mock_api = MagicMock()
+        mock_api.save.side_effect = Exception("Connection refused")
+        with patch("src.output.validator._WaybackSaveAPI", return_value=mock_api):
+            from src.output.validator import archive_wayback
+            result = archive_wayback("https://example.com/act")
         assert result == ""
 
 
@@ -534,17 +522,12 @@ class TestValidateAndFlag:
         respx.get("https://sso.agc.gov.sg/Act/PDPA").mock(
             return_value=httpx.Response(200, text="<html>PDPA</html>")
         )
-        respx.get("https://web.archive.org/save/https://sso.agc.gov.sg/Act/PDPA").mock(
-            return_value=httpx.Response(
-                200,
-                headers={"Content-Location": "/web/20240101/https://sso.agc.gov.sg/Act/PDPA"},
-                text="",
-            )
-        )
+        mock_wb_api = MagicMock()
+        mock_wb_api.save.return_value = "https://web.archive.org/web/20240101/https://sso.agc.gov.sg/Act/PDPA"
         from src.output.validator import REVIEW_NOTE, validate_and_flag
 
         record = _make_record(confidence=0.92)
-        with patch("src.output.validator._sleep"):
+        with patch("src.output.validator._sleep"), patch("src.output.validator._WaybackSaveAPI", return_value=mock_wb_api):
             results = validate_and_flag([record])
 
         assert len(results) == 1

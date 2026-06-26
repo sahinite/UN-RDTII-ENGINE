@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -14,6 +15,10 @@ from src.mapping.base_provider import BaseLLMProvider
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
+logger = logging.getLogger(__name__)
+
+# qwen/qwen3.6-27b is the verified-working model on Groq as of June 2026.
+# qwen/qwen3-32b is tried first (higher capacity) but falls back automatically.
 GROQ_MODEL_DEFAULT = "qwen/qwen3-32b"
 GROQ_MODEL_FALLBACK = "qwen/qwen3.6-27b"
 
@@ -58,8 +63,14 @@ class GroqProvider(BaseLLMProvider):
                     {"role": "user", "content": user_prompt},
                 ],
             )
-        except Exception:
-            # Primary model failed for any reason — always attempt fallback first
+        except Exception as e1:
+            # Primary model failed — log and fall back to the known-good model
+            logger.warning({
+                "event": "groq_primary_model_failed",
+                "primary_model": model_to_use,
+                "fallback_model": GROQ_MODEL_FALLBACK,
+                "error": str(e1),
+            })
             try:
                 model_to_use = GROQ_MODEL_FALLBACK
                 resp = client.chat.completions.create(

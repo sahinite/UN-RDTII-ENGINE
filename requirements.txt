@@ -33,14 +33,17 @@ sentence-transformers
 rank-bm25
 faiss-cpu
 
-# LLM clients — [Z2-4] (5-tier cascade: anthropic -> openai -> groq -> ollama)
+# LLM clients — [Z2-4] (7-tier cascade: anthropic -> openai -> deepseek -> groq -> qwen -> ollama)
 anthropic
 openai
 groq
 ollama
+# deepseek: uses openai package with base_url (no extra package needed)
+# qwen/dashscope: uses openai package with base_url (no extra package needed)
 
 # Output / utils — [Z2-6]
 pandas
+waybackpy
 
 # Testing
 pytest

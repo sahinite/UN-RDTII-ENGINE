@@ -1,4 +1,4 @@
-"""Ollama offline provider — qwen2.5:7b (P4) and granite3-8b (P5). [Z2-4 ST1]"""
+"""Ollama offline provider — qwen2.5:7b (P6) and granite3-8b (P7). [Z2-4 ST1]"""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from src.mapping.exceptions import ProviderAPIError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
 OLLAMA_MODELS = {
-    4: "qwen2.5:7b",    # Priority 4 — Apache 2.0
-    5: "granite3-8b",   # Priority 5 — Apache 2.0 (IBM Granite 3.0 8B)
+    6: "qwen2.5:7b",    # Priority 6 — Apache 2.0
+    7: "granite3-8b",   # Priority 7 — Apache 2.0 (IBM Granite 3.0 8B)
 }
 
 # CRITICAL: Llama 3.3 is EXPLICITLY EXCLUDED — non-Apache 2.0 license.
@@ -24,7 +24,7 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, priority: int):
-        assert priority in (4, 5), f"Invalid Ollama priority: {priority}"
+        assert priority in (6, 7), f"Invalid Ollama priority: {priority}"
         self._priority = priority
         self._model = OLLAMA_MODELS[priority]
         assert self._model not in LLAMA33_BLOCKLIST, "Llama 3.3 blocked — non-Apache 2.0 license"

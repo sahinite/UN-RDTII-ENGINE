@@ -269,14 +269,14 @@ class TestRetrieveBatchUnknownIndicator:
 # ── Bug 6 & 7: Ollama model tag + Groq fallback ───────────────────────────────
 
 class TestOllamaModelTag:
-    def test_priority5_model_is_granite3_8b(self):
+    def test_priority7_model_is_granite3_8b(self):
         from src.mapping.providers.ollama_provider import OllamaProvider
-        provider = OllamaProvider(5)
+        provider = OllamaProvider(7)
         assert provider.model == "granite3-8b"
 
-    def test_priority4_model_unchanged(self):
+    def test_priority6_model_is_qwen25(self):
         from src.mapping.providers.ollama_provider import OllamaProvider
-        provider = OllamaProvider(4)
+        provider = OllamaProvider(6)
         assert provider.model == "qwen2.5:7b"
 
 

@@ -135,7 +135,7 @@ def test_ollama_not_available_when_server_down():
     import requests as req
     with patch("src.mapping.providers.ollama_provider.requests.get", side_effect=req.ConnectionError("connection refused")):
         from src.mapping.providers.ollama_provider import OllamaProvider
-        assert OllamaProvider(4).is_available() is False
+        assert OllamaProvider(6).is_available() is False
 
 
 def test_ollama_not_available_when_model_not_pulled():
@@ -143,15 +143,15 @@ def test_ollama_not_available_when_model_not_pulled():
     mock_resp.json.return_value = {"models": [{"name": "llama2:7b"}]}
     with patch("src.mapping.providers.ollama_provider.requests.get", return_value=mock_resp):
         from src.mapping.providers.ollama_provider import OllamaProvider
-        assert OllamaProvider(4).is_available() is False
+        assert OllamaProvider(6).is_available() is False
 
 
 def test_ollama_provider_names():
     from src.mapping.providers.ollama_provider import OllamaProvider
-    assert OllamaProvider(4).provider_name == "ollama"
-    assert OllamaProvider(5).provider_name == "ollama"
-    assert "qwen" in OllamaProvider(4).model
-    assert "granite" in OllamaProvider(5).model
+    assert OllamaProvider(6).provider_name == "ollama"
+    assert OllamaProvider(7).provider_name == "ollama"
+    assert "qwen" in OllamaProvider(6).model
+    assert "granite" in OllamaProvider(7).model
 
 
 def test_anthropic_provider_name_and_model():

@@ -35,7 +35,6 @@ REVIEW_NOTE = "Recommend human review — OCR/translation source"
 
 _URL_VALIDATE_TIMEOUT = 15
 _URL_MAX_RETRIES = 3
-_WAYBACK_SAVE_URL = "https://web.archive.org/save/{url}"
 _WAYBACK_TIMEOUT = 30
 # Wayback is flaky (429/520). Keep retries cheap and fall back to a local snapshot.
 _WAYBACK_RETRY_WAIT = float(os.getenv("WAYBACK_RETRY_WAIT_S", "2.0"))
@@ -45,9 +44,16 @@ _LOCAL_ARCHIVE_FALLBACK = os.getenv("LOCAL_ARCHIVE_FALLBACK", "true").lower() in
 _LOCAL_ARCHIVE_DIR = os.getenv("LOCAL_ARCHIVE_DIR", "outputs/archive")
 
 _USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "RDTII-Engine/1.0 (UN ESCAP Hackathon; +https://github.com/un-escap/rdtii-engine) "
+    "waybackpy/3.0.6"
 )
+
+try:
+    from waybackpy import WaybackMachineSaveAPI as _WaybackSaveAPI
+    _WAYBACKPY_AVAILABLE = True
+except ImportError:
+    _WaybackSaveAPI = None  # type: ignore[assignment,misc]
+    _WAYBACKPY_AVAILABLE = False
 
 # Patterns that indicate a soft-404 / error page even on HTTP 200
 _ERROR_PAGE_PATTERNS = (
@@ -203,48 +209,33 @@ def validate_url(url: str) -> tuple[URLStatusType, Optional[int]]:
 
 def archive_wayback(url: str) -> str:
     """
-    POST a URL to Wayback Machine save API.
-    Returns archive URL (from Content-Location header) or "" on failure.
+    Submit a URL to the Wayback Machine using waybackpy.
+    Returns the archive URL or "" on failure.
     """
-    save_url = _WAYBACK_SAVE_URL.format(url=url)
-    headers = {"User-Agent": _USER_AGENT}
+    if not _WAYBACKPY_AVAILABLE:
+        logger.warning({
+            "event": "wayback_unavailable",
+            "reason": "waybackpy not installed (pip install waybackpy)",
+            "url": url,
+            "economy": "",
+        })
+        return ""
 
     for attempt in range(1, 3):
         try:
-            with httpx.Client(timeout=_WAYBACK_TIMEOUT, headers=headers) as client:
-                resp = client.get(save_url)  # Wayback uses GET for save
+            api = _WaybackSaveAPI(url, _USER_AGENT)
+            archive_url = api.save()
+            logger.info({
+                "event": "wayback_archived",
+                "url": url,
+                "archive_url": archive_url,
+                "economy": "",
+            })
+            return archive_url
 
-            if resp.status_code == 200:
-                # Content-Location: /web/20240101000000/https://example.com/act
-                content_location = resp.headers.get(
-                    "Content-Location",
-                    resp.headers.get("content-location", ""),
-                )
-                if content_location:
-                    archive = (
-                        content_location
-                        if content_location.startswith("http")
-                        else f"https://web.archive.org{content_location}"
-                    )
-                    logger.info({
-                        "event": "wayback_archived",
-                        "url": url,
-                        "archive_url": archive,
-                        "economy": "",
-                    })
-                    return archive
-                # Sometimes 200 without Content-Location — construct from redirect chain
-                final = str(resp.url)
-                if "web.archive.org/web/" in final:
-                    logger.info({
-                        "event": "wayback_archived",
-                        "url": url,
-                        "archive_url": final,
-                        "economy": "",
-                    })
-                    return final
-
-            if resp.status_code == 429:
+        except Exception as exc:
+            err = str(exc).lower()
+            if "429" in err or "too many" in err or "rate" in err:
                 logger.warning({
                     "event": "wayback_rate_limited",
                     "url": url,
@@ -253,19 +244,8 @@ def archive_wayback(url: str) -> str:
                 })
                 _sleep(_WAYBACK_RETRY_WAIT)
                 continue
-
             logger.warning({
                 "event": "wayback_failed",
-                "url": url,
-                "http_status": resp.status_code,
-                "attempt": attempt,
-                "economy": "",
-            })
-            break
-
-        except httpx.RequestError as exc:
-            logger.warning({
-                "event": "wayback_request_error",
                 "url": url,
                 "error": str(exc),
                 "attempt": attempt,
