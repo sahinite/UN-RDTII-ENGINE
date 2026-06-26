@@ -78,9 +78,11 @@ Two zones wired together in `main.py`:
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
 2. `openai` / `gpt-4o`
-3. `groq` / `qwen3-32b` (fallback: `qwen3.6-27b`)
-4. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
-5. `ollama` / `granite3-8b` (offline, Apache 2.0)
+3. `deepseek` / `deepseek-chat` V3 (`DEEPSEEK_API_KEY`; OpenAI-compatible)
+4. `groq` / `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`; free tier)
+5. `qwen` / `qwen-plus` via DashScope intl (`DASHSCOPE_API_KEY`)
+6. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
+7. `ollama` / `granite3-8b` (offline, Apache 2.0)
 
 > Llama 3.3 is explicitly excluded — non-Apache 2.0 license.
 

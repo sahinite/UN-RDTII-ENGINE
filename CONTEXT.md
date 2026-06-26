@@ -21,7 +21,7 @@ Updated as stories are completed — future agents should read this before touch
 | **Zone 2** | Intelligent Mapping: fetch/route → OCR → translate → chunk → embed → RAG → map → validate → write. |
 | **Pillar** | One of the RDTII regulatory dimensions (e.g. P6 Cross-border Data, P7 Domestic Data Protection). |
 | **PDPA** | Singapore Personal Data Protection Act — primary target for Phase 1 gate (Pillar 7). |
-| **5-tier LLM cascade** | Anthropic → OpenAI → Groq → Ollama (qwen2.5:7b) → Ollama (granite3-8b). Pinned per run via `LLM_PROVIDER`. Llama 3.3 excluded (non-Apache 2.0). |
+| **7-tier LLM cascade** | Anthropic → OpenAI → DeepSeek → Groq → Qwen → Ollama (qwen2.5:7b) → Ollama (granite3-8b). Pinned per run via `LLM_PROVIDER`. Llama 3.3 excluded (non-Apache 2.0). |
 | **CER** | Character Error Rate — OCR quality metric. Stage-2 OCR triggers at CER ≥ 5%. |
 | **RAG pipeline** | Hybrid BM25 + dense retrieval with cross-encoder reranking; top-5 chunks per indicator, each with `location_reference`. |
 | **location_reference** | `(act_name, part, article_number)` tuple for verifiable citations. |
@@ -131,7 +131,7 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 | `src/mapping/parser.py` | `parse_llm_response()` with verbatim assertion (hard discard), provision-level `resolve_provision_tag()`, law-name abbreviation check, cross-reference auto-flagging. |
 | `src/mapping/prompts.py` | `SYSTEM_PROMPT` with Rules 1–9 (incl. law name expansion, rationale format, leave-blank-if-uncertain). |
 | `src/mapping/provision_tag.py` | `resolve_provision_tag()` (KNOWN/NEW per provision), `infer_article_anchor()` heuristic. |
-| `src/mapping/providers/` | `AnthropicProvider`, `OpenAIProvider`, `GroqProvider` (qwen3-32b + fallback), `OllamaProvider` (qwen2.5:7b, granite3-8b). |
+| `src/mapping/providers/` | `AnthropicProvider`, `OpenAIProvider`, `DeepSeekProvider` (deepseek-chat, DEEPSEEK_API_KEY), `GroqProvider` (qwen/qwen3-32b + qwen/qwen3.6-27b fallback), `QwenProvider` (qwen-plus via DashScope, DASHSCOPE_API_KEY), `OllamaProvider` (qwen2.5:7b P6, granite3-8b P7). |
 | `src/output/writer.py` | `write_csv()` (13-col UTF-8-BOM), `write_json()` (document-level + `provisions[]` envelope per UN slide 18). `pdf_is_scanned`, `retrieval_method`, per-provision `discovery_tag`. `validate_record()` with portal domain allowlist. |
 | `src/output/validator.py` | URL validation + Wayback/local archiving (deduped per URL). Confidence flagging (<0.80 → review note). |
 | `src/output/cost_logger.py` | `CostLogger` — per-component accumulation → `logs/cost_report.json`. |
