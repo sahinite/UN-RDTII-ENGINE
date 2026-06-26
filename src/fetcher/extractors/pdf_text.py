@@ -9,6 +9,7 @@ when >30% of pages yield empty text.
 from __future__ import annotations
 
 import io
+import os
 import re
 import time
 from typing import TYPE_CHECKING
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
     from src.fetcher.models import Zone1Result
 
 logger = get_logger("pdf_text")
+
+# pdfplumber word-spacing tolerance. Default 3 merges words on tight-kerned
+# gov PDFs (e.g. SSO); 1.5 splits them correctly. Env-overridable for tuning.
+_PDF_X_TOLERANCE = float(os.getenv("PDF_X_TOLERANCE", "1.5"))
 
 
 # ── Custom exceptions ──────────────────────────────────────────────────────────
@@ -104,7 +109,10 @@ def extract_text_pdf(
             empty_count = 0
 
             for i, page in enumerate(pdf.pages):
-                text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                # x_tolerance=1.5 (not the default 3) — SSO PDFs are tightly
+                # kerned, and the default merges words ("responsibleforensuring")
+                # which corrupts chunk embeddings and tanks retrieval recall.
+                text = page.extract_text(x_tolerance=_PDF_X_TOLERANCE, y_tolerance=3) or ""
 
                 # Table extraction
                 tables = page.extract_tables()

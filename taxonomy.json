@@ -268,12 +268,15 @@
     "legal_question": "Does the law require Data Protection Impact Assessments (DPIA) or the appointment of a Data Protection Officer (DPO)?",
     "probe_keywords": [
       "data protection officer",
-      "data protection impact assessment",
+      "designate an individual responsible for compliance",
+      "individual responsible for ensuring compliance with the Act",
       "appoint a data protection officer",
-      "DPIA requirement",
-      "privacy impact assessment"
+      "data protection impact assessment",
+      "privacy impact assessment",
+      "business contact information of the individual"
     ],
     "in_scope": [
+      "A requirement to designate or appoint one or more individuals responsible for ensuring the organisation's compliance with the data protection law — this IS the DPO requirement even if the statute calls them an 'individual responsible for compliance' rather than 'Data Protection Officer'",
       "Mandatory appointment of a Data Protection Officer (DPO)",
       "Mandatory Data Protection Impact Assessment (DPIA) for processing"
     ],
@@ -300,10 +303,13 @@
     "legal_question": "Does the law allow government authorities to access personal data, particularly without a court order?",
     "probe_keywords": [
       "government access to personal data",
+      "power to access computer or data",
+      "access to decryption information",
+      "power to require production of documents or data",
+      "search by police officer",
       "lawful interception of communications",
       "disclosure of personal data to authorities",
-      "access to data without a warrant",
-      "power to require production of data"
+      "access to data without a warrant"
     ],
     "in_scope": [
       "Powers allowing authorities to access, intercept or compel disclosure of personal data",

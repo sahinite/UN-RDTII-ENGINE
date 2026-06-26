@@ -201,3 +201,11 @@ Each indicator has `rdtii_ref`, `category`, `scoring` (0/0.5/1 bands), `probe_ke
 ### Critical Discovery Fix (latest)
 
 Compound seed titles (e.g. "PDPA; Guide; Advisory...") split on `;`/newline in `seed_loader.py`. Exclude filter in `discover.py` runs BEFORE KNOWN check — Round 1 negative-example acts (banking/tax/companies) no longer bypass exclusion as KNOWN.
+
+### Retrieval recall — text quality + tuning
+
+- **pdfplumber `x_tolerance=1.5`** (`pdf_text.py`, env `PDF_X_TOLERANCE`). The default `x_tolerance=3` merged words on tightly-kerned gov PDFs (SSO) — ~339 run-together blobs per act (`"responsibleforensuring…"`) that corrupted chunk embeddings and tanked retrieval recall. 1.5 → 0 blobs. **Highest-leverage accuracy fix** — helps every indicator/economy and the verbatim output.
+- **RAG hyper-params env-overridable** (`retrieval/config.py`): `BM25_TOP_K`/`DENSE_TOP_K`=30, `FUSION_TOP_K`=30, `RERANK_TOP_N`=12. Raise `RERANK_TOP_N` toward 20 for more recall at higher LLM token cost.
+- **Taxonomy keywords/in_scope** for P7-I4 (DPO) and P7-I5 (gov access) rewritten to match real statutory wording (e.g. PDPA "designate an individual responsible for compliance" = DPO).
+
+**Known limitation (documented):** specific provisions buried deep in large/topically-diverse acts are not reliably extracted — e.g. PDPA DPO clause ranks ~18th of 54 chunks; CPC s.39-40 access powers sit in a 1M-char code. Even when forced into LLM context, `trim_chunks_to_budget` + LLM conservatism can drop them. Reliable fix needs token-budget tuning / section-aware retrieval — tracked as future work, not a single bug.

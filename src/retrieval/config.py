@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -53,8 +54,11 @@ def get_valid_indicator_ids() -> frozenset[str]:
     return frozenset(e.indicator_id for e in load_taxonomy())
 
 
-# Pipeline hyper-parameters (can be overridden via env for ablation tests)
-BM25_TOP_K = 20
-DENSE_TOP_K = 20
-FUSION_TOP_K = 20
-RERANK_TOP_N = 5
+# Pipeline hyper-parameters (env-overridable for recall/cost tuning).
+# Larger candidate pools + a deeper rerank cut surface provisions buried in big
+# acts (e.g. PDPA's DPO clause ranks ~18th; CPC's access powers sit in a 1M-char
+# code). Raise RERANK_TOP_N toward 20 for max recall at higher LLM token cost.
+BM25_TOP_K = int(os.getenv("BM25_TOP_K", "30"))
+DENSE_TOP_K = int(os.getenv("DENSE_TOP_K", "30"))
+FUSION_TOP_K = int(os.getenv("FUSION_TOP_K", "30"))
+RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "12"))
