@@ -48,6 +48,22 @@ _USER_AGENT = (
     "waybackpy/3.0.6"
 )
 
+# Real-browser header set for validating/archiving source URLs. Header-gated
+# portals (e.g. Singapore SSO) return 403 to the bot User-Agent above; the
+# document download path uses browser headers, so validation must too.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_BROWSER_HEADERS = {
+    "User-Agent": _BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+}
+
 try:
     from waybackpy import WaybackMachineSaveAPI as _WaybackSaveAPI
     _WAYBACKPY_AVAILABLE = True
@@ -97,7 +113,7 @@ def validate_url(url: str) -> tuple[URLStatusType, Optional[int]]:
     HTTP GET the URL, follow same-domain redirects, detect soft-404 pages.
     Returns (status, http_status_code).
     """
-    headers = {"User-Agent": _USER_AGENT}
+    headers = dict(_BROWSER_HEADERS)
     last_status: Optional[int] = None
 
     for attempt in range(1, _URL_MAX_RETRIES + 1):
@@ -275,11 +291,7 @@ def archive_local(url: str, dest_dir: str | None = None) -> str:
     bytes we extracted from is stronger provenance than a best-effort web snapshot.
     """
     dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
-    headers = {
-        "User-Agent": _USER_AGENT,
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    headers = dict(_BROWSER_HEADERS)
     try:
         with httpx.Client(timeout=_URL_VALIDATE_TIMEOUT, headers=headers, follow_redirects=True) as client:
             resp = client.get(url)

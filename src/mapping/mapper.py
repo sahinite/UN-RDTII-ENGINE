@@ -171,6 +171,7 @@ def _build_doc_metadata(doc) -> dict:
         "source_url": getattr(doc, "source_url", ""),
         "discovery_tag": getattr(doc, "discovery_tag", "KNOWN"),
         "verbatim_original": getattr(doc, "verbatim_original", None),
+        "translation_provider": getattr(doc, "translation_provider", "none"),
         "doc_type": doc_type,
     }
 
