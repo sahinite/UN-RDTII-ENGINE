@@ -28,6 +28,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from dotenv import load_dotenv
+
+load_dotenv()  # load API keys from .env, as main.py does (needed for --llm)
+
 from src.config.economy_config import load_economy
 from src.fetcher.extractors.pdf_text import extract_text_pdf
 from src.fetcher.models import Zone1Result
@@ -140,6 +144,59 @@ def run_case(case: Case, economy_config) -> dict:
     }
 
 
+def probe_llm(case: Case, economy_config) -> None:
+    """
+    Run the REAL extraction path (retrieve → prompt → LLM → parse) for one case
+    and show: the chunks the LLM sees (with article numbers), the raw LLM output,
+    and what survives parsing. Isolates whether a miss is chunk-structure, the
+    LLM declining, or the parser discarding. One real LLM call (~cents).
+    """
+    from src.retrieval.rag import retrieve
+    from src.mapping.prompts import (SYSTEM_PROMPT, build_user_prompt,
+                                     load_taxonomy_dict, trim_chunks_to_budget)
+    from src.mapping.mapper import _build_doc_metadata
+    from src.mapping.llm_client import call_llm_with_cascade, pin_active_provider
+    from src.mapping.parser import parse_llm_response
+
+    pin_active_provider()  # cascade requires a pinned provider (as main.py does)
+
+    pdf_path = _ARCHIVE / case.pdf
+    z1 = Zone1Result(url=case.source_url, economy="SG", act_title=case.act_title,
+                     discovery_tag="KNOWN", archive_url="")
+    doc = extract_text_pdf(pdf_path.read_bytes(), z1, economy_config)
+    retrieved = retrieve(case.indicator_id, doc, top_n=RERANK_TOP_N)
+
+    print(f"\n=== LLM PROBE: {case.name} [{case.indicator_id}] — {case.act_title} ===")
+    print(f"\nChunks sent to LLM (article# | target? | text):")
+    for i, rc in enumerate(retrieved, 1):
+        art = rc.chunk.location_reference.article_number or "?"
+        tgt = "TARGET" if _is_target(rc.chunk, case) else "      "
+        snippet = " ".join(rc.chunk.text.split())[:80]
+        print(f"  {i:2}. [{art:>8}] {tgt} {snippet}")
+
+    taxonomy = load_taxonomy_dict()
+    chunks_for_prompt = trim_chunks_to_budget(retrieved, SYSTEM_PROMPT)
+    user_prompt = build_user_prompt(
+        indicator_id=case.indicator_id, taxonomy=taxonomy,
+        top_chunks=chunks_for_prompt, act_title=doc.act_title,
+        economy=doc.economy, source_url=doc.source_url,
+    )
+    response = call_llm_with_cascade(system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
+                                     max_tokens=1000, temperature=0.0)
+    print(f"\nRAW LLM RESPONSE ({response.provider}/{response.model}):")
+    print("  " + response.text.strip().replace("\n", "\n  ")[:1200])
+
+    doc_metadata = _build_doc_metadata(doc)
+    provisions = parse_llm_response(response, case.indicator_id, retrieved,
+                                    doc_metadata, known_provisions=set())
+    print(f"\nPARSED PROVISIONS ({len(provisions)} survived):")
+    for p in provisions:
+        print(f"  - {p.article} | law_name={p.law_name!r} | {(p.verbatim_snippet or '')[:60]}")
+    if not provisions:
+        print("  (none — LLM declined OR parser discarded all)")
+    print()
+
+
 def _verdict(r: dict) -> str:
     if r.get("error"):
         return "ERROR"
@@ -155,10 +212,17 @@ def _verdict(r: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--case", help="run a single case by name")
+    ap.add_argument("--llm", action="store_true",
+                    help="run the real LLM extraction path (one call/case) instead of retrieval-only")
     args = ap.parse_args()
 
     economy_config = load_economy("Singapore")
     cases = [c for c in CASES if not args.case or c.name == args.case]
+
+    if args.llm:
+        for case in cases:
+            probe_llm(case, economy_config)
+        return
 
     print(f"\nRetrieval harness — BM25={BM25_TOP_K} DENSE={DENSE_TOP_K} "
           f"FUSION={FUSION_TOP_K} RERANK_TOP_N={RERANK_TOP_N}\n")

@@ -96,12 +96,20 @@ def _build_indicator_block(indicator_id: str, entry: dict) -> str:
         out_scope = "\n".join(f"  - {s}" for s in out_of_scope_items)
         out_scope_block = f"\nOUT OF SCOPE:\n{out_scope}"
 
+    # Optional per-indicator decision rule, injected at runtime from taxonomy.json
+    # (entry["extraction_guidance"]). Used where the in_scope/out_of_scope lists
+    # alone are not applied strictly enough — a forceful, imperative boundary the
+    # model reads last. Any indicator may define one; absent ones add nothing.
+    guidance = (entry.get("extraction_guidance") or "").strip()
+    guidance_block = f"\n\nDECISION RULE (apply strictly):\n{guidance}" if guidance else ""
+
     return (
         f"INDICATOR: {indicator_id} — {entry.get('name', '')}\n"
         f"LEGAL QUESTION: {entry.get('legal_question', '')}\n"
         f"IN SCOPE:\n{in_scope}"
         f"{out_scope_block}"
         f"{negative_str}"
+        f"{guidance_block}"
     )
 
 
