@@ -265,6 +265,7 @@ def _build_extraction_result(
         indicator_id=indicator_id,
         article=article,
         discovery_tag=tag,
+        doc_discovery_tag=doc_metadata.get("discovery_tag", "KNOWN"),
         location_reference=final_location_ref,
         verbatim_snippet=snippet,
         mapping_rationale=rationale or None,

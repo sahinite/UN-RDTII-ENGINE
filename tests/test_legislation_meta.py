@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.fetcher.extractors.legislation_meta import extract_legislation_meta
+from src.fetcher.extractors.legislation_meta import derive_act_title, extract_legislation_meta
 
 
 def test_act_number_and_revised_edition_from_cover():
@@ -36,3 +36,26 @@ def test_non_sso_returns_none():
 
 def test_empty_text_is_safe():
     assert extract_legislation_meta("", "https://example.com") == (None, None)
+
+
+# ── derive_act_title ────────────────────────────────────────────────────────────
+
+def test_derive_title_from_sso_cover_page():
+    cover = ("THE STATUTES OF THE REPUBLIC OF SINGAPORE\nCOMPANIES ACT 1967\n"
+             "2020 REVISED EDITION\n")
+    assert derive_act_title(cover, "https://sso.agc.gov.sg/act/coa1967") == "Companies Act 1967"
+
+
+def test_derive_title_skips_boilerplate_marker_lines():
+    # "THE STATUTES OF..." contains no marker; "REVISED EDITION" is skipped.
+    cover = "THE STATUTES OF THE REPUBLIC OF SINGAPORE\nINCOME TAX ACT 1947\n2020 REVISED EDITION"
+    assert derive_act_title(cover) == "Income Tax Act 1947"
+
+
+def test_derive_title_falls_back_to_url_slug():
+    # No marker line at all → readable slug from the URL, never empty.
+    assert derive_act_title("prose with no title", "https://sso.agc.gov.sg/act/ba1970") == "BA1970"
+
+
+def test_derive_title_empty_when_nothing_usable():
+    assert derive_act_title("", "") == ""

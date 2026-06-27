@@ -223,7 +223,10 @@ def write_json(records: list[OutputRecord], path: Path) -> Path:
             "ocr_quality_cer": first.ocr_quality_cer,
             "processing_time": first.processing_time,
             "model_version": first.model_version,
-            "discovery_tag": first.discovery_tag,
+            # Document-level tag = the act's KNOWN/NEW status (not the first
+            # provision's), so a KNOWN act isn't shown as NEW just because its
+            # provisions lack anchor-level ground truth.
+            "discovery_tag": getattr(first, "doc_discovery_tag", first.discovery_tag),
             "pdf_is_scanned": first.doc_type == "SCANNED_PDF",
             "retrieval_method": _RETRIEVAL_METHOD,
             "provisions": [r.as_provision_dict() for r in recs],
@@ -409,4 +412,5 @@ def build_output_record(
         verbatim_original=rec.verbatim_original,
         archive_url=validated_result.archive_url,
         doc_type=getattr(rec, "doc_type", None),
+        doc_discovery_tag=getattr(rec, "doc_discovery_tag", "KNOWN"),
     )

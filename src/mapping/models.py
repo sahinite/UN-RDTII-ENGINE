@@ -54,6 +54,10 @@ class ExtractionResult:
     raw_context_after: str
     verbatim_original: Optional[str]
     doc_type: Optional[str] = None       # "TEXT_PDF" | "SCANNED_PDF" | "HTML" | etc.
+    # Document-level KNOWN/NEW (the act's Round 1 status), distinct from the
+    # per-provision discovery_tag above. Drives the JSON document envelope tag so
+    # a KNOWN act isn't shown as NEW just because its provisions lack anchors.
+    doc_discovery_tag: str = "KNOWN"
     flag_for_review: bool = False
     flag_reason: Optional[str] = None
     non_consecutive: bool = False

@@ -73,6 +73,11 @@ class SeedData:
     known_urls: set[str] = field(default_factory=set)
     known_titles: set[str] = field(default_factory=set)
     known_provisions: set[str] = field(default_factory=set)  # anchor-level URLs e.g. "sso.agc.gov.sg/act/pdpa2012#pr26-"
+    # indicator_id (raw DB form, e.g. "7.3") → normalised act titles that are the
+    # Round 1 ground-truth seed acts for that indicator. Drives indicator-aware
+    # act selection so one indicator's many seed acts (P7-I3 has 5) don't crowd
+    # the others out of the ZONE2_MAX_ACTS cap.
+    known_titles_by_indicator: dict[str, set[str]] = field(default_factory=dict)
     economy: str = ""
     pillar: str = ""
 
@@ -103,6 +108,17 @@ def _extract_anchor_urls(raw: str) -> list[str]:
     return [p.strip() for p in parts if "#" in p.strip()]
 
 
+def _extract_ref_urls(raw: str) -> list[str]:
+    """All http(s) URLs in a References cell (split on ';' and newlines).
+
+    Round 1 has no dedicated URL column — act URLs live in the References cell
+    (e.g. "https://sso.agc.gov.sg/Act/CoA1967"). Harvesting these is what lets us
+    fetch every ground-truth act, not only the ones the browse index surfaces.
+    """
+    parts = re.split(r"[;\n]", raw)
+    return [p.strip() for p in parts if p.strip().lower().startswith("http")]
+
+
 def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) -> int:
     count = 0
     try:
@@ -120,6 +136,7 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
         col_url     = _find_col(headers, ["url", "act_url", "link"])
         col_pillar  = _find_col(headers, ["pillar_id", "pillar", "pillar.name"])
         col_refs    = _find_col(headers, ["references", "reference"])
+        col_indic   = _find_col(headers, ["indicator_id", "indicator"])
 
         for row in rows:
             if not any(row):
@@ -128,12 +145,13 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
             row_pillar  = str(row[col_pillar]  or "").strip() if col_pillar  is not None else ""
             row_url     = str(row[col_url]     or "").strip() if col_url     is not None else ""
             row_title   = str(row[col_title]   or "").strip() if col_title   is not None else ""
+            row_indic   = str(row[col_indic]   or "").strip() if col_indic   is not None else ""
             row_refs    = str(row[col_refs]    or "").strip() if col_refs    is not None else ""
             # Fallback: col index 7 is the References column per spec
             if not row_refs and len(row) > 7:
                 row_refs = str(row[7] or "").strip()
 
-            if _normalise_economy(row_economy) != economy_iso:
+            if _normalise_economy(row_economy) != _normalise_economy(economy_iso):
                 continue
             if not _pillar_matches(row_pillar, pillar):
                 continue
@@ -151,13 +169,25 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
                 for part in re.split(r"[;\n]", row_title):
                     part = part.strip()
                     if part:
-                        seed.known_titles.add(normalise_title(part))
+                        norm = normalise_title(part)
+                        seed.known_titles.add(norm)
+                        if row_indic:
+                            seed.known_titles_by_indicator.setdefault(row_indic, set()).add(norm)
                 if not has_url:
                     count += 1  # count title-only rows so we know seeds loaded
 
-            # Anchor-level provision URLs from References column
-            for anchor_url in _extract_anchor_urls(row_refs):
-                seed.known_provisions.add(normalise_url(anchor_url))
+            # URLs from the References column: bare act URLs → known_urls (so the
+            # act is fetched even if the browse index never surfaces it); anchored
+            # (#) URLs → known_provisions for provision-level KNOWN tagging.
+            for ref_url in _extract_ref_urls(row_refs):
+                if "#" in ref_url:
+                    seed.known_provisions.add(normalise_url(ref_url))
+                    bare = ref_url.split("#", 1)[0]
+                    if bare:
+                        seed.known_urls.add(normalise_url(bare))
+                else:
+                    seed.known_urls.add(normalise_url(ref_url))
+                count += 1
 
         wb.close()
     except Exception as exc:
@@ -183,7 +213,7 @@ def _load_sample_csv(path: str, economy_iso: str, pillar: str, seed: SeedData) -
                 row_economy = str(row.get(country_col or "", "") or "").strip()
                 row_pillar  = str(row.get(pillar_col  or "", "") or "").strip()
 
-                if _normalise_economy(row_economy) != economy_iso:
+                if _normalise_economy(row_economy) != _normalise_economy(economy_iso):
                     continue
                 if pillar_col and not _pillar_matches(row_pillar, pillar):
                     continue

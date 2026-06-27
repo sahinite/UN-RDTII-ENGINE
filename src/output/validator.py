@@ -36,9 +36,15 @@ REVIEW_NOTE = "Recommend human review — OCR/translation source"
 _URL_VALIDATE_TIMEOUT = 15
 _URL_MAX_RETRIES = 3
 _WAYBACK_TIMEOUT = 30
-# Wayback is flaky (429/520). Keep retries cheap and fall back to a local snapshot.
+# Wayback is flaky (429/520) and unreachable from some networks. Keep retries
+# cheap and fall back to a local snapshot. `max_tries` caps waybackpy's OWN
+# internal retry loop (default 8 → minutes of wasted backoff per URL when the
+# endpoint is blocked). Once a save hard-fails, disable Wayback for the rest of
+# the run so only the first URL pays the probe cost.
 _WAYBACK_RETRY_WAIT = float(os.getenv("WAYBACK_RETRY_WAIT_S", "2.0"))
+_WAYBACK_MAX_TRIES = int(os.getenv("WAYBACK_MAX_TRIES", "2"))
 _WAYBACK_BEST_EFFORT = os.getenv("WAYBACK_BEST_EFFORT", "true").lower() in ("1", "true", "yes")
+_wayback_disabled = False  # process-wide latch: set True after first hard failure
 # Local snapshot fallback: save the exact bytes we fetched when Wayback fails.
 _LOCAL_ARCHIVE_FALLBACK = os.getenv("LOCAL_ARCHIVE_FALLBACK", "true").lower() in ("1", "true", "yes")
 _LOCAL_ARCHIVE_DIR = os.getenv("LOCAL_ARCHIVE_DIR", "outputs/archive")
@@ -228,6 +234,8 @@ def archive_wayback(url: str) -> str:
     Submit a URL to the Wayback Machine using waybackpy.
     Returns the archive URL or "" on failure.
     """
+    global _wayback_disabled
+
     if not _WAYBACKPY_AVAILABLE:
         logger.warning({
             "event": "wayback_unavailable",
@@ -237,9 +245,14 @@ def archive_wayback(url: str) -> str:
         })
         return ""
 
+    if _wayback_disabled:
+        # An earlier URL already hard-failed → skip the probe, go straight to
+        # the local-snapshot fallback in archive_source.
+        return ""
+
     for attempt in range(1, 3):
         try:
-            api = _WaybackSaveAPI(url, _USER_AGENT)
+            api = _WaybackSaveAPI(url, _USER_AGENT, max_tries=_WAYBACK_MAX_TRIES)
             archive_url = api.save()
             logger.info({
                 "event": "wayback_archived",
@@ -260,11 +273,15 @@ def archive_wayback(url: str) -> str:
                 })
                 _sleep(_WAYBACK_RETRY_WAIT)
                 continue
+            # Hard failure (unreachable/timeout/blocked): latch off Wayback for
+            # the rest of the run so subsequent URLs fail fast to local archive.
+            _wayback_disabled = True
             logger.warning({
                 "event": "wayback_failed",
                 "url": url,
                 "error": str(exc),
                 "attempt": attempt,
+                "disabled_for_run": True,
                 "economy": "",
             })
             break
@@ -327,6 +344,12 @@ def archive_local(url: str, dest_dir: str | None = None) -> str:
         return ""
 
 
+def reset_wayback_latch() -> None:
+    """Re-enable Wayback archiving (call between independent runs/economies)."""
+    global _wayback_disabled
+    _wayback_disabled = False
+
+
 def archive_source(url: str) -> str:
     """
     Archive one source URL: Wayback (best-effort) → local snapshot fallback.
@@ -375,6 +398,11 @@ def validate_and_flag(
     Returns:
         list[ValidatedResult] — one per input record, with URL status + archive URL.
     """
+    # NOTE: the Wayback latch (_wayback_disabled) intentionally persists across
+    # the whole process — validate_and_flag is called once PER DOCUMENT, so
+    # resetting here would re-probe the (blocked) endpoint for every act. Tests
+    # reset it via an autouse fixture in conftest; batch_run resets per economy
+    # by calling reset_wayback_latch().
     results: list[ValidatedResult] = []
     now_iso = datetime.now(tz=timezone.utc).isoformat()
 

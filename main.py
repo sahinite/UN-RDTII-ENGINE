@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
 import logging
@@ -160,21 +161,29 @@ def run_pipeline(
     all_records: list[OutputRecord] = []
     n = len(zone1_results)
 
+    # Lightweight per-stage timing → printed as a summary at the end so we can
+    # see where wall-clock goes (fetch vs RAG vs LLM vs validate) against budget.
+    stage_times: dict[str, float] = defaultdict(float)
+
     for i, z1 in enumerate(zone1_results):
         title = z1.act_title or z1.url
         prefix = f"[{i+1}/{n}]"
 
         p.step(f"{prefix} Fetching — {title}")
+        _t = time.monotonic()
         try:
             fetched = route(z1, economy_config)
         except Exception as exc:
             p.fail(f"{prefix} Fetch failed — {exc}")
             continue
+        finally:
+            stage_times["fetch"] += time.monotonic() - _t
         docs = fetched if isinstance(fetched, list) else [fetched]
         p.done(f"{prefix} Fetched — {title}")
 
         for doc in docs:
             p.step(f"{prefix} Translating")
+            _t = time.monotonic()
             try:
                 translated = translate_document(doc, economy_config)
                 p.done(f"{prefix} Translation done")
@@ -182,16 +191,22 @@ def run_pipeline(
                 p.warn(f"{prefix} Translation failed — using raw text")
                 doc.flag_for_review = True
                 translated = doc
+            finally:
+                stage_times["translate"] += time.monotonic() - _t
 
             p.step(f"{prefix} RAG retrieval — {len(indicator_ids)} indicators")
+            _t = time.monotonic()
             try:
                 rag_results = retrieve_batch(indicator_ids, translated)
                 p.done(f"{prefix} RAG retrieval done")
             except Exception as exc:
                 p.fail(f"{prefix} RAG failed — {exc}")
                 continue
+            finally:
+                stage_times["rag"] += time.monotonic() - _t
 
             p.step(f"{prefix} LLM extraction — {pinned.provider_name}/{pinned.model}")
+            _t = time.monotonic()
             try:
                 results, llm_cost = extract_provisions(rag_results, translated, known_provisions)
                 found = sum(1 for r in results if getattr(r, "found", False))
@@ -199,14 +214,19 @@ def run_pipeline(
             except Exception as exc:
                 p.fail(f"{prefix} LLM extraction failed — {exc}")
                 continue
+            finally:
+                stage_times["llm"] += time.monotonic() - _t
 
             p.step(f"{prefix} Validating output")
+            _t = time.monotonic()
             try:
                 validated = validate_and_flag(results)
                 p.done(f"{prefix} Validation — {len(validated)} records")
             except Exception as exc:
                 p.warn(f"{prefix} Validation failed — {exc}")
                 validated = []
+            finally:
+                stage_times["validate"] += time.monotonic() - _t
 
             cer = getattr(doc, "cer_score", None)
             t_doc = time.monotonic()
@@ -255,6 +275,15 @@ def run_pipeline(
         records=summary.get("written", 0),
         cost_usd=report.get("total_cost_usd", 0.0),
     )
+
+    # Per-stage wall-clock summary (helps decide where remaining runtime goes).
+    if stage_times:
+        total = sum(stage_times.values())
+        parts = "  ".join(
+            f"{name}={secs:.1f}s ({secs / total * 100:.0f}%)"
+            for name, secs in sorted(stage_times.items(), key=lambda kv: -kv[1])
+        )
+        p.info(f"Stage timing — {parts}  | tracked total {total:.1f}s")
 
     return summary
 
@@ -328,6 +357,7 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
             discover(
                 economy_config, pillar, taxonomy, known_urls,
                 known_titles=getattr(seed_data, "known_titles", None),
+                known_titles_by_indicator=getattr(seed_data, "known_titles_by_indicator", None),
             )
         )
         known_count = sum(1 for z in zone1_results if z.discovery_tag == "KNOWN")

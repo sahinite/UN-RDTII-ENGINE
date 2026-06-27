@@ -55,10 +55,11 @@ def get_valid_indicator_ids() -> frozenset[str]:
 
 
 # Pipeline hyper-parameters (env-overridable for recall/cost tuning).
-# Larger candidate pools + a deeper rerank cut surface provisions buried in big
-# acts (e.g. PDPA's DPO clause ranks ~18th; CPC's access powers sit in a 1M-char
-# code). Raise RERANK_TOP_N toward 20 for max recall at higher LLM token cost.
+# The offline retrieval harness (tools/retrieval_harness.py) showed buried
+# provisions reaching the fused pool but the cross-encoder demoting them just
+# past 12 (PDPA s.11(3) DPO landed at rerank #13). RERANK_TOP_N=15 keeps them
+# while staying within the bounded ~10-15 chunks-to-LLM envelope.
 BM25_TOP_K = int(os.getenv("BM25_TOP_K", "30"))
 DENSE_TOP_K = int(os.getenv("DENSE_TOP_K", "30"))
 FUSION_TOP_K = int(os.getenv("FUSION_TOP_K", "30"))
-RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "12"))
+RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "15"))

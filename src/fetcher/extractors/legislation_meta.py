@@ -22,6 +22,45 @@ _ACT_NO_RE = re.compile(r"\bAct\s+(\d+)\s+of\s+(\d{4})\b", re.IGNORECASE)
 # Revised edition marker, e.g. "2020 Ed." / "2020 Rev. Ed." / "2020 Revised Edition"
 _REV_ED_RE = re.compile(r"\b(\d{4})\s*(?:Rev\.?\s*)?(?:Ed\.?|Edition)\b", re.IGNORECASE)
 
+# Words that mark a line as a legislation title across jurisdictions.
+_TITLE_MARKERS = ("ACT", "CODE", "ORDINANCE", "DECREE", "LAW", "STATUTE",
+                  "REGULATION", "RULES", "BILL")
+# Cover-page boilerplate that contains a marker word but is NOT the title —
+# includes gazette enactment formulae ("The following Act was passed…").
+_TITLE_SKIP = ("STATUTES OF", "REVISED EDITION", "LAW REVISION", "REPUBLIC OF",
+               "PREPARED AND PUBLISHED", "UNDER THE AUTHORITY", "TABLE OF",
+               "ARRANGEMENT OF", "AN ACT TO", "CHAPTER", "FOLLOWING ACT",
+               "PASSED BY PARLIAMENT", "ASSENTED TO", "BE IT ENACTED", "ENACTED BY")
+
+
+def derive_act_title(text: str, source_url: str = "") -> str:
+    """
+    Best-effort act title from a statute's cover page, for when Zone 1 supplied
+    none (e.g. URL-only seeds, NEW discoveries). Without a title the record's
+    law_name is empty and the whole provision is dropped at validation.
+
+    Scans the first lines for a short title line carrying a legislation marker
+    word (ACT/CODE/ORDINANCE/...), skipping known boilerplate. Falls back to a
+    readable slug from the URL so law_name is never empty. Economy-agnostic;
+    returns "" only when there is genuinely nothing to use.
+    """
+    for raw in text.splitlines()[:25]:
+        line = raw.strip()
+        if not (3 < len(line) < 100):
+            continue
+        upper = line.upper()
+        if any(skip in upper for skip in _TITLE_SKIP):
+            continue
+        if any(re.search(rf"\b{m}\b", upper) for m in _TITLE_MARKERS):
+            # Normalise SHOUTING cover-page titles to Title Case.
+            return line.title() if line.isupper() else line
+
+    if source_url:
+        slug = source_url.rstrip("/").split("/")[-1].split("?")[0]
+        if slug:
+            return slug.upper()
+    return ""
+
 
 def _docdate_from_url(source_url: str) -> Optional[str]:
     """Return version date from ?DocDate / ?ValidDate as YYYY-MM-DD (or YYYY)."""

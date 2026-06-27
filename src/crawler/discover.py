@@ -32,6 +32,14 @@ logger = logging.getLogger(__name__)
 # ── Environment config ─────────────────────────────────────────────────────────
 
 ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "5"))
+# KNOWN seeds are Round 1 ground truth → fetch all of them, bounded only by a
+# safety ceiling. The strict cap (ZONE2_MAX_NEW_ACTS) applies to speculative NEW
+# discoveries only. ZONE2_MAX_ACTS is kept for back-compat as the NEW default.
+_MAX_KNOWN_ACTS = int(os.getenv("ZONE2_MAX_KNOWN_ACTS", "12"))
+# NEW discoveries default OFF for the Singapore build gate (reproducing Round 1
+# ground truth is KNOWN-only; NEW acts add runtime + precision risk). Set
+# ZONE2_MAX_NEW_ACTS>0 to re-enable speculative discovery.
+_MAX_NEW_ACTS = int(os.getenv("ZONE2_MAX_NEW_ACTS", "0"))
 _DISCOVER_BUDGET_S = float(os.getenv("DISCOVER_BUDGET_S", "120.0"))
 _INDEX_FETCH_TIMEOUT_S = float(os.getenv("INDEX_FETCH_TIMEOUT_S", "30.0"))
 # Normalised BM25 title score a NEW (not-in-seed) act must clear to be kept.
@@ -261,6 +269,65 @@ def _seed_fallback(
     return results
 
 
+# ── Indicator-aware act selection ───────────────────────────────────────────────
+
+def _indicator_aware_select(
+    known_results: list[tuple[str, str, str]],
+    titles_by_indicator: dict[str, set[str]],
+    cap: int,
+) -> list[tuple[str, str, str]]:
+    """
+    Pick up to `cap` known acts, spreading slots across indicators.
+
+    Round-robin: each pass takes the next-highest-ranked unselected act for every
+    indicator in turn, so one indicator's many seed acts (P7-I3 has 5: PDPA,
+    Telecom, Companies, Income Tax, Employment) don't crowd the others out. Acts
+    with no indicator mapping fill any leftover slots. Discovery rank order is
+    preserved within each indicator. Falls back to plain rank order when no
+    mapping is available.
+    """
+    if not titles_by_indicator or len(known_results) <= cap:
+        return known_results[:cap]
+
+    title_to_inds: dict[str, list[str]] = {}
+    for ind, titles in titles_by_indicator.items():
+        for t in titles:
+            title_to_inds.setdefault(t, []).append(ind)
+
+    queues: dict[str, list[tuple[str, str, str]]] = {}
+    unmapped: list[tuple[str, str, str]] = []
+    for item in known_results:
+        inds = title_to_inds.get(normalise_title(item[0]))
+        if inds:
+            for ind in inds:
+                queues.setdefault(ind, []).append(item)
+        else:
+            unmapped.append(item)
+
+    selected: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    while len(selected) < cap and any(queues.values()):
+        for ind in sorted(queues.keys()):
+            if len(selected) >= cap:
+                break
+            q = queues[ind]
+            while q:
+                item = q.pop(0)
+                key = _normalise_url(item[1])
+                if key not in seen:
+                    selected.append(item)
+                    seen.add(key)
+                    break
+    for item in unmapped:
+        if len(selected) >= cap:
+            break
+        key = _normalise_url(item[1])
+        if key not in seen:
+            selected.append(item)
+            seen.add(key)
+    return selected
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def discover(
@@ -270,6 +337,7 @@ async def discover(
     known_urls: set[str],
     output_dir: str = "logs",
     known_titles: set[str] | None = None,
+    known_titles_by_indicator: dict[str, set[str]] | None = None,
 ) -> list[Zone1Result]:
     """
     Pillar-agnostic per-economy portal discovery.
@@ -331,19 +399,27 @@ async def discover(
     known_results = [(t, u, tag) for t, u, tag in all_results if tag == "KNOWN"]
     new_results   = [(t, u, tag) for t, u, tag in all_results if tag == "NEW"]
 
-    # Cap at ZONE2_MAX_ACTS — KNOWN always included; NEW fills remaining slots
-    cap = ZONE2_MAX_ACTS
-    if len(known_results) >= cap:
-        combined = known_results[:cap]
+    # Fetch ALL KNOWN ground-truth seeds (bounded by a safety ceiling; if there
+    # are more than the ceiling, indicator-aware selection keeps the spread fair).
+    # NEW discoveries get a strict cap — and are dropped entirely if discovery
+    # already consumed most of the wall-clock budget (runtime guard).
+    known_selected = _indicator_aware_select(
+        known_results, known_titles_by_indicator or {}, _MAX_KNOWN_ACTS
+    )
+    budget_left = budget_deadline - time.monotonic()
+    if budget_left <= 0:
+        new_selected: list[tuple[str, str, str]] = []
     else:
-        remaining = cap - len(known_results)
-        combined = known_results + new_results[:remaining]
+        new_selected = new_results[:_MAX_NEW_ACTS]
+    combined = known_selected + new_selected
 
     logger.info(
-        "[DISCOVER] %s P%d: %d KNOWN + %d NEW → %d acts (cap=%d)",
+        "[DISCOVER] %s P%d: %d KNOWN (→%d, ceiling=%d) + %d NEW (→%d, cap=%d) = %d acts; selected=%s",
         economy_iso, pillar,
-        len(known_results), len(new_results),
-        len(combined), cap,
+        len(known_results), len(known_selected), _MAX_KNOWN_ACTS,
+        len(new_results), len(new_selected), _MAX_NEW_ACTS,
+        len(combined),
+        [t or u for t, u, _ in combined],
     )
 
     zone1_results: list[Zone1Result] = []

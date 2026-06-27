@@ -304,11 +304,14 @@ class TestWriteJSON:
         assert "+" in mv
 
     def test_json_discovery_tag_at_doc_level(self, tmp_path):
-        """AC2: discovery_tag is at document level, not only inside provisions."""
-        records = [_make_output_record(discovery_tag="NEW")]
+        """AC2: doc-level discovery_tag comes from the act's KNOWN/NEW status,
+        independent of the per-provision tag (a KNOWN act keeps NEW provisions)."""
+        records = [_make_output_record(discovery_tag="NEW", doc_discovery_tag="KNOWN")]
         path = write_json(records, tmp_path / "out.json")
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["documents"][0]["discovery_tag"] == "NEW"
+        doc = data["documents"][0]
+        assert doc["discovery_tag"] == "KNOWN"                  # document-level
+        assert doc["provisions"][0]["discovery_tag"] == "NEW"   # provision-level
 
     def test_json_provision_fields_present(self, tmp_path):
         """AC2: Each provision in 'provisions' has the spec-required fields."""

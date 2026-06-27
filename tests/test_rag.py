@@ -145,6 +145,49 @@ class TestChunker:
         chunks = chunk_document(_make_fetched(PDPA_TEXT))
         assert all(c.doc_source_url == "https://sso.agc.gov.sg/Acts/PDPA" for c in chunks)
 
+    # ── Subsection-aware chunking (recall fix) ──────────────────────────────
+    @staticmethod
+    def _large_section_doc() -> MagicMock:
+        """A single PDPA-style section ~4k chars with a short DPO clause at (3)."""
+        body = (
+            "Personal Data Protection Act 2012\n\n"
+            "11. Protection of personal data\n"
+            "(1) " + "An organisation shall make reasonable security arrangements. " * 18 + "\n"
+            "(2) " + "The Commission may issue guidelines on security arrangements. " * 18 + "\n"
+            "(3) An organisation shall designate one or more individuals, known as "
+            "the data protection officer, to be responsible for ensuring compliance.\n"
+            "(4) " + "Designation under subsection (3) does not relieve obligations. " * 18
+        )
+        return _make_fetched(body)
+
+    def test_large_section_split_into_multiple_chunks(self):
+        chunks = chunk_document(self._large_section_doc())
+        assert len(chunks) >= 3, "oversized section should split into several chunks"
+
+    def test_chunks_bounded_near_target_size(self):
+        chunks = chunk_document(self._large_section_doc())
+        # No chunk should approach the old 6k block size; allow heading-prefix slack.
+        assert all(len(c.text) <= 2200 for c in chunks), [len(c.text) for c in chunks]
+
+    def test_buried_subsection_isolated_into_its_own_chunk(self):
+        chunks = chunk_document(self._large_section_doc())
+        dpo = [c for c in chunks if "data protection officer" in c.text]
+        assert len(dpo) == 1, "DPO clause should land in exactly one chunk"
+        # It must NOT be diluted by the long (1)/(2) security-arrangement prose.
+        assert "reasonable security arrangements" not in dpo[0].text
+
+    def test_chunk_carries_parent_heading_prefix(self):
+        chunks = chunk_document(self._large_section_doc())
+        dpo = next(c for c in chunks if "data protection officer" in c.text)
+        assert "Personal Data Protection Act 2012" in dpo.text
+        assert "Section 11" in dpo.text
+
+    def test_invariants_hold_after_split(self):
+        chunks = chunk_document(self._large_section_doc())
+        ids = [c.chunk_id for c in chunks]
+        assert len(ids) == len(set(ids)), "chunk_ids must stay unique"
+        assert all(c.location_reference.act_title for c in chunks)
+
 
 # ── ST2: Embedding Index (mocked) ─────────────────────────────────────────────
 

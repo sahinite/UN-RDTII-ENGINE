@@ -94,6 +94,15 @@ def full_taxonomy() -> list[dict]:
 
 
 @pytest.fixture(autouse=True)
+def reset_wayback_latch_fixture():
+    """Reset the process-wide Wayback latch so it can't leak across tests."""
+    from src.output import validator as _v
+    _v.reset_wayback_latch()
+    yield
+    _v.reset_wayback_latch()
+
+
+@pytest.fixture(autouse=True)
 def clear_translation_memory(monkeypatch):
     """
     Clear the in-session translation cache between tests and prevent disk I/O.

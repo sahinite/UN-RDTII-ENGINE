@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pdfplumber
 
-from src.fetcher.extractors.legislation_meta import extract_legislation_meta
+from src.fetcher.extractors.legislation_meta import derive_act_title, extract_legislation_meta
 from src.fetcher.logger import get_logger
 from src.fetcher.models import CostLogEntry, FetchedDocument
 
@@ -159,6 +159,10 @@ def extract_text_pdf(
 
     section_hierarchy = extract_section_hierarchy(full_text)
     law_number_ref, last_amended = extract_legislation_meta(full_text, zone1_result.url)
+    # Zone 1 may supply no title (URL-only seeds, NEW discoveries). Without a
+    # law_name every provision from this act is dropped at validation, so derive
+    # the title from the cover page when missing.
+    act_title = zone1_result.act_title or derive_act_title(full_text, zone1_result.url)
 
     cost_log = CostLogEntry(
         engine="pdfplumber",
@@ -173,7 +177,7 @@ def extract_text_pdf(
         source_url=zone1_result.url,
         resolved_url=zone1_result.url,
         economy=zone1_result.economy,
-        act_title=zone1_result.act_title,
+        act_title=act_title,
         discovery_tag=zone1_result.discovery_tag,  # type: ignore[arg-type]
         archive_url=zone1_result.archive_url,
         doc_type="TEXT_PDF",

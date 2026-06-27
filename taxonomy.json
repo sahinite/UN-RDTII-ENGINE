@@ -233,23 +233,27 @@
     "rdtii_ref": "7.3",
     "name": "Minimum data retention requirement",
     "category": "Domestic Data Protection & Privacy",
-    "legal_question": "Does the law impose a minimum period for retaining personal or communications data?",
+    "legal_question": "Does the law impose a mandatory minimum period for retaining data of any kind (other than government data)?",
     "probe_keywords": [
       "minimum data retention period",
-      "data retention requirement",
-      "retain personal data for a period",
-      "mandatory retention of communications data",
-      "preservation of data requirement"
+      "shall retain records for a period",
+      "keep records for not less than",
+      "mandatory retention period",
+      "retain for a period of years",
+      "preservation of records requirement",
+      "data retention requirement"
     ],
     "in_scope": [
-      "A mandatory minimum period for retaining personal or communications/traffic data",
-      "Statutory data-preservation obligations imposing a retention floor"
+      "Any statutory obligation to retain records or data for a fixed MINIMUM period (e.g. 'shall keep records for 5 years', 'retained for not less than 7 years') — regardless of whether the data is personal, financial, accounting, corporate, tax, employment, or communications data. The methodology does NOT limit this indicator to personal or communications data.",
+      "Mandatory retention of communications/traffic data for law-enforcement purposes",
+      "The discriminator is the presence of a fixed minimum retention FLOOR, NOT the type of data"
     ],
     "out_of_scope": [
-      "Data retention measures applied only to government data (excluded by methodology)",
-      "Maximum retention limits / storage-limitation duties (these reduce, not impose, retention)"
+      "Retention requirements applied only to government data (excluded by methodology)",
+      "Maximum retention limits / storage-limitation duties (these cap, not impose, retention)",
+      "General record-keeping duties that state NO fixed minimum period"
     ],
-    "negative_examples": ["storage limitation principle", "government records retention"],
+    "negative_examples": ["storage limitation principle (a maximum, not a minimum)", "government records retention", "duty to keep records with no minimum period stated"],
     "exclude_keywords": ["customs tariff"],
     "exclude_act_titles": ["customs act", "immigration act"],
     "scoring": {
@@ -300,26 +304,35 @@
     "rdtii_ref": "7.5",
     "name": "Government access to personal data",
     "category": "Domestic Data Protection & Privacy",
-    "legal_question": "Does the law allow government authorities to access personal data, particularly without a court order?",
+    "legal_question": "Does the law permit government or law-enforcement authorities to access, intercept, monitor, or compel disclosure of personal data, communications data, or computer/electronically-stored data — particularly without prior judicial authorisation (warrant/court order)?",
     "probe_keywords": [
       "government access to personal data",
-      "power to access computer or data",
+      "power to access computer or computer data",
       "access to decryption information",
-      "power to require production of documents or data",
-      "search by police officer",
       "lawful interception of communications",
-      "disclosure of personal data to authorities",
-      "access to data without a warrant"
+      "production of electronic records",
+      "compelled disclosure of communications data",
+      "access to data without a warrant",
+      "without prior judicial authorisation"
     ],
     "in_scope": [
-      "Powers allowing authorities to access, intercept or compel disclosure of personal data",
-      "Access permitted without prior judicial authorisation (court order/warrant)"
+      "Powers allowing government, police or law-enforcement authorities to access, search, intercept, monitor, or compel disclosure of personal data, communications/traffic data, subscriber information, or computer/electronically-stored data",
+      "Such access permitted WITHOUT prior judicial authorisation (no court order/warrant, or a broad exception to the warrant requirement)",
+      "Police powers to access computer data or compel decryption count as in scope even where the statute says 'data' or 'computer' rather than the literal phrase 'personal data'"
     ],
     "out_of_scope": [
       "Access strictly conditioned on a judicial warrant with no exception",
+      "Routine regulatory, safety or licensing inspection powers (e.g. radiation, food, building, environmental, occupational-safety or factory inspectors requiring production of ordinary business documents) — these are NOT government access to personal/communications/computer data",
       "Routine data-subject access requests by individuals (scored under data protection principles, not here)"
     ],
-    "negative_examples": ["individual data subject access request"],
+    "negative_examples": [
+      "individual data subject access request",
+      "building inspector requests maintenance records",
+      "radiation officer inspects facility records",
+      "food safety inspection of business documents",
+      "occupational safety inspection of premises",
+      "general production of ordinary business records by a sectoral regulator"
+    ],
     "exclude_keywords": ["customs tariff"],
     "exclude_act_titles": ["customs act"],
     "scoring": {
