@@ -38,23 +38,27 @@
     "rdtii_ref": "6.2",
     "name": "Local storage requirement",
     "category": "Cross-border Data Policies",
-    "legal_question": "Does the law require data to be stored on servers located within the country?",
+    "legal_question": "Does the law require data, records, registers, or books to be stored or kept within the country (e.g. on local servers, at the registered office, or at a place in the jurisdiction)?",
     "probe_keywords": [
       "local storage requirement",
       "data must be stored within the country",
-      "onshore data storage",
-      "retain a copy of data locally",
+      "records kept at a place within the country",
+      "registers kept locally",
+      "books and records kept at the registered office",
+      "branch register kept in the country",
+      "retain a copy of data or records locally",
       "data residency requirement"
     ],
     "in_scope": [
-      "Mandatory domestic storage of (personal) data",
-      "Requirement to keep a local copy of data held or transferred abroad",
-      "Server/storage location mandate"
+      "Mandatory domestic storage or keeping of data, records, registers, or books — including a requirement to keep accounting records, company registers, or documents at a place within the country. The methodology's local-storage requirement is NOT limited to electronic or personal data on servers; physical records required to be kept in-country also count.",
+      "Requirement to keep a local copy of data or records held or transferred abroad",
+      "Server, storage, or record-keeping location mandate"
     ],
     "out_of_scope": [
-      "Local storage measures applied only to government data (excluded by methodology)"
+      "Local storage measures applied only to government data (excluded by methodology)",
+      "Retention-period or record-preservation requirements that specify HOW LONG records must be kept (e.g. 'retain for 5 years') — those are scored under data retention (P7-I3), not here. This indicator is about WHERE data/records must be kept (within the country), not for how long."
     ],
-    "negative_examples": ["government records storage", "classified data"],
+    "negative_examples": ["government records storage", "classified data", "books retained for 5 years after dissolution (this is retention, not local storage)"],
     "exclude_keywords": ["income tax assessment", "customs tariff"],
     "exclude_act_titles": ["income tax act", "customs act", "immigration act"],
     "scoring": {

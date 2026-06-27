@@ -81,6 +81,13 @@ CASES = [
          "https://sso.agc.gov.sg/Act/ITA1947", "Income Tax Act 1947",
          "P7-I3", "67",
          ["keep records", "retain", "shall keep", "preserve"]),
+    # Pillar 6: Companies Act local-storage requirement (6.2, score 0.5) — records
+    # and registers must be kept at a place in Singapore.
+    Case("companies_localstorage", "Act_CoA1967_ViewType_Pdf.pdf",
+         "https://sso.agc.gov.sg/Act/CoA1967", "Companies Act 1967",
+         "P6-I2", "199",
+         ["kept in Singapore", "place in Singapore", "registered office within Singapore",
+          "branch register"]),
 ]
 
 
