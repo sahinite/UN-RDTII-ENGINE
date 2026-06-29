@@ -119,11 +119,40 @@ def _extract_ref_urls(raw: str) -> list[str]:
     return [p.strip() for p in parts if p.strip().lower().startswith("http")]
 
 
-def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) -> int:
+_NON_ECONOMY_SHEETS = {"consolidated", "methodology", "rdtii 2.1 methodology"}
+
+
+def _find_economy_sheet(wb, economy_iso: str, economy_name: str | None):
+    """
+    Return the worksheet for this economy, or None if the DB has no per-economy
+    sheet. Prefers a sheet whose name matches the economy name (reliable, avoids
+    2-letter collisions like India/Indonesia), then a normalised-ISO match. The
+    DB is laid out one sheet per economy (R1 also has a 'Consolidated' sheet,
+    which differs from the per-economy sheets and is NOT what evaluate() reads).
+    """
+    candidates = [s for s in wb.sheetnames if s.strip().lower() not in _NON_ECONOMY_SHEETS]
+    if economy_name:
+        for s in candidates:
+            if s.strip().lower() == economy_name.strip().lower():
+                return wb[s]
+    target = _normalise_economy(economy_iso)
+    matches = [s for s in candidates if _normalise_economy(s) == target]
+    if len(matches) == 1:
+        return wb[matches[0]]
+    return None
+
+
+def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
+                    economy_name: str | None = None) -> int:
     count = 0
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
+        # Read the economy's OWN sheet (consistent with evaluate.py + works for
+        # the Round 2 DB which has no Consolidated sheet). Fall back to the active
+        # sheet (R1 Consolidated, Country-filtered) only if no economy sheet.
+        econ_ws = _find_economy_sheet(wb, economy_iso, economy_name)
+        per_economy_sheet = econ_ws is not None
+        ws = econ_ws if per_economy_sheet else wb.active
         rows = ws.iter_rows(values_only=True)
         raw_headers = next(rows, None)
         if not raw_headers:
@@ -151,7 +180,9 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData) ->
             if not row_refs and len(row) > 7:
                 row_refs = str(row[7] or "").strip()
 
-            if _normalise_economy(row_economy) != _normalise_economy(economy_iso):
+            # Country filter applies only to the Consolidated sheet; a per-economy
+            # sheet has no Country column and is already economy-scoped.
+            if not per_economy_sheet and _normalise_economy(row_economy) != _normalise_economy(economy_iso):
                 continue
             if not _pillar_matches(row_pillar, pillar):
                 continue
@@ -248,18 +279,21 @@ def load_seed_data(
     pillar: str,
     round1_db_path: str | None = None,
     sample_csv_path: str | None = None,
+    economy_name: str | None = None,
 ) -> SeedData:
     """
     Build SeedData from Round 1 DB xlsx and/or Sample CSV.
 
-    Logs a warning (no crash) if no URLs found for the target economy — valid
-    for first-run economies with no Round 1 data.
+    economy_name (e.g. "Singapore") is used to select the economy's own sheet in
+    the DB; falls back to ISO matching, then the Consolidated sheet. Logs a
+    warning (no crash) if no URLs found for the target economy — valid for
+    first-run economies with no Round 1 data.
     """
     seed = SeedData(economy=economy_iso, pillar=pillar)
     db_count = csv_count = 0
 
     if round1_db_path and Path(round1_db_path).exists():
-        db_count = _load_round1_db(round1_db_path, economy_iso, pillar, seed)
+        db_count = _load_round1_db(round1_db_path, economy_iso, pillar, seed, economy_name)
 
     if sample_csv_path and Path(sample_csv_path).exists():
         csv_count = _load_sample_csv(sample_csv_path, economy_iso, pillar, seed)

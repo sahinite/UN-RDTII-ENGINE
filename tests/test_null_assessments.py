@@ -18,7 +18,7 @@ from src.config.economy_config import load_economy
 from src.crawler.seed_loader import load_seed_data
 from src.output.writer import write_outputs
 
-_ROUND1_DB = Path("data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
+_ROUND1_DB = Path("data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
 
 pytestmark = pytest.mark.skipif(not _ROUND1_DB.exists(), reason="Round 1 DB not present")
 

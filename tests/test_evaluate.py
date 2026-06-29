@@ -128,7 +128,7 @@ class TestEvaluateNewScore:
 
 # ── Grouped report + file output (per-pillar grouping + PDF) ─────────────────────
 
-_DB = Path("data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
+_DB = Path("data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
 
 
 def _grouped_report_fixture() -> dict:

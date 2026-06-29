@@ -30,7 +30,20 @@ from src.mapping.exceptions import PDPAGateError
 
 logger = logging.getLogger("main")
 
+# Round 1 ground-truth DB. Lives under data/database/; data/sample_kit/ kept as a
+# fallback for older checkouts. Resolved at call time so a moved file is found
+# rather than silently disabling seed loading (which breaks KNOWN tagging).
+_ROUND1_DB_CANDIDATES = (
+    "data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx",
+    "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx",
+)
 
+
+def _resolve_round1_db() -> str | None:
+    for path in _ROUND1_DB_CANDIDATES:
+        if Path(path).exists():
+            return path
+    return None
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -120,13 +133,16 @@ def run_pipeline(
 
     # ── Load seed data ──────────────────────────────────────────────────────────
     from src.crawler.seed_loader import load_seed_data as _load_seed
-    _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+    _ROUND1_DB = _resolve_round1_db()
+    if _ROUND1_DB is None:
+        p.warn("Round 1 DB not found in data/database/ or data/sample_kit/ — KNOWN tagging disabled")
     p.step("Loading Round 1 seed data")
     try:
         _seed = _load_seed(
             economy_iso=economy_iso,
             pillar=f"P{pillar}",
-            round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
+            round1_db_path=_ROUND1_DB,
+            economy_name=economy_config.economy_name,
         )
         known_provisions = _seed.known_provisions
         p.done(f"Seed data — {len(_seed.known_titles)} known acts, {len(known_provisions)} provisions")
@@ -345,7 +361,7 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
 
     economy_iso = economy_config.iso_code
     taxonomy = load_taxonomy("taxonomy.json")
-    _ROUND1_DB = "data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+    _ROUND1_DB = _resolve_round1_db()
 
     # Load Round 1 known URLs for this pillar (seed for merge + KNOWN tag)
     _p_step(f"Zone 1 — Loading seed data for {economy} P{pillar}")
@@ -353,7 +369,8 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
         seed_data = load_seed_data(
             economy_iso=economy_iso,
             pillar=f"P{pillar}",
-            round1_db_path=_ROUND1_DB if Path(_ROUND1_DB).exists() else None,
+            round1_db_path=_ROUND1_DB,
+            economy_name=economy_config.economy_name,
         )
         known_urls = seed_data.known_urls
         _match_mode = "by title" if not known_urls else "by url+title"

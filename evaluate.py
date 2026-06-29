@@ -49,6 +49,21 @@ def _normalise_for_key(s: str) -> str:
     return re.sub(r"\s+", " ", s.strip().lower())
 
 
+_R1_DB_NAME = "ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
+_DB_FALLBACK_DIRS = ("data/database", "data/sample_kit")
+
+
+def _resolve_round1_db(sample_kit_dir: Path) -> Path | None:
+    """Locate the Round 1 DB — in the given dir, then data/database/, then
+    data/sample_kit/ (the file was moved to data/database/)."""
+    for cand in [sample_kit_dir / _R1_DB_NAME, *(Path(d) / _R1_DB_NAME for d in _DB_FALLBACK_DIRS)]:
+        if cand.exists():
+            return cand
+    for x in sorted(sample_kit_dir.glob("*Round 1*.xlsx")):
+        return x
+    return None
+
+
 def load_sample_kit(
     sample_kit_dir: Path, economy: str, pillar: int | None = None
 ) -> dict[str, list[dict]]:
@@ -62,13 +77,11 @@ def load_sample_kit(
         print("Error: openpyxl required — pip install openpyxl", file=sys.stderr)
         sys.exit(1)
 
-    kit_path = sample_kit_dir / "ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
-    if not kit_path.exists():
-        candidates = list(sample_kit_dir.glob("*.xlsx"))
-        if not candidates:
-            print(f"Error: No .xlsx found in {sample_kit_dir}", file=sys.stderr)
-            sys.exit(1)
-        kit_path = candidates[0]
+    kit_path = _resolve_round1_db(sample_kit_dir)
+    if kit_path is None:
+        print(f"Error: Round 1 Database not found (looked in {sample_kit_dir}, "
+              f"{', '.join(_DB_FALLBACK_DIRS)})", file=sys.stderr)
+        sys.exit(1)
 
     wb = openpyxl.load_workbook(str(kit_path))
 
@@ -142,12 +155,9 @@ def _load_known_provision_keys(
     except ImportError:
         return set()
 
-    kit_path = sample_kit_dir / "ESCAP-RDTII-2.1_ Round 1 Database.xlsx"
-    if not kit_path.exists():
-        candidates = list(sample_kit_dir.glob("*.xlsx"))
-        if not candidates:
-            return set()
-        kit_path = candidates[0]
+    kit_path = _resolve_round1_db(sample_kit_dir)
+    if kit_path is None:
+        return set()
 
     wb = openpyxl.load_workbook(str(kit_path))
     sheet_name = None

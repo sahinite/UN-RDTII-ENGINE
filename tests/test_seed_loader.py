@@ -16,7 +16,7 @@ import pytest
 
 from src.crawler.seed_loader import load_seed_data, normalise_title
 
-_ROUND1_DB = Path("data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
+_ROUND1_DB = Path("data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
 
 pytestmark = pytest.mark.skipif(
     not _ROUND1_DB.exists(), reason="Round 1 DB not present in this checkout"
