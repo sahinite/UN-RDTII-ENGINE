@@ -247,6 +247,19 @@ def run_pipeline(
                     latency_ms=call_data.get("latency_ms", 0),
                 )
 
+    # ── Null assessments ────────────────────────────────────────────────────────
+    # RDTII scores EVERY indicator (0/0.5/1). For an indicator the Round 1 DB
+    # assessed but where we found no qualifying provision, emit an explicit
+    # "no barrier (score 0)" record — Round 1 itself documents these (e.g. SG 6.3:
+    # "Singapore does not implement infrastructure requirement"). Without this the
+    # indicator is silently absent and reads as a miss, not a documented null.
+    null_records = _emit_null_assessments(
+        all_records, _seed, economy_config.economy_name, economy_config,
+    )
+    if null_records:
+        all_records.extend(null_records)
+        p.info(f"Null assessments — {len(null_records)} indicator(s) assessed as no barrier")
+
     # ── PDPA gate (Singapore only) ──────────────────────────────────────────────
     if economy_iso == "SG" and pillar == 7:
         p.step("PDPA compliance gate check")
@@ -263,7 +276,9 @@ def run_pipeline(
     summary = write_outputs(
         records=all_records,
         output_dir=output_dir,
-        economy=economy,
+        # Canonical economy name for the filename, not whatever short form the
+        # user passed (e.g. "sg" → "Singapore"), so outputs are named consistently.
+        economy=economy_config.economy_name,
         pillar=pillar,
         skip_invalid=True,
     )
@@ -375,6 +390,63 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
         ]
 
     return zone1_results
+
+
+def _emit_null_assessments(all_records, seed, economy_name, economy_config) -> list:
+    """
+    Emit explicit "no barrier (score 0)" records for indicators the Round 1 DB
+    assessed for this economy+pillar but where the engine found no qualifying
+    provision. Pillar-agnostic; driven by the seed's indicator→act mapping, so it
+    only documents indicators that were actually in scope (never invents records
+    for indicators Round 1 didn't assess). Flagged for human review, since an
+    absence can also indicate a retrieval gap rather than a true score of 0.
+    """
+    from src.output.models import OutputRecord
+    from src.mapping.prompts import load_taxonomy_dict
+
+    assessed = getattr(seed, "known_titles_by_indicator", None) or {}
+    if not assessed:
+        return []
+
+    found = {r.indicator_id for r in all_records}
+    taxonomy = load_taxonomy_dict()
+    ref_to_id = {e.get("rdtii_ref"): iid for iid, e in taxonomy.items()}
+    portal_url = str(economy_config.portals[0].url) if economy_config.portals else ""
+
+    nulls: list = []
+    for rdtii_ref, titles in sorted(assessed.items()):
+        indicator_id = ref_to_id.get(rdtii_ref)
+        if not indicator_id or indicator_id in found:
+            continue
+        act = sorted(titles)[0].title() if titles else f"{economy_name} legislation reviewed"
+        nulls.append(OutputRecord(
+            economy=economy_name,
+            law_name=act,
+            law_number_ref=None,
+            last_amended=None,
+            indicator_id=indicator_id,
+            article="N/A",
+            discovery_tag="KNOWN",
+            location_reference=None,
+            verbatim_snippet="[No qualifying provision identified — assessed as no barrier]",
+            mapping_rationale=(
+                f"No provision establishing this requirement was identified in the "
+                f"reviewed legislation; assessed as no barrier (RDTII score 0)."
+            ),
+            source_url=portal_url,
+            confidence=None,
+            notes="Recommend human review — null/no-barrier assessment; absence may indicate a retrieval gap.",
+            ocr_quality_cer=None,
+            processing_time=None,
+            model_version="",
+            source_pdf_path=None,
+            raw_context_before="",
+            raw_context_after="",
+            verbatim_original=None,
+            archive_url="",
+            doc_discovery_tag="KNOWN",
+        ))
+    return nulls
 
 
 def main() -> None:
