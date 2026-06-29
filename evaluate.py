@@ -19,8 +19,10 @@ load_dotenv()
 
 import argparse
 import csv
+import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -325,33 +327,53 @@ def evaluate(
     }
 
 
-def _print_report(report: dict) -> None:
+def _format_report(report: dict) -> str:
     econ = report["economy"]
     pillar = report.get("pillar") or "6+7"
     s = report["scores"]
-    print(f"\n{'='*60}")
-    print(f"  EVALUATION REPORT — {econ} | Pillar {pillar}")
-    print(f"{'='*60}")
-    print(f"  CSV input        : {report['csv_path'] or '(no output found)'}")
-    print(f"  {'─'*56}")
-    print(f"  KNOWN indicators")
-    print(f"    Ground truth   : {s['known_total']}")
-    print(f"    Matched        : {s['known_matched']}")
+    L: list[str] = []
+    L.append("=" * 60)
+    L.append(f"  EVALUATION REPORT — {econ} | Pillar {pillar}")
+    L.append("=" * 60)
+    L.append(f"  CSV input        : {report['csv_path'] or '(no output found)'}")
+    L.append(f"  {'─'*56}")
+    L.append(f"  KNOWN indicators")
+    L.append(f"    Ground truth   : {s['known_total']}")
+    L.append(f"    Matched        : {s['known_matched']}")
     if report.get("matched_known"):
-        print(f"      ✓ {', '.join(report['matched_known'])}")
-    print(f"    Score          : {s['known_score']:.1f} / 40.0")
+        L.append(f"      ✓ {', '.join(report['matched_known'])}")
+    L.append(f"    Score          : {s['known_score']:.1f} / 40.0")
     if report["missed_known"]:
-        print(f"    Missed         : {', '.join(report['missed_known'])}")
-    print(f"  {'─'*56}")
-    print(f"  NEW provisions   : {s['new_discovered']} genuine new provisions")
+        L.append(f"    Missed         : {', '.join(report['missed_known'])}")
+    L.append(f"  {'─'*56}")
+    L.append(f"  NEW provisions   : {s['new_discovered']} genuine new provisions")
     for np in report.get("new_provisions", []):
         art = (np.get("article") or "").strip()
-        print(f"      + [{np.get('indicator_id','')}] {np.get('law_name','')}"
-              + (f" — {art}" if art else ""))
-    print(f"    Score          : {s['new_score']:.1f} / 20.0")
-    print(f"  {'─'*56}")
-    print(f"  TOTAL SCORE      : {s['total_score']:.1f} / {s['max_score']:.1f}")
-    print(f"{'='*60}\n")
+        L.append(f"      + [{np.get('indicator_id','')}] {np.get('law_name','')}"
+                 + (f" — {art}" if art else ""))
+    L.append(f"    Score          : {s['new_score']:.1f} / 20.0")
+    L.append(f"  {'─'*56}")
+    L.append(f"  TOTAL SCORE      : {s['total_score']:.1f} / {s['max_score']:.1f}")
+    L.append("=" * 60)
+    return "\n".join(L)
+
+
+def _print_report(report: dict) -> None:
+    print("\n" + _format_report(report) + "\n")
+
+
+def write_report(report: dict, report_dir: Path) -> tuple[Path, Path]:
+    """Write the evaluation report as JSON (data) + TXT (human-readable)."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    econ = re.sub(r"[^A-Za-z0-9]+", "_", report["economy"]).strip("_") or "economy"
+    pillar = report.get("pillar") or "6+7"
+    ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stem = f"{econ}_evaluation_P{pillar}_{ts}"
+    json_path = report_dir / f"{stem}.json"
+    txt_path = report_dir / f"{stem}.txt"
+    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    txt_path.write_text(_format_report(report) + "\n", encoding="utf-8")
+    return json_path, txt_path
 
 
 def main() -> None:
@@ -374,6 +396,14 @@ def main() -> None:
         "--output-dir", default="outputs",
         help="Output directory for auto-detection"
     )
+    parser.add_argument(
+        "--report-dir", default="outputs/reports",
+        help="Directory to write the evaluation report (JSON + TXT)"
+    )
+    parser.add_argument(
+        "--no-report-file", action="store_true",
+        help="Print to console only; do not write a report file"
+    )
     args = parser.parse_args()
 
     report = evaluate(
@@ -384,6 +414,11 @@ def main() -> None:
         output_dir=Path(args.output_dir),
     )
     _print_report(report)
+
+    if not args.no_report_file:
+        json_path, txt_path = write_report(report, Path(args.report_dir))
+        print(f"  Report written   : {json_path}")
+        print(f"                     {txt_path}\n")
 
 
 if __name__ == "__main__":
