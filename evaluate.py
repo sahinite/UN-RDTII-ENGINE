@@ -305,6 +305,14 @@ def evaluate(
         "matched_known": sorted(matched_known),
         "missed_known": sorted(missed_known),
         "genuine_new_provisions": len(genuine_new_provisions),
+        "new_provisions": [
+            {
+                "indicator_id": r.get("indicator_id", ""),
+                "law_name": r.get("law_name", ""),
+                "article": r.get("article", ""),
+            }
+            for r in genuine_new_provisions
+        ],
         "scores": {
             "known_matched": len(matched_known),
             "known_total": len(known_indicators),
@@ -329,11 +337,17 @@ def _print_report(report: dict) -> None:
     print(f"  KNOWN indicators")
     print(f"    Ground truth   : {s['known_total']}")
     print(f"    Matched        : {s['known_matched']}")
+    if report.get("matched_known"):
+        print(f"      ✓ {', '.join(report['matched_known'])}")
     print(f"    Score          : {s['known_score']:.1f} / 40.0")
     if report["missed_known"]:
         print(f"    Missed         : {', '.join(report['missed_known'])}")
     print(f"  {'─'*56}")
     print(f"  NEW provisions   : {s['new_discovered']} genuine new provisions")
+    for np in report.get("new_provisions", []):
+        art = (np.get("article") or "").strip()
+        print(f"      + [{np.get('indicator_id','')}] {np.get('law_name','')}"
+              + (f" — {art}" if art else ""))
     print(f"    Score          : {s['new_score']:.1f} / 20.0")
     print(f"  {'─'*56}")
     print(f"  TOTAL SCORE      : {s['total_score']:.1f} / {s['max_score']:.1f}")
