@@ -208,19 +208,33 @@ def load_engine_output(csv_path: Path) -> list[dict]:
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 
-def _find_best_csv(output_dir: Path, economy: str, pillar: int | None) -> Path | None:
-    """Locate the most recent engine CSV for economy+pillar."""
-    if pillar:
-        candidate = output_dir / f"{economy.lower()}_pillar{pillar}.csv"
-        if candidate.exists():
-            return candidate
-    for p in (6, 7):
-        candidate = output_dir / f"{economy.lower()}_pillar{p}.csv"
-        if candidate.exists():
-            return candidate
-    for f in sorted(output_dir.glob(f"{economy.lower()}*.csv")):
-        return f
-    return None
+def _find_csvs(output_dir: Path, economy: str, pillar: int | None) -> list[Path]:
+    """
+    Return the most-recent engine CSV(s) for economy+pillar.
+
+    Matches the engine's `{EconomyName}_P{pillar}_{timestamp}.csv` naming
+    case-insensitively (and legacy `{economy}_pillar{n}.csv`), picking the newest
+    by modification time. With no pillar, returns the newest CSV for EACH of
+    pillars 6 and 7 so the evaluation covers the economy's full output rather than
+    comparing both pillars' ground truth against a single-pillar file.
+    """
+    if not output_dir.exists():
+        return []
+    econ = economy.lower()
+    pillars = [pillar] if pillar else [6, 7]
+    found: list[Path] = []
+    for p in pillars:
+        best: Path | None = None
+        for f in output_dir.glob("*.csv"):
+            low = f.name.lower()
+            if low.startswith(econ + "_") and (
+                f"_p{p}_" in low or f"_pillar{p}" in low or low == f"{econ}_pillar{p}.csv"
+            ):
+                if best is None or f.stat().st_mtime > best.stat().st_mtime:
+                    best = f
+        if best is not None:
+            found.append(best)
+    return found
 
 
 def evaluate(
@@ -237,10 +251,15 @@ def evaluate(
     ground_truth = load_sample_kit(sample_kit_dir, economy, pillar)
     known_provision_keys = _load_known_provision_keys(sample_kit_dir, economy, pillar)
 
-    if csv_path is None:
-        csv_path = _find_best_csv(output_dir, economy, pillar)
+    if csv_path is not None:
+        csv_paths = [csv_path]
+    else:
+        csv_paths = _find_csvs(output_dir, economy, pillar)
 
-    engine_rows = load_engine_output(csv_path) if csv_path else []
+    engine_rows: list[dict] = []
+    for cp in csv_paths:
+        engine_rows.extend(load_engine_output(cp))
+    csv_path = ", ".join(str(c) for c in csv_paths) if csv_paths else None
 
     engine_by_indicator: dict[str, list[dict]] = {}
     for row in engine_rows:
