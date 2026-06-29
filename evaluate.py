@@ -19,7 +19,6 @@ load_dotenv()
 
 import argparse
 import csv
-import json
 import re
 import sys
 from datetime import datetime
@@ -466,24 +465,8 @@ def write_report_pdf(report: dict, path: Path) -> Path | None:
     return path
 
 
-_SCORE_KEYS = ("known_score", "new_score", "total_score", "max_score")
-
-
-def _strip_score_values(report: dict) -> dict:
-    """Return a copy with point-score fields removed (counts preserved), so the
-    written report shows the comparison without a score."""
-    import copy
-    r = copy.deepcopy(report)
-    for pr in r.get("pillars", [r]):
-        sc = pr.get("scores")
-        if isinstance(sc, dict):
-            for k in _SCORE_KEYS:
-                sc.pop(k, None)
-    return r
-
-
 def write_report(report: dict, report_dir: Path) -> list[Path]:
-    """Write the evaluation report as JSON (data) + TXT (human-readable) + PDF."""
+    """Write the evaluation report as a formatted PDF (only)."""
     report_dir.mkdir(parents=True, exist_ok=True)
     econ = re.sub(r"[^A-Za-z0-9]+", "_", report["economy"]).strip("_") or "economy"
     ov = report.get("overall", {})
@@ -492,15 +475,8 @@ def write_report(report: dict, report_dir: Path) -> list[Path]:
     ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     stem = f"{econ}_evaluation_{pillar_tag}_{ts}"
 
-    json_path = report_dir / f"{stem}.json"
-    txt_path = report_dir / f"{stem}.txt"
-    json_path.write_text(json.dumps(_strip_score_values(report), indent=2, ensure_ascii=False), encoding="utf-8")
-    txt_path.write_text(_format_report(report) + "\n", encoding="utf-8")
-    out = [json_path, txt_path]
     pdf_path = write_report_pdf(report, report_dir / f"{stem}.pdf")
-    if pdf_path:
-        out.append(pdf_path)
-    return out
+    return [pdf_path] if pdf_path else []
 
 
 def main() -> None:
@@ -544,10 +520,10 @@ def main() -> None:
 
     if not args.no_report_file:
         paths = write_report(report, Path(args.report_dir))
-        print("  Report written   :")
-        for pth in paths:
-            print(f"    - {pth}")
-        print()
+        if paths:
+            print(f"  PDF report       : {paths[0]}\n")
+        else:
+            print("  PDF report       : not written (fpdf2 unavailable — pip install fpdf2)\n")
 
 
 if __name__ == "__main__":

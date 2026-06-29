@@ -147,11 +147,11 @@ def _grouped_report_fixture() -> dict:
     }
 
 
-def test_write_report_produces_json_txt_pdf(tmp_path):
+def test_write_report_produces_pdf_only(tmp_path):
     import evaluate as ev
     paths = ev.write_report(_grouped_report_fixture(), tmp_path)
-    exts = {p.suffix for p in paths}
-    assert {".json", ".txt", ".pdf"} <= exts
+    assert {p.suffix for p in paths} == {".pdf"}
+    assert not list(tmp_path.glob("*.json")) and not list(tmp_path.glob("*.txt"))
     for p in paths:
         assert p.exists() and p.stat().st_size > 0
 
@@ -169,11 +169,6 @@ def test_report_does_not_show_scores(tmp_path):
     text = ev._format_report(report)
     for token in ("/40", "/20", "/60", "/120", "SCORE", "Score"):
         assert token not in text, f"score token {token!r} leaked into report"
-    paths = ev.write_report(report, tmp_path)
-    json_file = next(p for p in paths if p.suffix == ".json")
-    data = json_file.read_text()
-    for k in ("known_score", "new_score", "total_score", "max_score"):
-        assert k not in data, f"score field {k!r} leaked into JSON report"
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="Round 1 DB not present")
