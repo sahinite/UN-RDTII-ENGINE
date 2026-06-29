@@ -345,16 +345,15 @@ def build_economy_report(
         # Honour an explicit --csv only when a single pillar is requested.
         cp = csv_path if (pillar and csv_path) else None
         sections.append(evaluate(sample_kit_dir, economy, p, cp, output_dir))
-    total = round(sum(r["scores"]["total_score"] for r in sections), 1)
-    maximum = round(sum(r["scores"]["max_score"] for r in sections), 1)
     return {
         "economy": economy,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "pillars": sections,
         "overall": {
             "pillars_evaluated": [r["pillar"] for r in sections],
-            "total_score": total,
-            "max_score": maximum,
+            "known_matched": sum(r["scores"]["known_matched"] for r in sections),
+            "known_total": sum(r["scores"]["known_total"] for r in sections),
+            "new_discovered": sum(r["scores"]["new_discovered"] for r in sections),
         },
     }
 
@@ -365,17 +364,16 @@ def _format_pillar_section(pr: dict) -> str:
     L.append(f"  PILLAR {pr.get('pillar') or '?'}")
     L.append(f"    CSV input        : {pr['csv_path'] or '(no output found)'}")
     L.append(f"    {'─'*54}")
-    L.append(f"    KNOWN indicators : {s['known_matched']}/{s['known_total']} matched   ({s['known_score']:.1f}/40)")
+    L.append(f"    KNOWN indicators : {s['known_matched']}/{s['known_total']} matched")
     if pr.get("matched_known"):
         L.append(f"      ✓ matched : {', '.join(pr['matched_known'])}")
     if pr.get("missed_known"):
         L.append(f"      ✗ missed  : {', '.join(pr['missed_known'])}")
-    L.append(f"    NEW provisions   : {s['new_discovered']} discovered   ({s['new_score']:.1f}/20)")
+    L.append(f"    NEW provisions   : {s['new_discovered']} discovered")
     for np in pr.get("new_provisions", []):
         art = (np.get("article") or "").strip()
         L.append(f"      + [{np.get('indicator_id','')}] {np.get('law_name','')}"
                  + (f" — {art}" if art else ""))
-    L.append(f"    PILLAR SCORE     : {s['total_score']:.1f} / {s['max_score']:.1f}")
     return "\n".join(L)
 
 
@@ -389,7 +387,8 @@ def _format_report(report: dict) -> str:
             L.append(_format_pillar_section(pr))
         ov = report["overall"]
         L.append("=" * 62)
-        L.append(f"  OVERALL SCORE    : {ov['total_score']:.1f} / {ov['max_score']:.1f}")
+        L.append(f"  SUMMARY          : {ov['known_matched']}/{ov['known_total']} known indicators matched"
+                 f"  ·  {ov['new_discovered']} new provisions discovered")
         L.append("=" * 62)
         return "\n".join(L)
     # Flat single-pillar report (back-compat).
@@ -440,16 +439,16 @@ def write_report_pdf(report: dict, path: Path) -> Path | None:
 
     for pr in sections:
         s = pr["scores"]
-        line(f"  Pillar {pr.get('pillar','?')}     Score {s['total_score']:.1f} / {s['max_score']:.1f}",
+        line(f"  Pillar {pr.get('pillar','?')}",
              h=9, bold=True, size=13, fill=(33, 73, 125), fg=(255, 255, 255))
         pdf.ln(1)
-        line(f"KNOWN indicators: {s['known_matched']}/{s['known_total']} matched  ({s['known_score']:.1f}/40)",
+        line(f"KNOWN indicators: {s['known_matched']}/{s['known_total']} matched",
              h=6.5, bold=True, size=11)
         if pr.get("matched_known"):
             line("  Matched: " + ", ".join(pr["matched_known"]), h=5.5, size=10)
         if pr.get("missed_known"):
             line("  Missed: " + ", ".join(pr["missed_known"]), h=5.5, size=10, fg=(170, 0, 0))
-        line(f"NEW provisions: {s['new_discovered']} discovered  ({s['new_score']:.1f}/20)",
+        line(f"NEW provisions: {s['new_discovered']} discovered",
              h=6.5, bold=True, size=11)
         for np in pr.get("new_provisions", []):
             art = (np.get("article") or "").strip()
@@ -459,11 +458,28 @@ def write_report_pdf(report: dict, path: Path) -> Path | None:
 
     ov = report.get("overall")
     if ov:
-        line(f"OVERALL SCORE: {ov['total_score']:.1f} / {ov['max_score']:.1f}",
-             h=10, bold=True, size=13, fill=(225, 225, 225))
+        line(f"Summary: {ov['known_matched']}/{ov['known_total']} known indicators matched"
+             f"  -  {ov['new_discovered']} new provisions discovered",
+             h=10, bold=True, size=12, fill=(225, 225, 225))
 
     pdf.output(str(path))
     return path
+
+
+_SCORE_KEYS = ("known_score", "new_score", "total_score", "max_score")
+
+
+def _strip_score_values(report: dict) -> dict:
+    """Return a copy with point-score fields removed (counts preserved), so the
+    written report shows the comparison without a score."""
+    import copy
+    r = copy.deepcopy(report)
+    for pr in r.get("pillars", [r]):
+        sc = pr.get("scores")
+        if isinstance(sc, dict):
+            for k in _SCORE_KEYS:
+                sc.pop(k, None)
+    return r
 
 
 def write_report(report: dict, report_dir: Path) -> list[Path]:
@@ -478,7 +494,7 @@ def write_report(report: dict, report_dir: Path) -> list[Path]:
 
     json_path = report_dir / f"{stem}.json"
     txt_path = report_dir / f"{stem}.txt"
-    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    json_path.write_text(json.dumps(_strip_score_values(report), indent=2, ensure_ascii=False), encoding="utf-8")
     txt_path.write_text(_format_report(report) + "\n", encoding="utf-8")
     out = [json_path, txt_path]
     pdf_path = write_report_pdf(report, report_dir / f"{stem}.pdf")

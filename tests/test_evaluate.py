@@ -142,7 +142,8 @@ def _grouped_report_fixture() -> dict:
     return {
         "economy": "Singapore",
         "pillars": [pillar],
-        "overall": {"pillars_evaluated": [6], "total_score": 30.7, "max_score": 60.0},
+        "overall": {"pillars_evaluated": [6], "known_matched": 2, "known_total": 3,
+                    "new_discovered": 1},
     }
 
 
@@ -159,8 +160,20 @@ def test_formatted_report_groups_by_pillar(tmp_path):
     import evaluate as ev
     text = ev._format_report(_grouped_report_fixture())
     assert "PILLAR 6" in text
-    assert "OVERALL SCORE" in text
     assert "P6-I3" in text  # missed indicator is itemised
+
+
+def test_report_does_not_show_scores(tmp_path):
+    import evaluate as ev
+    report = _grouped_report_fixture()
+    text = ev._format_report(report)
+    for token in ("/40", "/20", "/60", "/120", "SCORE", "Score"):
+        assert token not in text, f"score token {token!r} leaked into report"
+    paths = ev.write_report(report, tmp_path)
+    json_file = next(p for p in paths if p.suffix == ".json")
+    data = json_file.read_text()
+    for k in ("known_score", "new_score", "total_score", "max_score"):
+        assert k not in data, f"score field {k!r} leaked into JSON report"
 
 
 @pytest.mark.skipif(not _DB.exists(), reason="Round 1 DB not present")
@@ -169,4 +182,6 @@ def test_build_economy_report_has_two_pillar_sections(tmp_path):
     # Empty output_dir → scores will be 0, but the structure must group P6 + P7.
     r = ev.build_economy_report(Path("data/sample_kit"), "Singapore", None, None, tmp_path)
     assert [pr["pillar"] for pr in r["pillars"]] == [6, 7]
-    assert r["overall"]["max_score"] == 120.0
+    # P6 (4) + P7 (5) ground-truth indicators; no score fields in overall.
+    assert r["overall"]["known_total"] == 9
+    assert "total_score" not in r["overall"] and "max_score" not in r["overall"]
