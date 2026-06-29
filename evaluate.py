@@ -327,53 +327,164 @@ def evaluate(
     }
 
 
-def _format_report(report: dict) -> str:
-    econ = report["economy"]
-    pillar = report.get("pillar") or "6+7"
-    s = report["scores"]
+def build_economy_report(
+    sample_kit_dir: Path,
+    economy: str,
+    pillar: int | None,
+    csv_path: Path | None,
+    output_dir: Path,
+) -> dict:
+    """
+    Group the evaluation by pillar. Runs evaluate() per pillar (P6, P7 — or just
+    the requested one) and returns a report with a per-pillar section list plus an
+    overall score (sum of the independent per-pillar /60 scores).
+    """
+    pillars = [pillar] if pillar else [6, 7]
+    sections: list[dict] = []
+    for p in pillars:
+        # Honour an explicit --csv only when a single pillar is requested.
+        cp = csv_path if (pillar and csv_path) else None
+        sections.append(evaluate(sample_kit_dir, economy, p, cp, output_dir))
+    total = round(sum(r["scores"]["total_score"] for r in sections), 1)
+    maximum = round(sum(r["scores"]["max_score"] for r in sections), 1)
+    return {
+        "economy": economy,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "pillars": sections,
+        "overall": {
+            "pillars_evaluated": [r["pillar"] for r in sections],
+            "total_score": total,
+            "max_score": maximum,
+        },
+    }
+
+
+def _format_pillar_section(pr: dict) -> str:
+    s = pr["scores"]
     L: list[str] = []
-    L.append("=" * 60)
-    L.append(f"  EVALUATION REPORT — {econ} | Pillar {pillar}")
-    L.append("=" * 60)
-    L.append(f"  CSV input        : {report['csv_path'] or '(no output found)'}")
-    L.append(f"  {'─'*56}")
-    L.append(f"  KNOWN indicators")
-    L.append(f"    Ground truth   : {s['known_total']}")
-    L.append(f"    Matched        : {s['known_matched']}")
-    if report.get("matched_known"):
-        L.append(f"      ✓ {', '.join(report['matched_known'])}")
-    L.append(f"    Score          : {s['known_score']:.1f} / 40.0")
-    if report["missed_known"]:
-        L.append(f"    Missed         : {', '.join(report['missed_known'])}")
-    L.append(f"  {'─'*56}")
-    L.append(f"  NEW provisions   : {s['new_discovered']} genuine new provisions")
-    for np in report.get("new_provisions", []):
+    L.append(f"  PILLAR {pr.get('pillar') or '?'}")
+    L.append(f"    CSV input        : {pr['csv_path'] or '(no output found)'}")
+    L.append(f"    {'─'*54}")
+    L.append(f"    KNOWN indicators : {s['known_matched']}/{s['known_total']} matched   ({s['known_score']:.1f}/40)")
+    if pr.get("matched_known"):
+        L.append(f"      ✓ matched : {', '.join(pr['matched_known'])}")
+    if pr.get("missed_known"):
+        L.append(f"      ✗ missed  : {', '.join(pr['missed_known'])}")
+    L.append(f"    NEW provisions   : {s['new_discovered']} discovered   ({s['new_score']:.1f}/20)")
+    for np in pr.get("new_provisions", []):
         art = (np.get("article") or "").strip()
         L.append(f"      + [{np.get('indicator_id','')}] {np.get('law_name','')}"
                  + (f" — {art}" if art else ""))
-    L.append(f"    Score          : {s['new_score']:.1f} / 20.0")
-    L.append(f"  {'─'*56}")
-    L.append(f"  TOTAL SCORE      : {s['total_score']:.1f} / {s['max_score']:.1f}")
-    L.append("=" * 60)
+    L.append(f"    PILLAR SCORE     : {s['total_score']:.1f} / {s['max_score']:.1f}")
     return "\n".join(L)
+
+
+def _format_report(report: dict) -> str:
+    # Grouped (per-pillar) report.
+    if "pillars" in report:
+        L = ["=" * 62, f"  RDTII EVALUATION REPORT — {report['economy']}", "=" * 62]
+        for i, pr in enumerate(report["pillars"]):
+            if i:
+                L.append("  " + "─" * 58)
+            L.append(_format_pillar_section(pr))
+        ov = report["overall"]
+        L.append("=" * 62)
+        L.append(f"  OVERALL SCORE    : {ov['total_score']:.1f} / {ov['max_score']:.1f}")
+        L.append("=" * 62)
+        return "\n".join(L)
+    # Flat single-pillar report (back-compat).
+    return ("=" * 62 + "\n"
+            + f"  RDTII EVALUATION REPORT — {report['economy']} | Pillar {report.get('pillar') or '?'}\n"
+            + "=" * 62 + "\n" + _format_pillar_section(report) + "\n" + "=" * 62)
 
 
 def _print_report(report: dict) -> None:
     print("\n" + _format_report(report) + "\n")
 
 
-def write_report(report: dict, report_dir: Path) -> tuple[Path, Path]:
-    """Write the evaluation report as JSON (data) + TXT (human-readable)."""
+def _ascii(text: str) -> str:
+    """Make text safe for fpdf2's latin-1 core fonts."""
+    return (str(text).replace("✓", "[match]").replace("✗", "[miss]")
+            .replace("—", "-").replace("–", "-").replace("─", "-")
+            .encode("latin-1", "replace").decode("latin-1"))
+
+
+def write_report_pdf(report: dict, path: Path) -> Path | None:
+    """Render the grouped report as a formatted PDF (fpdf2). Returns None if fpdf
+    is unavailable."""
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        return None
+
+    sections = report.get("pillars", [report])
+    pdf = FPDF()
+    pdf.set_margins(15, 15, 15)
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    def line(text: str, h: float = 6.0, bold: bool = False, size: int = 11,
+             fill: tuple | None = None, fg: tuple = (0, 0, 0)) -> None:
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", "B" if bold else "", size)
+        pdf.set_text_color(*fg)
+        if fill:
+            pdf.set_fill_color(*fill)
+        pdf.multi_cell(0, h, _ascii(text), new_x="LMARGIN", new_y="NEXT", fill=bool(fill))
+        pdf.set_text_color(0, 0, 0)
+
+    line("RDTII Evaluation Report", h=10, bold=True, size=18)
+    line(f"Economy: {report.get('economy','')}", h=6, size=11, fg=(90, 90, 90))
+    line(f"Generated: {datetime.now():%Y-%m-%d %H:%M}", h=6, size=11, fg=(90, 90, 90))
+    pdf.ln(2)
+
+    for pr in sections:
+        s = pr["scores"]
+        line(f"  Pillar {pr.get('pillar','?')}     Score {s['total_score']:.1f} / {s['max_score']:.1f}",
+             h=9, bold=True, size=13, fill=(33, 73, 125), fg=(255, 255, 255))
+        pdf.ln(1)
+        line(f"KNOWN indicators: {s['known_matched']}/{s['known_total']} matched  ({s['known_score']:.1f}/40)",
+             h=6.5, bold=True, size=11)
+        if pr.get("matched_known"):
+            line("  Matched: " + ", ".join(pr["matched_known"]), h=5.5, size=10)
+        if pr.get("missed_known"):
+            line("  Missed: " + ", ".join(pr["missed_known"]), h=5.5, size=10, fg=(170, 0, 0))
+        line(f"NEW provisions: {s['new_discovered']} discovered  ({s['new_score']:.1f}/20)",
+             h=6.5, bold=True, size=11)
+        for np in pr.get("new_provisions", []):
+            art = (np.get("article") or "").strip()
+            line(f"  + [{np.get('indicator_id','')}] {np.get('law_name','')}" + (f" - {art}" if art else ""),
+                 h=5.5, size=10)
+        pdf.ln(3)
+
+    ov = report.get("overall")
+    if ov:
+        line(f"OVERALL SCORE: {ov['total_score']:.1f} / {ov['max_score']:.1f}",
+             h=10, bold=True, size=13, fill=(225, 225, 225))
+
+    pdf.output(str(path))
+    return path
+
+
+def write_report(report: dict, report_dir: Path) -> list[Path]:
+    """Write the evaluation report as JSON (data) + TXT (human-readable) + PDF."""
     report_dir.mkdir(parents=True, exist_ok=True)
     econ = re.sub(r"[^A-Za-z0-9]+", "_", report["economy"]).strip("_") or "economy"
-    pillar = report.get("pillar") or "6+7"
+    ov = report.get("overall", {})
+    pillars = ov.get("pillars_evaluated") or ([report.get("pillar")] if report.get("pillar") else [6, 7])
+    pillar_tag = "P" + "-".join(str(p) for p in pillars)
     ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
-    stem = f"{econ}_evaluation_P{pillar}_{ts}"
+    stem = f"{econ}_evaluation_{pillar_tag}_{ts}"
+
     json_path = report_dir / f"{stem}.json"
     txt_path = report_dir / f"{stem}.txt"
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     txt_path.write_text(_format_report(report) + "\n", encoding="utf-8")
-    return json_path, txt_path
+    out = [json_path, txt_path]
+    pdf_path = write_report_pdf(report, report_dir / f"{stem}.pdf")
+    if pdf_path:
+        out.append(pdf_path)
+    return out
 
 
 def main() -> None:
@@ -406,7 +517,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    report = evaluate(
+    report = build_economy_report(
         sample_kit_dir=Path(args.sample_kit),
         economy=args.economy,
         pillar=args.pillar,
@@ -416,9 +527,11 @@ def main() -> None:
     _print_report(report)
 
     if not args.no_report_file:
-        json_path, txt_path = write_report(report, Path(args.report_dir))
-        print(f"  Report written   : {json_path}")
-        print(f"                     {txt_path}\n")
+        paths = write_report(report, Path(args.report_dir))
+        print("  Report written   :")
+        for pth in paths:
+            print(f"    - {pth}")
+        print()
 
 
 if __name__ == "__main__":

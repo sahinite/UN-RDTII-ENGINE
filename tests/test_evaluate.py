@@ -124,3 +124,49 @@ class TestEvaluateNewScore:
             report = ev.evaluate(tmp_path, "Singapore", csv_path=csv_path)
 
         assert report["scores"]["new_score"] == 0.0
+
+
+# ── Grouped report + file output (per-pillar grouping + PDF) ─────────────────────
+
+_DB = Path("data/sample_kit/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
+
+
+def _grouped_report_fixture() -> dict:
+    pillar = {
+        "pillar": 6, "csv_path": "x.csv",
+        "matched_known": ["P6-I1", "P6-I2"], "missed_known": ["P6-I3"],
+        "new_provisions": [{"indicator_id": "P6-I1", "law_name": "PDPA 2012", "article": "s.26"}],
+        "scores": {"known_matched": 2, "known_total": 3, "known_score": 26.7,
+                   "new_discovered": 1, "new_score": 4.0, "total_score": 30.7, "max_score": 60.0},
+    }
+    return {
+        "economy": "Singapore",
+        "pillars": [pillar],
+        "overall": {"pillars_evaluated": [6], "total_score": 30.7, "max_score": 60.0},
+    }
+
+
+def test_write_report_produces_json_txt_pdf(tmp_path):
+    import evaluate as ev
+    paths = ev.write_report(_grouped_report_fixture(), tmp_path)
+    exts = {p.suffix for p in paths}
+    assert {".json", ".txt", ".pdf"} <= exts
+    for p in paths:
+        assert p.exists() and p.stat().st_size > 0
+
+
+def test_formatted_report_groups_by_pillar(tmp_path):
+    import evaluate as ev
+    text = ev._format_report(_grouped_report_fixture())
+    assert "PILLAR 6" in text
+    assert "OVERALL SCORE" in text
+    assert "P6-I3" in text  # missed indicator is itemised
+
+
+@pytest.mark.skipif(not _DB.exists(), reason="Round 1 DB not present")
+def test_build_economy_report_has_two_pillar_sections(tmp_path):
+    import evaluate as ev
+    # Empty output_dir → scores will be 0, but the structure must group P6 + P7.
+    r = ev.build_economy_report(Path("data/sample_kit"), "Singapore", None, None, tmp_path)
+    assert [pr["pillar"] for pr in r["pillars"]] == [6, 7]
+    assert r["overall"]["max_score"] == 120.0
