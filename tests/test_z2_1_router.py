@@ -107,6 +107,34 @@ class TestDownload:
         assert raw == text_pdf_bytes
         assert "pdf" in ct
 
+    def test_download_reads_local_file_uri(self, text_pdf_bytes, tmp_path):
+        """main.py --pdf: a file:// URI is read off disk, not via httpx."""
+        f = tmp_path / "law.pdf"
+        f.write_bytes(text_pdf_bytes)
+        from src.fetcher.router import download
+        raw, ct, url = download(f.resolve().as_uri())
+        assert raw == text_pdf_bytes
+        assert ct == "application/pdf"
+
+    def test_download_reads_bare_local_path(self, text_pdf_bytes, tmp_path):
+        f = tmp_path / "law.pdf"
+        f.write_bytes(text_pdf_bytes)
+        from src.fetcher.router import download
+        raw, _ct, _url = download(str(f))
+        assert raw == text_pdf_bytes
+
+    def test_fetched_document_accepts_file_url(self):
+        """file:// is a valid source_url for locally-provided PDFs."""
+        doc = FetchedDocument(
+            source_url="file:///tmp/law.pdf", resolved_url="file:///tmp/law.pdf",
+            economy="SG", act_title="Law", discovery_tag="KNOWN", archive_url="",
+            doc_type="TEXT_PDF", extraction_method="pdfplumber", page_count=1,
+            raw_text="some text", section_hierarchy=[],
+            cost_log_entry=CostLogEntry(engine="pdfplumber", pages=1, cost_usd=0.0,
+                                        processing_time_ms=1.0),
+        )
+        doc.validate()  # must not raise
+
     def test_download_404_raises_download_error(self, sg_zone1):
         with patch("src.fetcher.router.httpx.Client") as mock_client_cls:
             mock_client = MagicMock()

@@ -84,7 +84,26 @@ def download(url: str, timeout: int = 30) -> tuple[bytes, str, str]:
     """
     Returns (raw_bytes, content_type_header, resolved_url).
     Retries once on timeout. Raises DownloadError on failure.
+
+    Local files (a `file://` URI or a bare existing path) are read directly —
+    httpx only speaks http(s). This is what backs `main.py --pdf path/to/law.pdf`.
     """
+    import urllib.parse
+    from pathlib import Path as _Path
+
+    parsed = urllib.parse.urlparse(url)
+    is_file_uri = parsed.scheme == "file"
+    if is_file_uri or (not parsed.scheme and _Path(url).exists()):
+        local = _Path(urllib.parse.unquote(parsed.path) if is_file_uri else url)
+        try:
+            data = local.read_bytes()
+        except OSError as exc:
+            raise DownloadError(url, f"local file read failed: {exc}") from exc
+        ctype = "application/pdf" if local.suffix.lower() == ".pdf" else "application/octet-stream"
+        logger.info({"event": "local_file_read", "path": str(local),
+                     "bytes": len(data), "content_type": ctype, "economy": ""})
+        return data, ctype, url
+
     headers = {"User-Agent": _USER_AGENT}
 
     for attempt in range(1, 3):

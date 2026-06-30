@@ -269,15 +269,20 @@ def run_pipeline(
     # "no barrier (score 0)" record — Round 1 itself documents these (e.g. SG 6.3:
     # "Singapore does not implement infrastructure requirement"). Without this the
     # indicator is silently absent and reads as a miss, not a documented null.
-    null_records = _emit_null_assessments(
+    # Only for full-economy runs: a single provided PDF (--pdf) can't justify a
+    # "no barrier" verdict for the economy's other indicators, so skip nulls there.
+    null_records = [] if pdf_path else _emit_null_assessments(
         all_records, _seed, economy_config.economy_name, economy_config,
     )
     if null_records:
         all_records.extend(null_records)
         p.info(f"Null assessments — {len(null_records)} indicator(s) assessed as no barrier")
 
-    # ── PDPA gate (Singapore only) ──────────────────────────────────────────────
-    if economy_iso == "SG" and pillar == 7:
+    # ── PDPA gate (Singapore crawl only) ────────────────────────────────────────
+    # This is the Phase-1 build gate for the live Singapore P7 crawl. It must NOT
+    # apply to --pdf mode, which processes an arbitrary provided document (e.g. a
+    # foreign or non-PDPA law) and would otherwise always abort here.
+    if economy_iso == "SG" and pillar == 7 and not pdf_path:
         p.step("PDPA compliance gate check")
         try:
             check_pdpa_gate(economy_iso, all_records)

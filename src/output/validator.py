@@ -119,6 +119,11 @@ def validate_url(url: str) -> tuple[URLStatusType, Optional[int]]:
     HTTP GET the URL, follow same-domain redirects, detect soft-404 pages.
     Returns (status, http_status_code).
     """
+    # Locally-provided documents (main.py --pdf) have a file:// source that is
+    # not HTTP-checkable; it was already read off disk, so treat it as ok.
+    if url.startswith("file://"):
+        return "ok", None
+
     headers = dict(_BROWSER_HEADERS)
     last_status: Optional[int] = None
 

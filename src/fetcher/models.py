@@ -88,8 +88,9 @@ class FetchedDocument:
     def validate(self) -> None:
         if not self.raw_text:
             raise ValueError(f"raw_text is empty for {self.source_url}")
-        if not re.match(r"^https?://", self.source_url):
-            raise ValueError(f"source_url is not a valid HTTP/HTTPS URL: {self.source_url}")
+        # file:// is allowed for locally-provided PDFs (main.py --pdf).
+        if not re.match(r"^(https?|file)://", self.source_url):
+            raise ValueError(f"source_url is not a valid HTTP/HTTPS/file URL: {self.source_url}")
         if self.discovery_tag not in ("KNOWN", "NEW"):
             raise ValueError(f"discovery_tag must be KNOWN or NEW, got: {self.discovery_tag!r}")
         if self.doc_type == "UNKNOWN":
