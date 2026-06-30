@@ -151,8 +151,7 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
         # the Round 2 DB which has no Consolidated sheet). Fall back to the active
         # sheet (R1 Consolidated, Country-filtered) only if no economy sheet.
         econ_ws = _find_economy_sheet(wb, economy_iso, economy_name)
-        per_economy_sheet = econ_ws is not None
-        ws = econ_ws if per_economy_sheet else wb.active
+        ws = econ_ws if econ_ws is not None else wb.active
         rows = ws.iter_rows(values_only=True)
         raw_headers = next(rows, None)
         if not raw_headers:
@@ -161,6 +160,10 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
 
         headers = [str(h).strip().lower() if h else "" for h in raw_headers]
         col_economy = _find_col(headers, ["economy", "country"])
+        # A true per-economy sheet has NO Country column (R1 'Singapore', R2
+        # 'India'); a sheet that HAS one is multi-economy and must be filtered,
+        # even if its name happened to match the economy.
+        per_economy_sheet = col_economy is None
         col_title   = _find_col(headers, ["act title", "title", "act_title", "act and/or practice", "act and/or"])
         col_url     = _find_col(headers, ["url", "act_url", "link"])
         col_pillar  = _find_col(headers, ["pillar_id", "pillar", "pillar.name"])
