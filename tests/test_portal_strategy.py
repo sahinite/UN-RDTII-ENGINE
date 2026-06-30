@@ -408,7 +408,9 @@ class TestIndexDiscovery:
         assert any("PDPA2012" in z.url for z in known_results)
 
     def test_discover_new_above_threshold_included(self):
-        """NEW acts with BM25 score above threshold should be included."""
+        """NEW acts with BM25 score above threshold should be included when NEW
+        discovery is enabled (ZONE2_MAX_NEW_ACTS > 0 — it defaults to 0 so the
+        build-gate run stays KNOWN-only)."""
         from src.crawler.discover import discover
 
         known_urls: set[str] = set()
@@ -416,7 +418,8 @@ class TestIndexDiscovery:
         async def mock_fetch(url, portal):
             return _SSO_INDEX_HTML, 200
 
-        with patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch):
+        with patch("src.crawler.discover._MAX_NEW_ACTS", 5), \
+             patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch):
             results = asyncio.run(
                 discover(_SG_ECONOMY, 7, _MINI_TAXONOMY, known_urls)
             )

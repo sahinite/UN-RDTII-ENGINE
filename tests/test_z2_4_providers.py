@@ -32,7 +32,9 @@ def test_anthropic_complete_returns_llm_response():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_msg
 
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
+    # Clear LLM_MODEL so the model is the deterministic default, not whatever a
+    # loaded .env set (which made this test order-dependent in the full suite).
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test", "LLM_MODEL": ""}):
         from src.mapping.providers.anthropic_provider import AnthropicProvider
         import src.mapping.providers.anthropic_provider as ap_module
         # Ensure anthropic module is not None for this test
@@ -155,8 +157,11 @@ def test_ollama_provider_names():
 
 
 def test_anthropic_provider_name_and_model():
-    from src.mapping.providers.anthropic_provider import ANTHROPIC_MODEL, AnthropicProvider
-    p = AnthropicProvider()
-    assert p.provider_name == "anthropic"
-    assert p.model == ANTHROPIC_MODEL
-    assert "claude" in p.model
+    from src.mapping.providers.anthropic_provider import ANTHROPIC_MODEL_DEFAULT, AnthropicProvider
+    # Clear LLM_MODEL so we test the provider's default, not an env override
+    # (a loaded .env can pin LLM_MODEL to a non-Claude model).
+    with patch.dict(os.environ, {"LLM_MODEL": ""}):
+        p = AnthropicProvider()
+        assert p.provider_name == "anthropic"
+        assert p.model == ANTHROPIC_MODEL_DEFAULT
+    assert "claude" in ANTHROPIC_MODEL_DEFAULT

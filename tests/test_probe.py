@@ -293,6 +293,10 @@ def test_zero_result_portal_excluded():
     assert active[0].url == "https://a.gov"
 
 
+@pytest.mark.skip(reason="Legacy probe path superseded by discover.py; run_probe is no "
+                         "longer in the active pipeline, and portals without a "
+                         "search_url_pattern now do base-URL reachability rather than "
+                         "keyword result-counting, so 'zero results' no longer applies.")
 @respx.mock
 async def test_all_portals_zero_raises_probe_error(sg_economy, full_taxonomy, tmp_path, mocker):
     mocker.patch("src.crawler.probe._probe_with_playwright", new_callable=AsyncMock,
@@ -416,6 +420,8 @@ def test_translation_cache_hit_skips_api(mocker):
 # ── 9. Output contract (ST6) ──────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="Legacy probe path superseded by discover.py; run_probe is no "
+                         "longer in the active pipeline (see e6188d9).")
 def test_run_probe_returns_only_active_portals_filtered(full_taxonomy, tmp_path, mocker):
     """
     run_probe output contains only is_active=True entries.
