@@ -64,6 +64,62 @@ def _rewrite_to_pdf_url(url: str, pdf_view_suffix: str) -> str:
     return new_url
 
 
+# ── api_versioned_pdf fetch (resolve latest version date → dated PDF URL) ─────────
+
+# AU register id, e.g. C2004A03712 (Act) or F2021L00289 (legislative instrument).
+_TITLE_ID_RE = re.compile(r"[cf]\d{4}[a-z]\d{5}", re.IGNORECASE)
+
+
+def _extract_title_id(url: str) -> str | None:
+    """Pull the title/register id out of any legislation.gov.au URL form
+    (`/C2004A03712`, `/c2004a03712/latest/text`, `/details/c2023c00106`)."""
+    m = _TITLE_ID_RE.search(url)
+    return m.group(0).upper() if m else None
+
+
+def _latest_version_start(api_base: str, title_id: str, timeout: int = 30) -> str | None:
+    """Resolve the latest in-force compilation's start date (YYYY-MM-DD) via the
+    versions API. Prefers the `isLatest` row; future rows have registerId=null and
+    isLatest=false and are skipped."""
+    import urllib.parse
+    crit = urllib.parse.quote("affects(Amend,Disallow)")
+    filt = urllib.parse.quote(f"titleId eq '{title_id}'")
+    order = urllib.parse.quote("start desc")
+    url = (
+        f"{api_base}/versions/search(criteria='{crit}')"
+        f"?$filter={filt}&$select=start,isLatest,registerId&$orderby={order}&$top=20"
+    )
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(url, headers={"Accept": "application/json"})
+        if resp.status_code != 200:
+            return None
+        rows = resp.json().get("value", [])
+    except (httpx.HTTPError, ValueError):
+        return None
+    latest = next((r for r in rows if r.get("isLatest")), None)
+    if latest is None:
+        latest = next((r for r in rows if r.get("registerId")), None)
+    start = (latest or {}).get("start") or ""
+    return start.split("T")[0] if start else None
+
+
+def _resolve_versioned_pdf_url(act_url: str, portal) -> str | None:
+    """Build the dated PDF URL for an api_versioned_pdf portal, or None if it
+    can't be resolved (caller then downloads the original URL and lets detect_type
+    route it)."""
+    title_id = _extract_title_id(act_url)
+    api_base = getattr(portal, "api_base", None)
+    if not title_id or not api_base:
+        return None
+    start = _latest_version_start(api_base, title_id)
+    if not start:
+        return None
+    suffix = (getattr(portal, "pdf_path_suffix", None) or "text/original/pdf").strip("/")
+    portal_base = str(portal.url).rstrip("/")
+    return f"{portal_base}/{title_id}/{start}/{start}/{suffix}"
+
+
 # ── Custom exceptions ──────────────────────────────────────────────────────────
 
 class DownloadError(Exception):
@@ -320,6 +376,27 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
                 "economy": zone1_result.economy,
             })
             fetch_url = rewritten
+        elif fetch_strategy == "api_versioned_pdf":
+            # Resolve the act's latest-version dated PDF URL via the versions API.
+            # Also a single act's PDF → not a consolidated volume.
+            single_act_fetch = True
+            resolved = _resolve_versioned_pdf_url(fetch_url, portal)
+            if resolved:
+                logger.info({
+                    "event": "api_versioned_pdf_resolved",
+                    "original_url": fetch_url,
+                    "pdf_url": resolved,
+                    "portal": portal.name,
+                    "economy": zone1_result.economy,
+                })
+                fetch_url = resolved
+            else:
+                logger.warning({
+                    "event": "api_versioned_pdf_unresolved",
+                    "original_url": fetch_url,
+                    "portal": portal.name,
+                    "economy": zone1_result.economy,
+                })
 
     raw_bytes, content_type, resolved_url = download(fetch_url)
 

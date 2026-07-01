@@ -73,7 +73,7 @@ pdf_path_suffix: text/original/pdf
 2. ✅ Add `.docx` extractor branch (D5) — `src/fetcher/extractors/docx_text.py`, wired into `router.detect_type`/`route`, `python-docx` in requirements, `tests/test_docx_extractor.py`. Additive; SG golden unchanged; full suite green (654 passed).
 3. ✅ Build the shared SPA/SSR probe utility (D6) — `src/crawler/spa_probe.py` (`classify_render` pure fn + `probe_render` network wrapper), `tests/test_spa_probe.py`. Marker-primary / length-secondary logic, calibrated live: AU FRL→SPA (`ng-version`), SG SSO→SSR. New files only; SG golden unchanged; suite 664 passed.
 4. ✅ Refactor `discover()`: `_discover_index` now emits raw `(title, url)` only; the shared `_rank_exclude_tag()` tail does BM25 rank + taxonomy exclude + KNOWN/NEW tag + threshold (per portal, so BM25 corpus unchanged). `api`/`auto` will reuse it. *Acceptance met: SG golden byte-identical; suite 666 passed.*
-5. Add config Literals + fields (D8); implement `api` discovery + `api_versioned_pdf` fetch adapters (D3/D4); flip `australia.yaml` off `TBD`.
+5. ✅ Config Literals + fields (D8: `discovery:api`, `fetch:api_versioned_pdf`, `api_base`/`api_collection`/`pdf_path_suffix`); `_discover_api` (OData `contains(name,term)` per pillar keyword → raw candidates → shared tail) + `_resolve_versioned_pdf_url` (versions API → dated PDF). `australia.yaml` live. Verified against the live API (Privacy Act → KNOWN, correct dated PDF URL); 13 tests; SG golden unchanged; suite 679 passed.
 6. Implement `auto` discovery + fetch as best-effort safety net (D7).
 7. Validate Australia end-to-end; update `australia.yaml`, CONTEXT.md, ADRs.
 

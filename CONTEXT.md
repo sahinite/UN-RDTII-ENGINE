@@ -92,7 +92,7 @@ KNOWN always kept. NEW fills remaining slots up to cap.
 `_find_portal_for_url()` matches by registered domain. Rewrites in `route()` before `download()`.
 
 ### ADR-041 — Unified portal strategy = stable interface + fixed adapter set
-Onboarding a new economy is config-only against already-implemented adapters; a "single literal strategy for all 11" is rejected as infeasible (SG=HTML, AU=JSON API, TH/KH/LA/MM=scanned OCR). New code only for a genuinely-new portal *category*. Spec: `docs/prd/unified-portal-strategy.md`. *(status: design agreed, not yet implemented)*
+Onboarding a new economy is config-only against already-implemented adapters; a "single literal strategy for all 11" is rejected as infeasible (SG=HTML, AU=JSON API, TH/KH/LA/MM=scanned OCR). New code only for a genuinely-new portal *category*. Spec: `docs/prd/unified-portal-strategy.md`. *(status: steps 1–5 done — SG golden baseline, `.docx` branch, SPA/SSR probe, shared rank/tag tail, AU `api`+`api_versioned_pdf` live; remaining: `auto` adapter + AU end-to-end)*
 
 ### ADR-042 — Discovery adapter emits raw `(title, url)` only; rank/tag is shared
 `index`/`api`/`auto`/`seed_only` each only *list candidates*. BM25 rank, taxonomy exclude, KNOWN/NEW tag, indicator-aware cap are lifted out of `_discover_index` into the shared `discover()` tail so adapters cannot drift. NEW discovery is always-on; seeds are the KNOWN-tag reference + floor, not the discovery source.

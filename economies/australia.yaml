@@ -60,11 +60,16 @@ portals:
   - name: Federal Register of Legislation
     url: https://www.legislation.gov.au
     type: primary
-    # Planned: anti_bot:none, discovery:api, fetch:api_versioned_pdf (see header).
-    # Set TBD until the "api" / "api_versioned_pdf" handlers are implemented.
+    # No bot-block: plain httpx gets 200 on both the API and the PDF.
     anti_bot: none
-    discovery: TBD
-    fetch: TBD
+    # Discover via the OData titles API (contains(name,<term>) per pillar keyword).
+    discovery: api
+    api_base: https://api.prod.legislation.gov.au/v1
+    api_collection: Act
+    # Resolve each act's latest-version date via the versions API, then fetch the
+    # dated text-layer PDF: {url}/{titleId}/{start}/{start}/text/original/pdf
+    fetch: api_versioned_pdf
+    pdf_path_suffix: text/original/pdf
   - name: Office of the Australian Information Commissioner
     url: https://www.oaic.gov.au
     type: secondary

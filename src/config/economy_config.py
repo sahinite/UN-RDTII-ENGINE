@@ -86,13 +86,20 @@ class Portal(BaseModel):
     # How to reach the portal without bot-blocks
     anti_bot: Literal["none", "header_spoof", "playwright_stealth"] = "none"
     # How to find pillar-relevant instruments
-    discovery: Literal["index", "search", "search_js", "seed_only", "TBD"] = "TBD"
+    discovery: Literal["index", "api", "auto", "search", "search_js", "seed_only", "TBD"] = "TBD"
     # How to obtain complete document text
-    fetch: Literal["pdf_endpoint", "html", "html_wholedoc", "html_js", "pdf_link", "TBD"] = "TBD"
+    fetch: Literal["pdf_endpoint", "api_versioned_pdf", "html", "html_wholedoc", "html_js", "pdf_link", "auto", "TBD"] = "TBD"
     # URLs of in-force browse indexes (used when discovery: index)
     index_urls: list[str] = Field(default_factory=list)
     # Query-string suffix to rewrite act URL to its PDF view (used when fetch: pdf_endpoint)
     pdf_view_suffix: str | None = None
+    # OData/JSON API base + collection (used when discovery: api / fetch: api_versioned_pdf)
+    # e.g. api_base="https://api.prod.legislation.gov.au/v1", api_collection="Act"
+    api_base: str | None = None
+    api_collection: str | None = None
+    # Path suffix appended after the resolved version dates for api_versioned_pdf,
+    # e.g. "text/original/pdf" → {url}/{titleId}/{start}/{start}/text/original/pdf
+    pdf_path_suffix: str | None = None
     # Escalation target when httpx-based fetch is blocked
     transport_fallback: Literal["playwright_stealth"] | None = None
 

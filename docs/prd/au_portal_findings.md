@@ -9,8 +9,7 @@
 ## Portal 1 — Federal Register of Legislation (FRL)
 
 **URL:** https://www.legislation.gov.au
-**Planned strategy:** `anti_bot: none`, `discovery: api`, `fetch: api_versioned_pdf`
-**Current YAML:** `discovery: TBD`, `fetch: TBD` (adapters not yet implemented — see [unified-portal-strategy.md](unified-portal-strategy.md))
+**Declared strategy (live):** `anti_bot: none`, `discovery: api`, `fetch: api_versioned_pdf`, `api_base: https://api.prod.legislation.gov.au/v1`, `api_collection: Act`, `pdf_path_suffix: text/original/pdf` — adapters implemented (`_discover_api` / `_resolve_versioned_pdf_url`); see [unified-portal-strategy.md](unified-portal-strategy.md) step 5.
 
 ### Why AU is architecturally different from Singapore
 

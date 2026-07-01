@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import urllib.parse
 from typing import TYPE_CHECKING
 
+import httpx
 from bs4 import BeautifulSoup
 
 from src.crawler.crawler import _normalise_url, _registered_domain
@@ -265,6 +267,94 @@ def _rank_exclude_tag(
     return results
 
 
+# ── API-strategy discovery (OData / JSON) ───────────────────────────────────────
+
+_API_STOPWORDS = {
+    "and", "the", "for", "with", "from", "that", "this", "other", "under",
+    "into", "act", "acts", "law", "laws", "regulation", "regulations",
+}
+
+
+def _api_search_terms(keywords: list[str], cap: int = 12) -> list[str]:
+    """Distinct significant single words from pillar keywords, for name-contains
+    API queries (multi-word phrases rarely appear verbatim in act names)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for kw in keywords:
+        for w in re.split(r"[^a-z0-9]+", kw.lower()):
+            if len(w) >= 4 and w not in _API_STOPWORDS and w not in seen:
+                seen.add(w)
+                out.append(w)
+                if len(out) >= cap:
+                    return out
+    return out
+
+
+async def _api_titles_contains(
+    client: "httpx.AsyncClient", api_base: str, collection: str, term: str, top: int = 50,
+) -> list[dict]:
+    """One OData query: in-force titles in `collection` whose name contains `term`."""
+    crit = urllib.parse.quote(f"and(collection({collection}),status(InForce))")
+    filt = urllib.parse.quote(f"contains(name,'{term}')")
+    url = (
+        f"{api_base}/titles/search(criteria='{crit}')"
+        f"?$filter={filt}&$select=id,name&$top={top}"
+    )
+    try:
+        resp = await client.get(url, headers={"Accept": "application/json"})
+        if resp.status_code != 200:
+            logger.warning("[DISCOVER] api query HTTP %d for term '%s'", resp.status_code, term)
+            return []
+        return resp.json().get("value", [])
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("[DISCOVER] api query failed for term '%s': %s", term, exc)
+        return []
+
+
+async def _discover_api(
+    portal: "Portal",
+    pillar: int,
+    taxonomy: list[dict],
+    budget_deadline: float,
+) -> list[tuple[str, str]] | None:
+    """
+    API discovery adapter — query a JSON/OData legislation API for pillar-relevant
+    titles and emit raw (name, url) candidates. Like every adapter (D3), it only
+    lists candidates; the shared `_rank_exclude_tag` tail ranks + tags them.
+
+    Queries `contains(name, term)` for each significant pillar keyword term and
+    unions the results (deduped by title id). Emits the canonical act URL
+    `{portal.url}/{titleId}`, which `_normalise_url` lowercases to match the
+    Round 1 seed form (`.../c2004a03712`). Returns None on empty/no-config.
+    """
+    api_base = getattr(portal, "api_base", None)
+    if not api_base:
+        logger.warning("[DISCOVER] portal '%s' has discovery:api but no api_base", portal.name)
+        return None
+    collection = getattr(portal, "api_collection", None) or "Act"
+    terms = _api_search_terms(build_pillar_keywords(taxonomy, pillar))
+    if not terms:
+        return None
+
+    portal_base = str(portal.url).rstrip("/")
+    candidates: dict[str, tuple[str, str]] = {}  # titleId → (name, url)
+    async with httpx.AsyncClient(timeout=_INDEX_FETCH_TIMEOUT_S, follow_redirects=True) as client:
+        for term in terms:
+            if time.monotonic() > budget_deadline:
+                logger.warning("[DISCOVER] budget exhausted during api discovery (term=%s)", term)
+                break
+            rows = await _api_titles_contains(client, api_base, collection, term)
+            logger.info("[DISCOVER] api term '%s' → %d titles", term, len(rows))
+            for row in rows:
+                tid = row.get("id")
+                if tid and tid not in candidates:
+                    candidates[tid] = (row.get("name", ""), f"{portal_base}/{tid}")
+
+    if not candidates:
+        return None
+    return list(candidates.values())
+
+
 # ── Seed-only fallback ─────────────────────────────────────────────────────────
 
 def _seed_fallback(
@@ -390,6 +480,12 @@ async def discover(
             candidates = await _discover_index(portal, budget_deadline)
             if candidates is None:
                 raw = _seed_fallback(portal, economy_iso, known_urls, "index discovery failed")
+            else:
+                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
+        elif discovery_strategy == "api":
+            candidates = await _discover_api(portal, pillar, taxonomy, budget_deadline)
+            if candidates is None:
+                raw = _seed_fallback(portal, economy_iso, known_urls, "api discovery failed")
             else:
                 raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
         elif discovery_strategy == "seed_only":
