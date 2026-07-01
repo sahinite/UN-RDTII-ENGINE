@@ -18,7 +18,7 @@ import pytest
 import respx
 
 from src.config.economy_config import EconomyConfig
-from src.crawler.exceptions import ConfigError, ProbeError
+from src.crawler.exceptions import ConfigError
 from src.crawler.probe import (
     ProbeRawResult,
     ProbeResult,
@@ -30,7 +30,6 @@ from src.crawler.probe import (
     _probe_with_httpx,
     _rank_portals,
     _translate_keyword,
-    run_probe,
     translate_keywords,
     validate_taxonomy,
 )
@@ -293,22 +292,6 @@ def test_zero_result_portal_excluded():
     assert active[0].url == "https://a.gov"
 
 
-@pytest.mark.skip(reason="Legacy probe path superseded by discover.py; run_probe is no "
-                         "longer in the active pipeline, and portals without a "
-                         "search_url_pattern now do base-URL reachability rather than "
-                         "keyword result-counting, so 'zero results' no longer applies.")
-@respx.mock
-async def test_all_portals_zero_raises_probe_error(sg_economy, full_taxonomy, tmp_path, mocker):
-    mocker.patch("src.crawler.probe._probe_with_playwright", new_callable=AsyncMock,
-                 return_value=(0, [], "zero"))
-    # Return zero-result HTML for all requests
-    zero_html = "<html><body><p>No results found.</p><p>Try a different search term.</p><p>Use specific legal keywords for better results.</p></body></html>"
-    respx.get().mock(return_value=httpx.Response(200, text=zero_html))
-
-    with pytest.raises(ProbeError, match="zero results"):
-        await run_probe(sg_economy, full_taxonomy, output_dir=str(tmp_path))
-
-
 def test_skip_log_written(tmp_path):
     """Zero-result portal should produce a probe_skip_*.jsonl log entry."""
     from src.crawler.probe import _write_probe_logs
@@ -418,41 +401,6 @@ def test_translation_cache_hit_skips_api(mocker):
 
 
 # ── 9. Output contract (ST6) ──────────────────────────────────────────────────
-
-
-@pytest.mark.skip(reason="Legacy probe path superseded by discover.py; run_probe is no "
-                         "longer in the active pipeline (see e6188d9).")
-def test_run_probe_returns_only_active_portals_filtered(full_taxonomy, tmp_path, mocker):
-    """
-    run_probe output contains only is_active=True entries.
-    Simulate: primary portal has hits, secondary portal returns zero.
-    """
-    async def mock_probe_all_kw(portal_url, pattern, keywords):
-        if "primary-results" in portal_url:
-            return [_make_raw(portal_url, "kw", 5, "ok", [f"{portal_url}/act1"])]
-        return [_make_raw(portal_url, "kw", 0, "zero")]
-
-    mocker.patch(
-        "src.crawler.probe._probe_portal_all_keywords",
-        side_effect=mock_probe_all_kw,
-    )
-
-    economy = EconomyConfig.model_validate({
-        "economy_name": "TestEcon",
-        "script_type": "latin",
-        "languages": ["en"],
-        "portals": [
-            {"name": "Good Portal", "url": "https://primary-results.gov", "type": "primary"},
-            {"name": "Empty Portal", "url": "https://empty-portal.gov", "type": "secondary"},
-        ],
-    })
-
-    import asyncio
-    result = asyncio.run(run_probe(economy, full_taxonomy, output_dir=str(tmp_path)))
-
-    assert len(result) == 1
-    assert result[0].is_active is True
-    assert "primary-results.gov" in result[0].url
 
 
 def test_probe_result_fields_complete():
