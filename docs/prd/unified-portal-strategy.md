@@ -71,7 +71,7 @@ pdf_path_suffix: text/original/pdf
 
 1. ✅ **Baseline first:** golden-output snapshots of SG discovery captured (P6/P7 × known_only/with_new) — `tests/golden/` + `tests/test_golden_sg_discovery.py`. *Gate satisfied: shared-hot-path edits are now regression-guarded.*
 2. ✅ Add `.docx` extractor branch (D5) — `src/fetcher/extractors/docx_text.py`, wired into `router.detect_type`/`route`, `python-docx` in requirements, `tests/test_docx_extractor.py`. Additive; SG golden unchanged; full suite green (654 passed).
-3. Build the shared SPA/SSR probe utility (D6).
+3. ✅ Build the shared SPA/SSR probe utility (D6) — `src/crawler/spa_probe.py` (`classify_render` pure fn + `probe_render` network wrapper), `tests/test_spa_probe.py`. Marker-primary / length-secondary logic, calibrated live: AU FRL→SPA (`ng-version`), SG SSO→SSR. New files only; SG golden unchanged; suite 664 passed.
 4. Refactor `discover()`: lift rank/exclude/tag out of `_discover_index` into the shared tail (D3). *Acceptance: SG snapshot unchanged.*
 5. Add config Literals + fields (D8); implement `api` discovery + `api_versioned_pdf` fetch adapters (D3/D4); flip `australia.yaml` off `TBD`.
 6. Implement `auto` discovery + fetch as best-effort safety net (D7).
