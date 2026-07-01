@@ -104,6 +104,19 @@ def _latest_version_start(api_base: str, title_id: str, timeout: int = 30) -> st
     return start.split("T")[0] if start else None
 
 
+def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
+    """Best-effort JS render of a SPA document page via Crawl4AI/Playwright.
+    Returns '' on failure. Used by fetch: auto when the page is a JS shell."""
+    import asyncio
+    try:
+        from src.crawler.crawl4ai_runner import fetch_with_playwright
+        html, _status = asyncio.run(fetch_with_playwright(url, None, timeout_ms))
+        return html or ""
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning({"event": "auto_render_failed", "url": url, "error": str(exc)})
+        return ""
+
+
 def _resolve_versioned_pdf_url(act_url: str, portal) -> str | None:
     """Build the dated PDF URL for an api_versioned_pdf portal, or None if it
     can't be resolved (caller then downloads the original URL and lets detect_type
@@ -359,6 +372,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     # ── pdf_endpoint rewrite: act URL → PDF print endpoint ────────────────────
     fetch_url = zone1_result.url
     single_act_fetch = False
+    auto_render = False
     portal = _find_portal_for_url(fetch_url, economy_config)
     if portal is not None:
         fetch_strategy = getattr(portal, "fetch", "TBD")
@@ -397,6 +411,10 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
                     "portal": portal.name,
                     "economy": zone1_result.economy,
                 })
+        elif fetch_strategy == "auto":
+            # Best-effort: download as-is; if the page is a JS SPA shell, the HTML
+            # branch below renders it with Playwright before extraction.
+            auto_render = True
 
     raw_bytes, content_type, resolved_url = download(fetch_url)
 
@@ -415,6 +433,16 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         raise UnsupportedDocTypeError(zone1_result.url, doc_type)
 
     if doc_type == "HTML":
+        # fetch: auto — if the static HTML is a JS SPA shell, render it first.
+        if auto_render:
+            from src.crawler.spa_probe import classify_render
+            if classify_render(raw_bytes.decode("utf-8", "replace")).is_spa:
+                rendered = _render_spa_sync(resolved_url)
+                if rendered:
+                    logger.info({"event": "auto_render_spa", "url": resolved_url,
+                                 "economy": zone1_result.economy})
+                    return extract_html(rendered.encode("utf-8"), zone1_result_resolved,
+                                        content_type="text/html")
         return extract_html(raw_bytes, zone1_result_resolved, content_type=content_type)
 
     if doc_type == "DOCX":

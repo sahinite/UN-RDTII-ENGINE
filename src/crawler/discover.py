@@ -355,6 +355,71 @@ async def _discover_api(
     return list(candidates.values())
 
 
+# ── Auto discovery (best-effort zero-config safety net) ─────────────────────────
+
+async def _render_spa(url: str) -> str:
+    """Best-effort JS render of a SPA page via stealth Playwright ('' on failure)."""
+    from src.crawler.transport import _fetch_playwright
+    try:
+        html, _status = await _fetch_playwright(url)
+        return html or ""
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("[DISCOVER] auto render failed for %s: %s", url, exc)
+        return ""
+
+
+async def _discover_auto(
+    portal: "Portal",
+    budget_deadline: float,
+) -> list[tuple[str, str]] | None:
+    """
+    Zero-config best-effort discovery adapter (D7 / ADR-046). For each start URL
+    (declared index_urls, else the portal root): fetch static HTML, classify it
+    SSR vs SPA with the shared probe, render SPAs with Playwright, then extract
+    same-domain candidate links. Emits raw (title, url) → shared `_rank_exclude_tag`.
+
+    NOT a reliable universal crawler — it grabs whatever it can so an undeclared
+    portal still yields *something*; declare a real strategy (index/api) for
+    production quality. Returns None when nothing is found.
+    """
+    from src.crawler.crawler import _extract_act_links
+    from src.crawler.spa_probe import classify_render
+
+    start_urls = list(getattr(portal, "index_urls", []) or []) or [str(portal.url).rstrip("/")]
+    portal_domain = _registered_domain(str(portal.url))
+    all_candidates: dict[str, tuple[str, str]] = {}
+
+    for url in start_urls:
+        if time.monotonic() > budget_deadline:
+            logger.warning("[DISCOVER] budget exhausted during auto discovery (%s)", url)
+            break
+        html, _status = await transport_fetch(url, portal)
+        render = classify_render(html) if html else None
+        if (not html) or (render is not None and render.is_spa):
+            logger.info(
+                "[DISCOVER] auto: %s is %s → rendering with Playwright",
+                url, render.mode if render else "unreachable",
+            )
+            rendered = await _render_spa(url)
+            if rendered:
+                html = rendered
+        if not html:
+            continue
+        for link in _extract_act_links(html, url, portal_domain):
+            norm = _normalise_url(link["url"])
+            if norm not in all_candidates:
+                all_candidates[norm] = (link["title"], link["url"])
+
+    if not all_candidates:
+        return None
+    logger.warning(
+        "[DISCOVER] portal '%s' ran on AUTO best-effort (%d candidates) — declare a "
+        "discovery strategy (index/api) for production quality",
+        portal.name, len(all_candidates),
+    )
+    return list(all_candidates.values())
+
+
 # ── Seed-only fallback ─────────────────────────────────────────────────────────
 
 def _seed_fallback(
@@ -486,6 +551,12 @@ async def discover(
             candidates = await _discover_api(portal, pillar, taxonomy, budget_deadline)
             if candidates is None:
                 raw = _seed_fallback(portal, economy_iso, known_urls, "api discovery failed")
+            else:
+                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
+        elif discovery_strategy == "auto":
+            candidates = await _discover_auto(portal, budget_deadline)
+            if candidates is None:
+                raw = _seed_fallback(portal, economy_iso, known_urls, "auto discovery found nothing")
             else:
                 raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
         elif discovery_strategy == "seed_only":

@@ -74,8 +74,8 @@ pdf_path_suffix: text/original/pdf
 3. ✅ Build the shared SPA/SSR probe utility (D6) — `src/crawler/spa_probe.py` (`classify_render` pure fn + `probe_render` network wrapper), `tests/test_spa_probe.py`. Marker-primary / length-secondary logic, calibrated live: AU FRL→SPA (`ng-version`), SG SSO→SSR. New files only; SG golden unchanged; suite 664 passed.
 4. ✅ Refactor `discover()`: `_discover_index` now emits raw `(title, url)` only; the shared `_rank_exclude_tag()` tail does BM25 rank + taxonomy exclude + KNOWN/NEW tag + threshold (per portal, so BM25 corpus unchanged). `api`/`auto` will reuse it. *Acceptance met: SG golden byte-identical; suite 666 passed.*
 5. ✅ Config Literals + fields (D8: `discovery:api`, `fetch:api_versioned_pdf`, `api_base`/`api_collection`/`pdf_path_suffix`); `_discover_api` (OData `contains(name,term)` per pillar keyword → raw candidates → shared tail) + `_resolve_versioned_pdf_url` (versions API → dated PDF). `australia.yaml` live. Verified against the live API (Privacy Act → KNOWN, correct dated PDF URL); 13 tests; SG golden unchanged; suite 679 passed.
-6. Implement `auto` discovery + fetch as best-effort safety net (D7).
-7. Validate Australia end-to-end; update `australia.yaml`, CONTEXT.md, ADRs.
+6. ✅ Implement `auto` discovery + fetch as best-effort safety net (D7). `_discover_auto` (probe SSR/SPA → render SPAs via Playwright → generic link extract → shared tail); router `fetch:auto` renders SPA doc shells before extraction. **Portal `discovery` default flipped `TBD`→`auto`** so an undeclared portal auto-crawls (explicit `TBD` still skips). 9 tests; SG golden byte-identical; suite 688 passed.
+7. ✅ Australia validated end-to-end (user run, Australia_P7): `api`+`api_versioned_pdf` deliver real text-layer PDF text; CSV 13-col UTF-8-BOM + JSON schema-conformant; OCR pages=0. Open quality items (mapping stage, not discovery/fetch): Privacy Act 1988 degenerate mapping (title-as-verbatim on the 472-pp doc); provision-level tag always NEW for PDF sources (no anchors); a seed law_name/instrument mismatch. Tracked separately.
 
 ## Out of scope
 - A scaffold / settings-suggestion CLI (D7 — explicitly declined).

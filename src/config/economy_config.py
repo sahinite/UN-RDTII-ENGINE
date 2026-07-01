@@ -85,8 +85,9 @@ class Portal(BaseModel):
     # ── Per-economy portal strategy fields ────────────────────────────────────
     # How to reach the portal without bot-blocks
     anti_bot: Literal["none", "header_spoof", "playwright_stealth"] = "none"
-    # How to find pillar-relevant instruments
-    discovery: Literal["index", "api", "auto", "search", "search_js", "seed_only", "TBD"] = "TBD"
+    # How to find pillar-relevant instruments. Default "auto": an undeclared portal
+    # is crawled best-effort (SPA/SSR auto-detected). Set "TBD" to deliberately skip.
+    discovery: Literal["index", "api", "auto", "search", "search_js", "seed_only", "TBD"] = "auto"
     # How to obtain complete document text
     fetch: Literal["pdf_endpoint", "api_versioned_pdf", "html", "html_wholedoc", "html_js", "pdf_link", "auto", "TBD"] = "TBD"
     # URLs of in-force browse indexes (used when discovery: index)

@@ -42,7 +42,7 @@ class TestPortalStrategyFields:
         cfg = EconomyConfig.model_validate(_SG_MINIMAL)
         portal = cfg.portals[0]
         assert portal.anti_bot == "none"
-        assert portal.discovery == "TBD"
+        assert portal.discovery == "auto"   # undeclared portal → best-effort auto-crawl
         assert portal.fetch == "TBD"
         assert portal.index_urls == []
         assert portal.pdf_view_suffix is None
