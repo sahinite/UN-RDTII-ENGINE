@@ -173,26 +173,21 @@ def _rank_by_keywords(
 
 async def _discover_index(
     portal: "Portal",
-    pillar: int,
-    taxonomy: list[dict],
-    known_urls: set[str],
     budget_deadline: float,
-    known_titles: set[str] | None = None,
-) -> list[tuple[str, str, str]] | None:
+) -> list[tuple[str, str]] | None:
     """
-    Fetch portal index_urls and return (title, url, discovery_tag) triples.
+    Index discovery adapter — fetch portal index_urls and emit raw (title, url)
+    candidates. That is the adapter's ONLY job (D3): ranking, taxonomy exclusion,
+    and KNOWN/NEW tagging are done once, for every adapter, by the shared
+    `_rank_exclude_tag` tail in `discover()`.
 
-    Returns None on timeout/failure → caller falls back to seed KNOWN URLs.
+    Returns None on empty/failure → caller falls back to seed KNOWN URLs.
     """
     index_urls: list[str] = getattr(portal, "index_urls", [])
     if not index_urls:
         logger.warning("[DISCOVER] portal '%s' has discovery:index but no index_urls", portal.name)
         return None
 
-    known_norm = {_normalise_url(u) for u in known_urls}
-    known_titles_norm = {normalise_title(t) for t in (known_titles or set())}
-    exclude_titles, exclude_keywords = build_pillar_excludes(taxonomy, pillar)
-    keywords = build_pillar_keywords(taxonomy, pillar)
     all_candidates: dict[str, tuple[str, str]] = {}  # norm_url → (title, abs_url)
 
     for idx_url in index_urls:
@@ -219,9 +214,31 @@ async def _discover_index(
     if not all_candidates:
         return None
 
-    # Rank against pillar-scoped keywords
-    candidate_list = list(all_candidates.values())
-    scored = _rank_by_keywords(candidate_list, keywords)
+    return list(all_candidates.values())
+
+
+# ── Shared rank + exclude + KNOWN/NEW tag (adapter-agnostic) ─────────────────────
+
+def _rank_exclude_tag(
+    candidates: list[tuple[str, str]],
+    pillar: int,
+    taxonomy: list[dict],
+    known_urls: set[str],
+    known_titles: set[str] | None = None,
+) -> list[tuple[str, str, str]]:
+    """
+    Turn raw (title, url) candidates from ANY discovery adapter into tagged
+    (title, url, discovery_tag) triples. This is the universal tail every economy
+    gets for free (D3): BM25 rank against pillar keywords → taxonomy exclusion →
+    KNOWN/NEW tag → NEW threshold drop. Runs per portal so each adapter's BM25
+    corpus is unchanged from the pre-refactor behaviour.
+    """
+    known_norm = {_normalise_url(u) for u in known_urls}
+    known_titles_norm = {normalise_title(t) for t in (known_titles or set())}
+    exclude_titles, exclude_keywords = build_pillar_excludes(taxonomy, pillar)
+    keywords = build_pillar_keywords(taxonomy, pillar)
+
+    scored = _rank_by_keywords(candidates, keywords)
 
     results: list[tuple[str, str, str]] = []
     for score, title, url in scored:
@@ -370,9 +387,11 @@ async def discover(
         logger.info("[DISCOVER] portal=%s strategy=%s", portal_name, discovery_strategy)
 
         if discovery_strategy == "index":
-            raw = await _discover_index(portal, pillar, taxonomy, known_urls, budget_deadline, known_titles)
-            if raw is None:
+            candidates = await _discover_index(portal, budget_deadline)
+            if candidates is None:
                 raw = _seed_fallback(portal, economy_iso, known_urls, "index discovery failed")
+            else:
+                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
         elif discovery_strategy == "seed_only":
             raw = _seed_fallback(portal, economy_iso, known_urls, "seed_only strategy")
         elif discovery_strategy == "TBD":
