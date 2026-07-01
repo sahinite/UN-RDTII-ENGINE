@@ -1,5 +1,56 @@
 # Australia — economy config (Latin script / English)
-# legislation.gov.au is the primary portal for Commonwealth legislation.
+# legislation.gov.au (Federal Register of Legislation) is the primary portal for
+# Commonwealth legislation.
+#
+# ============================================================================
+# PORTAL STRATEGY — DOCUMENTED (not yet implemented in discover.py / fetcher)
+# Reverse-engineered 2026-06-30 via live inspection of the live portal.
+# ----------------------------------------------------------------------------
+# AU is architecturally DIFFERENT from Singapore. SSO (SG) serves server-rendered
+# HTML browse indexes that we scrape + BM25-rank (discovery: index). The FRL (AU)
+# is a single-page Angular app backed by a clean PUBLIC OData JSON API — so we do
+# NOT scrape HTML; we query the API directly.
+#
+# ANTI-BOT: none. Plain httpx (default UA, no browser headers) returns 200 on both
+#   the API and the PDF files. No header_spoof, no Playwright needed.
+#   (Contrast: SG SSO 403s plain httpx and requires anti_bot: header_spoof.)
+#
+# DISCOVERY (planned strategy → "api"): query the OData titles endpoint.
+#   The Browse tab fires one request per letter, e.g. for "P":
+#     https://api.prod.legislation.gov.au/v1/titles/search(criteria='and(
+#       browsebyname("P"),collection(Act),status(InForce))')
+#       ?$select=id,name,year,number,isPrincipal&$orderby=name asc&$top=100&$skip=0
+#   - Returns JSON: id (e.g. "C2004A03712"), name, year, number, isPrincipal, isInForce
+#   - Scope with collection(Act) + status(InForce) for in-force Acts
+#     (316 acts under "P" alone; iterate browsebyname A–Z, or use $top/$skip paging)
+#   - Pillar targeting: add $filter=contains(name,'Privacy') for keyword narrowing
+#   - Supports $count=true and $top/$skip paging
+#
+# FETCH (planned strategy → "api_versioned_pdf"): two-step, version-aware.
+#   1. Resolve the latest in-force version's start date via the versions API:
+#        https://api.prod.legislation.gov.au/v1/versions/search(criteria='affects(
+#          Amend,Disallow)')?$filter=titleId eq 'C2004A03712'&$orderby=start desc
+#      Pick the row with isLatest:true → use its "start" (YYYY-MM-DD).
+#      IMPORTANT: skip future-dated rows (registerId:null) — those are not yet
+#      registered compilations.
+#   2. Build the dated PDF URL (explicit dates REQUIRED):
+#        https://www.legislation.gov.au/{titleId}/{start}/{start}/text/original/pdf
+#      e.g. C2004A03712/2026-06-04/2026-06-04/text/original/pdf
+#      ⚠️ The /latest/text/original/pdf form returns the SPA HTML shell, NOT the PDF.
+#      (.../text/original/word gives the .docx equivalent.)
+#   VERIFIED: Privacy Act 1988 → 472-page, text-layer application/pdf. No OCR needed
+#   (pdfplumber extracts ~3000 chars/page). Tesseract path won't be triggered.
+#
+# CODE CHANGES REQUIRED before this strategy can run (deferred per review):
+#   - src/config/economy_config.py: add "api" to discovery Literal, "api_versioned_pdf"
+#     to fetch Literal, and new fields api_base / api_collection / pdf_path_suffix
+#     (model uses extra="forbid", so unknown fields fail validation today).
+#   - src/crawler/discover.py: add a discovery=="api" branch (_discover_api()).
+#   - src/fetcher/router.py: add the api_versioned_pdf fetch handler (resolve date → URL).
+#
+# Until the above lands, portals are marked discovery/fetch: TBD so the config loads
+# and the portal is skipped (same pattern as SG's secondary egazette portal).
+# ============================================================================
 economy_name: Australia
 iso_code: AU
 un_name: "Australia"
@@ -9,8 +60,16 @@ portals:
   - name: Federal Register of Legislation
     url: https://www.legislation.gov.au
     type: primary
-    search_url_pattern: "https://www.legislation.gov.au/Search?Title={keyword}"
+    # Planned: anti_bot:none, discovery:api, fetch:api_versioned_pdf (see header).
+    # Set TBD until the "api" / "api_versioned_pdf" handlers are implemented.
+    anti_bot: none
+    discovery: TBD
+    fetch: TBD
   - name: Office of the Australian Information Commissioner
     url: https://www.oaic.gov.au
     type: secondary
+    # Secondary regulator portal (Privacy / Pillar 7 guidance). Strategy TBD.
+    anti_bot: none
+    discovery: TBD
+    fetch: TBD
 llm_override: null   # uses global 5-tier cascade from .env

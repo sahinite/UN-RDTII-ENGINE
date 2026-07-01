@@ -91,6 +91,30 @@ KNOWN always kept. NEW fills remaining slots up to cap.
 ### ADR-040 — `pdf_endpoint` rewrites URL before download
 `_find_portal_for_url()` matches by registered domain. Rewrites in `route()` before `download()`.
 
+### ADR-041 — Unified portal strategy = stable interface + fixed adapter set
+Onboarding a new economy is config-only against already-implemented adapters; a "single literal strategy for all 11" is rejected as infeasible (SG=HTML, AU=JSON API, TH/KH/LA/MM=scanned OCR). New code only for a genuinely-new portal *category*. Spec: `docs/prd/unified-portal-strategy.md`. *(status: design agreed, not yet implemented)*
+
+### ADR-042 — Discovery adapter emits raw `(title, url)` only; rank/tag is shared
+`index`/`api`/`auto`/`seed_only` each only *list candidates*. BM25 rank, taxonomy exclude, KNOWN/NEW tag, indicator-aware cap are lifted out of `_discover_index` into the shared `discover()` tail so adapters cannot drift. NEW discovery is always-on; seeds are the KNOWN-tag reference + floor, not the discovery source.
+
+### ADR-043 — Fetch adapter resolves a document URL; extraction stays universal
+`pdf_endpoint`/`api_versioned_pdf`/`html*`/`pdf_link`/`auto` only produce `(title,url,portal) → document_url(s)`. The `router.py` extractor (sniff → PDF/OCR/HTML + segment + translate) is untouched. "Text only inside rendered HTML" is the existing `extract_html` branch, not a new seam.
+
+### ADR-044 — Extractor branch set closed at five; `.docx` added now
+{text-PDF, scanned-PDF→OCR, static-HTML, JS-HTML, `.docx`/`.doc`}. `.docx` built proactively (AU offers Word) as an additive `detect_type` case — cannot regress the existing four.
+
+### ADR-045 — One shared SPA-vs-SSR probe feeds discovery and fetch
+The only bit `detect_type` can't sniff is static-HTML vs JS-SPA (both return `200 text/html` — the AU `/latest/` trap). A single probe utility resolves it for both the `auto` crawler and the static-vs-JS fetch branch. Built once, shared.
+
+### ADR-046 — `auto` is a best-effort safety net, not a reliable universal crawler
+No declared strategy → `auto` probes SPA/SSR and best-effort lists candidates, labelling the run "declare a strategy for production quality." Production quality comes from a ~30-min declared strategy (as for AU), not from perfecting a universal crawler. No scaffold/suggestion CLI is built.
+
+### ADR-047 — Config stays a strict typed menu; new adapters extend the Literals
+New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; `extra="forbid"` (ADR-003) stays. No free-form params box — the strict menu catches typos and protects validated economies from silent breakage.
+
+### ADR-048 — Validated economies protected by golden-output snapshots
+"Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
+
 ---
 
 ## Implementation State

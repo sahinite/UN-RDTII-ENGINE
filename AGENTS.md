@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -76,7 +76,7 @@ Two zones wired together in `main.py`:
 `economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference. 11 economy files exist (SG, AU, MY, TH, VN, PH, KH, MM, LA, BN, ID).
 
 ### LLM Cascade (pinned order, no mid-run switching)
-1. `anthropic` / `claude-sonnet-4-20250514` (primary)
+1. `anthropic` / `Codex-sonnet-4-20250514` (primary)
 2. `openai` / `gpt-4o`
 3. `deepseek` / `deepseek-chat` V3 (`DEEPSEEK_API_KEY`; OpenAI-compatible)
 4. `groq` / `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`; free tier)
@@ -115,6 +115,6 @@ Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies:
 - for json output always refer data/output_schema_sample.json
 - for csv output always refer data/output_template/OUTPUT_TEMPLATE_31MAY.xlsx (Make sure to read it correctly)
 
-## For RDTII Complete pillar definition/methodology and score critiera
+## For RDTII Complete pillar definition and score critiera
 - always refer to docs/RDTII_methodology_and_scoring_criteria.csv
 

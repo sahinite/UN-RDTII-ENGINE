@@ -1,0 +1,26 @@
+[
+  {
+    "url": "https://sso.agc.gov.sg/Act/PDPA2012",
+    "economy": "SG",
+    "act_title": "Personal Data Protection Act 2012",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/coa1967",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act/data-protection-obligations",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  }
+]

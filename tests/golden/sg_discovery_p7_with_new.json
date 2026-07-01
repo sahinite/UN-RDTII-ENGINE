@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://sso.agc.gov.sg/Act/CSNA2018",
+    "economy": "SG",
+    "act_title": "Cybersecurity Act",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/Act/PDPA2012",
+    "economy": "SG",
+    "act_title": "Personal Data Protection Act 2012",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/Act/POFMA2019",
+    "economy": "SG",
+    "act_title": "Protection from Online Falsehoods and Manipulation Act",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/SL/PDPA2012-S362",
+    "economy": "SG",
+    "act_title": "Personal Data Protection (Notification of Data Breaches) Regulations 2021",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/SL/PDPA2012-S460",
+    "economy": "SG",
+    "act_title": "Personal Data Protection (Fees) Regulations 2021",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/ba1970",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/coa1967",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/cpc2010",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/ema1968",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/ita1947",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/act/ta1999",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://sso.agc.gov.sg/acts-supp/9-2018/?provids=sc2-",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/-/media/files/pdpc/pdf-files/advisory-guidelines/the-retention-limitation-obligation---ch-18-(270717).pdf",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act/data-protection-obligations",
+    "economy": "SG",
+    "act_title": "",
+    "discovery_tag": "KNOWN"
+  }
+]
