@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 import httpx
 
+from src.fetcher.extractors.docx_text import extract_docx
 from src.fetcher.extractors.html_extractor import ExtractionError as HTMLExtractionError
 from src.fetcher.extractors.html_extractor import extract_html
 from src.fetcher.extractors.ocr_stage1 import OCRQualityError, extract_ocr_stage1
@@ -178,7 +179,30 @@ def download(url: str, timeout: int = 30) -> tuple[bytes, str, str]:
 
 # ── Document type detection ────────────────────────────────────────────────────
 
-DocType = Literal["TEXT_PDF", "SCANNED_PDF", "PDF", "HTML", "IMAGE", "UNKNOWN"]
+DocType = Literal["TEXT_PDF", "SCANNED_PDF", "PDF", "HTML", "IMAGE", "DOCX", "UNKNOWN"]
+
+# Content-Type headers that denote a modern Word (.docx / OOXML) document.
+_DOCX_CONTENT_TYPES = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-word",
+)
+
+
+def _is_docx(raw_bytes: bytes) -> bool:
+    """True if the bytes are a .docx (a ZIP whose members include word/document.xml).
+
+    Distinguishes .docx from other OOXML zips (.xlsx/.pptx) and plain zips by
+    checking for the Word document part, so a bare `PK` header alone is not enough.
+    """
+    if raw_bytes[:2] != b"PK":
+        return False
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+            return "word/document.xml" in zf.namelist()
+    except (zipfile.BadZipFile, OSError):
+        return False
 
 
 def classify_pdf(raw_bytes: bytes) -> Literal["TEXT_PDF", "SCANNED_PDF"]:
@@ -198,6 +222,14 @@ def classify_pdf(raw_bytes: bytes) -> Literal["TEXT_PDF", "SCANNED_PDF"]:
 def detect_type(raw_bytes: bytes, content_type: str) -> DocType:
     ct = content_type.lower().split(";")[0].strip()
     method: str = "header"
+
+    # Priority 0: .docx is a ZIP with word/document.xml — structurally unambiguous,
+    # so trust the bytes over the header (covers proper CT, octet-stream local
+    # files, and mislabeled downloads). Legacy .doc (OLE) is NOT matched here and
+    # falls through to UNKNOWN → UnsupportedDocTypeError.
+    if ct in _DOCX_CONTENT_TYPES or _is_docx(raw_bytes):
+        logger.info({"event": "doc_type_detected", "url": "", "doc_type": "DOCX", "method": method, "economy": ""})
+        return "DOCX"
 
     # Priority 1: Content-Type application/pdf
     if "application/pdf" in ct:
@@ -307,6 +339,9 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
 
     if doc_type == "HTML":
         return extract_html(raw_bytes, zone1_result_resolved, content_type=content_type)
+
+    if doc_type == "DOCX":
+        return extract_docx(raw_bytes, zone1_result_resolved, economy_config)
 
     if doc_type == "IMAGE":
         return extract_ocr_stage1(raw_bytes, zone1_result_resolved, economy_config)

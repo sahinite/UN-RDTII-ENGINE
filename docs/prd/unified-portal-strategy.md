@@ -69,8 +69,8 @@ pdf_path_suffix: text/original/pdf
 
 ## Build sequence (golden-snapshot-gated — D9)
 
-1. **Baseline first:** capture golden-output snapshots of every validated economy (SG P6+P7, + any others done). *Gate: no shared-hot-path edit before this exists.*
-2. Add `.docx` extractor branch (D5) — additive, independently testable.
+1. ✅ **Baseline first:** golden-output snapshots of SG discovery captured (P6/P7 × known_only/with_new) — `tests/golden/` + `tests/test_golden_sg_discovery.py`. *Gate satisfied: shared-hot-path edits are now regression-guarded.*
+2. ✅ Add `.docx` extractor branch (D5) — `src/fetcher/extractors/docx_text.py`, wired into `router.detect_type`/`route`, `python-docx` in requirements, `tests/test_docx_extractor.py`. Additive; SG golden unchanged; full suite green (654 passed).
 3. Build the shared SPA/SSR probe utility (D6).
 4. Refactor `discover()`: lift rank/exclude/tag out of `_discover_index` into the shared tail (D3). *Acceptance: SG snapshot unchanged.*
 5. Add config Literals + fields (D8); implement `api` discovery + `api_versioned_pdf` fetch adapters (D3/D4); flip `australia.yaml` off `TBD`.

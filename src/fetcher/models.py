@@ -56,8 +56,8 @@ class FetchedDocument:
     archive_url: str
 
     # Document metadata
-    doc_type: Literal["TEXT_PDF", "SCANNED_PDF", "HTML", "IMAGE", "UNKNOWN"]
-    extraction_method: Literal["pdfplumber", "tesseract", "paddleocr", "beautifulsoup", "azure_di", "mistral_ocr"]
+    doc_type: Literal["TEXT_PDF", "SCANNED_PDF", "HTML", "IMAGE", "DOCX", "UNKNOWN"]
+    extraction_method: Literal["pdfplumber", "tesseract", "paddleocr", "beautifulsoup", "azure_di", "mistral_ocr", "python_docx"]
     page_count: Optional[int]            # None for HTML
 
     # Extracted content

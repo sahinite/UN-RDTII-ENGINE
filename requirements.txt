@@ -16,6 +16,7 @@ httpx
 pdfplumber
 beautifulsoup4
 lxml
+python-docx   # .docx extraction branch (ADR-044) — Word-only portals + AU Word downloads
 pytesseract
 paddleocr
 pymupdf
