@@ -41,8 +41,9 @@ _ARTICLE_BOUNDARY = re.compile(
     r"""
     (?:^|\n)                            # start of string or newline
     (?:
-        (?:Section|Article|Regulation|Rule|Clause)\s+(\d+[A-Z]?(?:\(\d+\))?)[.\s—–-] |
-        ^(\d+[A-Z]?)\.\s+[A-Z]         # "12.  Heading…" at line start
+        (?:Section|Article|Regulation|Rule|Clause)\s+(\d+[A-Z]{0,3}(?:\(\d+\))?)[.\s—–-] |
+        ^(\d+[A-Z]{0,3})\.\s+[A-Z]     |  # "12.  Heading…"  (SG SSO / period style)
+        ^(\d+[A-Z]{0,3})\ +[A-Z]          # "6A  Heading…"   (AU compilation / space style)
     )
     """,
     re.VERBOSE | re.IGNORECASE | re.MULTILINE,
@@ -62,6 +63,55 @@ _SUBSECTION_BOUNDARY = re.compile(r"(?<=[.;:\n])\s*(?=\(\d+[A-Za-z]?\)\s)")
 _MIN_CHUNK_CHARS = 80                                              # discard fragments shorter than this
 _TARGET_CHUNK_CHARS = int(os.getenv("CHUNK_TARGET_CHARS", "1200"))  # preferred chunk size (chars)
 _MAX_CHUNK_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "1800"))        # hard cap → force-split oversized units
+
+# When section_hierarchy chunking retains less than this fraction of the source
+# text, the hierarchy is untrustworthy (e.g. AU legislation.gov.au compilations,
+# whose running page-headers masquerade as Part/Division entries so real section
+# bodies get dropped). Below the threshold we discard the hierarchy result and
+# fall back to raw-text regex splitting, which recovers the full body.
+_HIERARCHY_MIN_COVERAGE = float(os.getenv("CHUNK_HIERARCHY_MIN_COVERAGE", "0.5"))
+
+# ── Page-furniture / table-of-contents noise (repeats every page in PDFs) ──────
+# These lines are never citable provision text. Left in, they (a) let the dense,
+# keyword-rich TOC out-rank real body prose in retrieval and (b) fragment sections
+# at every page break (the "Section 3A" running header is a false article split).
+_TOC_LEADER = re.compile(r"\.{4,}\s*\d+\s*$")               # "Short title ......... 12"
+_RUNNING_SECTION_HDR = re.compile(r"^Section\s+\d+[A-Z]{0,3}$", re.IGNORECASE)
+_COMPILATION_FURNITURE = re.compile(
+    r"^(Compilation No\.|Compilation date|Includes amendments|Authorised Version|"
+    r"Prepared by the Office|Registered:|About this compilation|No table of contents)",
+    re.IGNORECASE,
+)
+
+
+def _strip_page_furniture(text: str, act_title: str = "") -> str:
+    """Remove repeating page headers/footers and TOC leader lines from raw text.
+
+    Only used on the raw-text (regex) chunking path, where hierarchy chunking has
+    been rejected — for PDFs whose per-page furniture would otherwise pollute the
+    chunk set. Blank lines are preserved so paragraph structure survives.
+    """
+    act = act_title.strip()
+    kept: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            kept.append(line)
+            continue
+        if _TOC_LEADER.search(s) or _RUNNING_SECTION_HDR.match(s) or _COMPILATION_FURNITURE.match(s):
+            continue
+        if act:
+            if s == act:
+                continue
+            # page footer "<n> <Act Title>" or header "<Act Title> <n>"
+            m = re.match(r"^(\d{1,4})\s+(.*)$", s)
+            if m and m.group(2).strip() == act:
+                continue
+            m = re.match(r"^(.*?)\s+(\d{1,4})$", s)
+            if m and m.group(1).strip() == act:
+                continue
+        kept.append(line)
+    return "\n".join(kept)
 
 
 def _make_chunk_id(act_title: str, article_number: str, seq: int) -> str:
@@ -96,15 +146,20 @@ def _location_from_hierarchy(
     )
 
 
-def _split_text_by_regex(raw_text: str) -> list[tuple[str, str]]:
+def _split_text_by_regex(raw_text: str, act_title: str = "") -> list[tuple[str, str]]:
     """
     Returns [(article_number, text)] pairs by regex-splitting raw_text at article headers.
+
+    Strips repeating page furniture/TOC noise first (act_title enables footer
+    detection) so section boundaries are not fragmented by per-page running headers.
     """
+    raw_text = _strip_page_furniture(raw_text, act_title)
+
     splits: list[tuple[str, str]] = []
     positions: list[tuple[int, str]] = []
 
     for m in _ARTICLE_BOUNDARY.finditer(raw_text):
-        art_num = (m.group(1) or m.group(2) or "").strip()
+        art_num = (m.group(1) or m.group(2) or m.group(3) or "").strip()
         positions.append((m.start(), art_num))
 
     if not positions:
@@ -273,8 +328,15 @@ def chunk_document(
                 ))
                 seq += 1
 
-        if chunks:
+        # Accept the hierarchy result only if it retained most of the document.
+        # A low ratio means the hierarchy is untrustworthy (running page-headers
+        # parsed as Part/Division entries, real section bodies dropped) — fall
+        # through to raw-text splitting instead of shipping a 3%-coverage chunk set.
+        covered = sum(len(c.text) for c in chunks)
+        if chunks and covered >= _HIERARCHY_MIN_COVERAGE * len(text):
             return chunks
+        chunks = []
+        seq = 0
 
     # ── Strategy 2: regex-based article splitting on raw_text ─────────────────
     # Build a lookup from article_number → ArticleReference for provenance
@@ -283,7 +345,7 @@ def chunk_document(
         ref_by_num[ref.article_number] = ref
 
     current_part = ""
-    for art_num, art_text in _split_text_by_regex(text):
+    for art_num, art_text in _split_text_by_regex(text, act_title):
         # Detect part context once per section (from its head), not per sub-chunk.
         part_m = _PART_HEADING.search(art_text[:200])
         if part_m:
