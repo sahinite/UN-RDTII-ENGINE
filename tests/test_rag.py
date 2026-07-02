@@ -188,6 +188,69 @@ class TestChunker:
         assert len(ids) == len(set(ids)), "chunk_ids must stay unique"
         assert all(c.location_reference.act_title for c in chunks)
 
+    # ── AU legislation.gov.au compilation format (regression) ───────────────
+    # Compilation PDFs use "6A Heading" section titles (space, no period) and
+    # repeat running page-headers ("Part I Preliminary", "Section 6A") and
+    # footers ("Privacy Act 1988 3") on every page. pdfplumber's section
+    # hierarchy parses those running headers as Part/Division entries, so the
+    # hierarchy path drops ~97% of the body and retrieval only ever saw the
+    # cover/TOC — the LLM then "cited" the act title itself. See chunker.py
+    # coverage guard + AU heading regex + _strip_page_furniture.
+    @staticmethod
+    def _au_compilation_doc() -> MagicMock:
+        raw_text = (
+            "No table of contents\nentries found.\n"
+            "Privacy Act 1988\n"
+            "Compilation No. 104\n\n"
+            "Contents\n"
+            "Part I—Preliminary 1\n"
+            "6A Breach of an Australian Privacy Principle ...........................50\n"
+            "26WK Statement about eligible data breach ..............................170\n\n"
+            "Part I Preliminary\n"
+            "Section 6A\n"
+            "6A Breach of an Australian Privacy Principle\n"
+            "(1) For the purposes of this Act, an act or practice breaches an "
+            "Australian Privacy Principle if, and only if, it is contrary to, or "
+            "inconsistent with, that principle. " + "An APP entity must comply. " * 12 + "\n"
+            "Privacy Act 1988 3\n"
+            "Part II Interpretation\n"
+            "Section 26WK\n"
+            "26WK Statement about eligible data breach\n"
+            "(1) An entity must prepare a statement that sets out a description of "
+            "the eligible data breach and the kinds of personal information "
+            "concerned, and give a copy to the Commissioner. " + "Security matters. " * 12 + "\n"
+            "Privacy Act 1988 4\n"
+        )
+        # The weak pdfplumber hierarchy: running Part headers swallow the body,
+        # exactly the shape that made Strategy 1 collapse in production.
+        hierarchy = [
+            {"level": 1, "title": "Part I Preliminary", "text": raw_text[:400], "anchor": ""},
+            {"level": 1, "title": "Part II Interpretation", "text": raw_text[400:], "anchor": ""},
+        ]
+        doc = _make_fetched(raw_text, hierarchy=hierarchy)
+        doc.act_title = "Privacy Act 1988"  # footer detection keys off the real title
+        return doc
+
+    def test_au_compilation_recovers_real_sections(self):
+        chunks = chunk_document(self._au_compilation_doc())
+        # Must NOT degenerate to a single title-only chunk (the production bug:
+        # one chunk whose only "provision" was the act title).
+        assert len(chunks) >= 2, f"AU body collapsed to {len(chunks)} chunk(s)"
+        arts = {c.location_reference.article_number for c in chunks}
+        assert "6A" in arts and "26WK" in arts, f"AU section numbers missing: {sorted(arts)}"
+        body = " ".join(c.text for c in chunks)
+        assert "Australian Privacy Principle" in body
+        assert "eligible data breach" in body
+
+    def test_au_compilation_strips_page_furniture(self):
+        chunks = chunk_document(self._au_compilation_doc())
+        body = " ".join(c.text for c in chunks)
+        # Running footer, TOC leader dots, and the cover artifact are noise, not text.
+        assert "Privacy Act 1988 3" not in body
+        assert "Privacy Act 1988 4" not in body
+        assert "..........." not in body
+        assert "No table of contents" not in body
+
 
 # ── ST2: Embedding Index (mocked) ─────────────────────────────────────────────
 

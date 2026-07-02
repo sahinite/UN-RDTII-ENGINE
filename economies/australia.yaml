@@ -1,10 +1,9 @@
 # Australia — economy config (Latin script / English)
 # legislation.gov.au (Federal Register of Legislation) is the primary portal for
-# Commonwealth legislation.
+# Commonwealth legislation. Live: discovery=api + fetch=api_versioned_pdf.
 #
 # ============================================================================
-# PORTAL STRATEGY — DOCUMENTED (not yet implemented in discover.py / fetcher)
-# Reverse-engineered 2026-06-30 via live inspection of the live portal.
+# PORTAL STRATEGY — API-driven (implemented; see discover.py + router.py)
 # ----------------------------------------------------------------------------
 # AU is architecturally DIFFERENT from Singapore. SSO (SG) serves server-rendered
 # HTML browse indexes that we scrape + BM25-rank (discovery: index). The FRL (AU)
@@ -15,7 +14,7 @@
 #   the API and the PDF files. No header_spoof, no Playwright needed.
 #   (Contrast: SG SSO 403s plain httpx and requires anti_bot: header_spoof.)
 #
-# DISCOVERY (planned strategy → "api"): query the OData titles endpoint.
+# DISCOVERY (discovery: api): query the OData titles endpoint.
 #   The Browse tab fires one request per letter, e.g. for "P":
 #     https://api.prod.legislation.gov.au/v1/titles/search(criteria='and(
 #       browsebyname("P"),collection(Act),status(InForce))')
@@ -26,7 +25,7 @@
 #   - Pillar targeting: add $filter=contains(name,'Privacy') for keyword narrowing
 #   - Supports $count=true and $top/$skip paging
 #
-# FETCH (planned strategy → "api_versioned_pdf"): two-step, version-aware.
+# FETCH (fetch: api_versioned_pdf): two-step, version-aware.
 #   1. Resolve the latest in-force version's start date via the versions API:
 #        https://api.prod.legislation.gov.au/v1/versions/search(criteria='affects(
 #          Amend,Disallow)')?$filter=titleId eq 'C2004A03712'&$orderby=start desc
@@ -40,16 +39,9 @@
 #      (.../text/original/word gives the .docx equivalent.)
 #   VERIFIED: Privacy Act 1988 → 472-page, text-layer application/pdf. No OCR needed
 #   (pdfplumber extracts ~3000 chars/page). Tesseract path won't be triggered.
-#
-# CODE CHANGES REQUIRED before this strategy can run (deferred per review):
-#   - src/config/economy_config.py: add "api" to discovery Literal, "api_versioned_pdf"
-#     to fetch Literal, and new fields api_base / api_collection / pdf_path_suffix
-#     (model uses extra="forbid", so unknown fields fail validation today).
-#   - src/crawler/discover.py: add a discovery=="api" branch (_discover_api()).
-#   - src/fetcher/router.py: add the api_versioned_pdf fetch handler (resolve date → URL).
-#
-# Until the above lands, portals are marked discovery/fetch: TBD so the config loads
-# and the portal is skipped (same pattern as SG's secondary egazette portal).
+#   NOTE: these compilation PDFs use "6A Heading" section titles (space, no period)
+#   and repeat running headers/footers + a multi-page Contents TOC every page —
+#   chunker.py handles this (coverage guard + AU heading regex + furniture strip).
 # ============================================================================
 economy_name: Australia
 iso_code: AU
@@ -77,4 +69,4 @@ portals:
     anti_bot: none
     discovery: TBD
     fetch: TBD
-llm_override: null   # uses global 5-tier cascade from .env
+llm_override: null   # uses global 7-tier cascade from .env

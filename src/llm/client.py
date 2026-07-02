@@ -1,5 +1,5 @@
 """
-LLM client — thin re-export of the 5-tier auto-cascade in src/mapping/llm_client.py.
+LLM client — thin re-export of the 7-tier auto-cascade in src/mapping/llm_client.py.
 
 The actual implementation lives in src/mapping/llm_client.py (ADR-021).
 This module re-exports the public API so tooling and README guides that reference

@@ -29,4 +29,4 @@ portals:
     # Discovery and fetch strategy TBD — implemented after SSO is verified
     discovery: TBD
     fetch: TBD
-llm_override: null   # uses global 5-tier cascade from .env
+llm_override: null   # uses global 7-tier cascade from .env

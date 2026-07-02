@@ -3,7 +3,7 @@
 **UN Global Hackathon on AI for Digital Trade Regulatory Analysis**
 Team: UN ESCAP | Round: 1 | Submission deadline: 20 July 2026 | Demo: 3 August 2026
 
-An end-to-end AI pipeline that crawls government legal portals, extracts regulatory text via OCR/NLP, and maps provisions to RDTII indicators (Pillars 6 & 7) using a 5-tier LLM cascade with hybrid RAG retrieval.
+An end-to-end AI pipeline that crawls government legal portals, extracts regulatory text via OCR/NLP, and maps provisions to RDTII indicators (Pillars 6 & 7) using a 7-tier LLM cascade with hybrid RAG retrieval.
 
 ---
 
@@ -62,15 +62,15 @@ python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
 
 ```
 src/config/      economy YAML schema + loader                [Z1-1]
-src/crawler/     auto-probe, Crawl4AI, currency, ranker      [Z1-2..Z1-5]
+src/crawler/     discover() strategy engine (index/api/auto) [Z1-2..Z1-5]
 src/fetcher/     fetch + route + segment + translate         [Z2-1, Z2-2]
 src/ocr/         OCR two-stage cascade (Tesseract/PaddleOCR + Azure DI/Mistral)
 src/retrieval/   chunking, embedding, BM25+dense hybrid RAG  [Z2-3]
 src/llm/         LLM cascade re-export (see src/mapping/)    [Z2-4]
-src/mapping/     5-tier LLM cascade + indicator mapping      [Z2-4]
+src/mapping/     7-tier LLM cascade + indicator mapping      [Z2-4]
 src/output/      CSV/JSON writer, URL validator, cost logger [Z2-5, Z2-6]
 tools/           cost_logger.py — standalone cost benchmark  [Z2-6]
-economies/       per-economy YAML configs (SG, AU, MY, TH)   [Z1-1]
+economies/       per-economy YAML configs (10 files)         [Z1-1]
 tests/           pytest suite (mirrors src/ modules)
 data/
   sample_kit/    Round 1 ground truth (evaluation input)
@@ -84,12 +84,22 @@ logs/            run logs + cost_report.json (gitignored)
 
 ## Supported economies
 
-| Economy | YAML | Portals | Script | Languages |
-|---------|------|---------|--------|-----------|
-| Singapore | `economies/singapore.yaml` | sso.agc.gov.sg | Latin | en |
-| Australia | `economies/australia.yaml` | legislation.gov.au | Latin | en |
-| Malaysia | `economies/malaysia.yaml` | agc.gov.my | Latin | en, ms |
-| Thailand | `economies/thailand.yaml` | ratchakitcha.soc.go.th | Asian | th, en |
+Ten economy YAML files exist. Four have configured portals (Singapore is the
+HTML-index reference; Australia is the API-driven reference); the remaining six
+are scaffolds carrying only economy metadata (portals `TBD`).
+
+| Economy | YAML | Primary portal | Discovery | Script | Languages | Status |
+|---------|------|----------------|-----------|--------|-----------|--------|
+| Singapore | `singapore.yaml` | sso.agc.gov.sg | index | latin | en | Reference (PDPA-first gate) |
+| Australia | `australia.yaml` | legislation.gov.au | api | latin | en | Live |
+| Malaysia | `malaysia.yaml` | agc.gov.my | — | latin | ms, en | Configured |
+| Thailand | `thailand.yaml` | ratchakitcha.soc.go.th | — | asian | th, en | Configured |
+| Viet Nam | `vietnam.yaml` | — | — | latin | vi, en | Scaffold |
+| Philippines | `philippines.yaml` | — | — | latin | fil, en | Scaffold |
+| Cambodia | `cambodia.yaml` | — | — | khmer | km, en | Scaffold |
+| Myanmar | `myanmar.yaml` | — | — | myanmar | my, en | Scaffold |
+| Lao PDR | `laos.yaml` | — | — | lao | lo, en | Scaffold |
+| Brunei Darussalam | `brunei.yaml` | — | — | latin | ms, en | Scaffold |
 
 ---
 
@@ -128,11 +138,14 @@ Provider order is fixed (ADR-021, pinned once per run via `LLM_PROVIDER` env var
 |------|----------|-------|-------|
 | 1 | Anthropic | `claude-sonnet-4-20250514` | Recommended primary |
 | 2 | OpenAI | `gpt-4o` | Fallback on API error |
-| 3 | Groq | `qwen3-32b` (fallback: `qwen3.6-27b`) | Free tier |
-| 4 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
-| 5 | Ollama | `granite3-8b` | Offline, Apache 2.0 |
+| 3 | DeepSeek | `deepseek-chat` (V3) | OpenAI-compatible; `DEEPSEEK_API_KEY` |
+| 4 | Groq | `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`) | Free tier |
+| 5 | Qwen (DashScope) | `qwen-plus` | `DASHSCOPE_API_KEY` |
+| 6 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
+| 7 | Ollama | `granite3-dense:8b` | Offline, Apache 2.0 |
 
 **Note:** Llama 3.3 is explicitly excluded (non-Apache 2.0 license).
+Pin any provider with `LLM_PROVIDER`: `anthropic | openai | deepseek | groq | qwen | ollama`.
 
 The LLM cascade implementation lives in `src/mapping/llm_client.py`.
 `src/llm/client.py` re-exports the same public API for backwards compatibility.
@@ -142,7 +155,9 @@ The LLM cascade implementation lives in `src/mapping/llm_client.py`.
 Set `LLM_PROVIDER` in `.env`:
 ```bash
 LLM_PROVIDER=anthropic   # use Anthropic as primary (recommended)
+LLM_PROVIDER=deepseek    # use DeepSeek V3 as primary
 LLM_PROVIDER=groq        # use Groq free tier as primary
+LLM_PROVIDER=qwen        # use Qwen via DashScope as primary
 LLM_PROVIDER=ollama      # use local Ollama as primary (offline mode)
 ```
 
@@ -166,10 +181,16 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Tier 2 — OpenAI
 OPENAI_API_KEY=sk-...
 
-# Tier 3 — Groq (free)
+# Tier 3 — DeepSeek (OpenAI-compatible)
+DEEPSEEK_API_KEY=sk-...
+
+# Tier 4 — Groq (free)
 GROQ_API_KEY=gsk_...
 
-# Tier 4/5 — Ollama (offline)
+# Tier 5 — Qwen via DashScope International
+DASHSCOPE_API_KEY=sk-...
+
+# Tier 6/7 — Ollama (offline)
 # Run: ollama serve && ollama pull qwen2.5:7b
 
 # OCR Stage 2 (optional, triggers when CER >= 5%)
@@ -244,11 +265,13 @@ No `latest` tags are used anywhere in this project. All versions are pinned:
 
 | Component | Pinned version |
 |-----------|---------------|
-| LLM (primary) | `claude-sonnet-4-20250514` |
-| LLM (fallback 2) | `gpt-4o` |
-| LLM (fallback 3) | `qwen3-32b` via Groq |
-| LLM (offline 4) | `qwen2.5:7b` (Ollama, Apache 2.0) |
-| LLM (offline 5) | `granite3-dense:8b` (Ollama, Apache 2.0) |
+| LLM (tier 1) | `claude-sonnet-4-20250514` |
+| LLM (tier 2) | `gpt-4o` |
+| LLM (tier 3) | `deepseek-chat` (V3) |
+| LLM (tier 4) | `qwen/qwen3-32b` via Groq |
+| LLM (tier 5) | `qwen-plus` via DashScope |
+| LLM (tier 6, offline) | `qwen2.5:7b` (Ollama, Apache 2.0) |
+| LLM (tier 7, offline) | `granite3-dense:8b` (Ollama, Apache 2.0) |
 | OCR (Latin scripts) | Tesseract 5.x |
 | OCR (Asian scripts) | PaddleOCR 2.x |
 
