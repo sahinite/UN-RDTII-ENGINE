@@ -62,9 +62,9 @@ Two zones wired together in `main.py`:
 - `src/fetcher/extractors/html_extractor.py` — BeautifulSoup + anchor map extraction
 - `src/fetcher/extractors/llm_ocr.py` — LLM vision OCR fallback
 - `src/ocr/processor.py` — two-stage OCR cascade (Stage 1 local → Stage 2 Azure DI/Mistral on CER≥5%)
-- `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — chunk → embed → BM25+dense hybrid RAG with cross-encoder rerank
+- `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — chunk → embed → BM25+dense hybrid RAG with cross-encoder rerank. Chunker has a hierarchy-coverage guard + raw-text furniture stripping that handles AU legislation.gov.au compilation PDFs (space-separated `6A` headings, per-page running headers/footers, multi-page Contents TOC)
 - `src/mapping/mapper.py` — maps retrieved passages to RDTII indicators; provision-level KNOWN/NEW tagging
-- `src/mapping/llm_client.py` — 5-tier provider cascade; one provider pinned per run via `LLM_PROVIDER` env var
+- `src/mapping/llm_client.py` — 7-tier provider cascade; one provider pinned per run via `LLM_PROVIDER` env var
 - `src/mapping/parser.py` — LLM response parser with verbatim assertion + provision tag resolution
 - `src/mapping/prompts.py` — system/user prompt builder with Rules 1–9
 - `src/output/writer.py` — CSV (13-col UTF-8-BOM) + JSON (document-level + `provisions[]` envelope)
@@ -73,7 +73,7 @@ Two zones wired together in `main.py`:
 - `src/cli/progress.py` — single-line ANSI spinner with substep reporting
 
 ### Economy Configs
-`economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference. 11 economy files exist (SG, AU, MY, TH, VN, PH, KH, MM, LA, BN, ID).
+`economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `api_base`, `api_collection`, `pdf_path_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference; Australia (`australia.yaml`) is the API-driven reference. 10 economy files exist (SG, AU, MY, TH, VN, PH, KH, MM, LA, BN) — SG/AU/MY/TH have configured portals; the other six are scaffolds.
 
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
@@ -87,11 +87,14 @@ Two zones wired together in `main.py`:
 > Llama 3.3 is explicitly excluded — non-Apache 2.0 license.
 
 ### Zone 1 Discovery Strategy (per-portal YAML-driven)
-Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies:
-- `discovery: index` — fetch browse index pages (`index_urls`), BM25-rank titles against pillar-scoped keywords, merge KNOWN seeds, apply taxonomy exclusions
+Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies (defined as Pydantic `Literal`s in `economy_config.py`):
+- `discovery: auto` — **default**: best-effort adapter that probes the portal (SPA-vs-SSR) and picks a discovery path
+- `discovery: index` — fetch browse index pages (`index_urls`), BM25-rank titles against pillar-scoped keywords, merge KNOWN seeds, apply taxonomy exclusions (Singapore SSO)
+- `discovery: api` — query a portal's public OData/JSON API (`api_base`, `api_collection`) instead of scraping HTML (Australia FRL)
 - `discovery: seed_only` — use only Round 1 KNOWN URLs
 - `discovery: TBD` — portal skipped (not yet implemented)
-- `fetch: pdf_endpoint` — rewrite act URL with `pdf_view_suffix` (e.g. `?ViewType=Pdf`) for text-layer PDF
+- `fetch: pdf_endpoint` — rewrite act URL with `pdf_view_suffix` (e.g. `?ViewType=Pdf`) for text-layer PDF (Singapore)
+- `fetch: api_versioned_pdf` — resolve the act's latest in-force version date via the API, then fetch the dated text-layer PDF using `pdf_path_suffix` (Australia)
 - `anti_bot: header_spoof` — browser-like headers bypass 403 bot blocks
 - `transport_fallback: playwright_stealth` — escalate to stealth Playwright if headers fail
 

@@ -29,7 +29,7 @@ Each **Portal** entry has:
 |-------|------|---------|-------------|
 | `ocr_engine_override` | `"tesseract"` \| `"paddleocr"` \| `"azure"` \| `"mistral_ocr"` \| `null` | `null` | Force a specific OCR engine instead of the derived default |
 | `be_year_conversion` | `bool` | `false` | Convert Buddhist Era years to Gregorian (Thailand, Cambodia, etc.) |
-| `llm_override` | `str` \| `null` | `null` | Pin a specific model string; `null` uses the global 5-tier cascade |
+| `llm_override` | `str` \| `null` | `null` | Pin a specific model string; `null` uses the global 7-tier cascade |
 | `translation_provider` | `"deepl"` \| `"google"` \| `null` | `null` | Force a translation provider; `null` uses DeepL with Google fallback |
 
 ### Derived (do NOT set in YAML)
