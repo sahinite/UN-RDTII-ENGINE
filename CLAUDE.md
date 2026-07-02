@@ -121,3 +121,6 @@ Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies (d
 ## For RDTII Complete pillar definition/methodology and score critiera
 - always refer to docs/RDTII_methodology_and_scoring_criteria.csv
 
+## For Round 1 and 2 databases:
+- for round 1 always throughly read the complete file from data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx
+- for round 2 always throughly read the complete file from data/database/ESCAP-RDTII-2.1_ Round 2 Database.xlsx
