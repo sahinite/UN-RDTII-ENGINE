@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 
 from src.crawler.crawler import _normalise_url, _registered_domain
 from src.crawler.seed_loader import normalise_title
+from src.crawler.transport import _BROWSER_HEADERS
 from src.crawler.transport import fetch as transport_fetch
 from src.fetcher.models import Zone1Result
 
@@ -217,6 +218,76 @@ async def _discover_index(
         return None
 
     return list(all_candidates.values())
+
+
+async def _fetch_sitemap_xml(url: str) -> tuple[str, int]:
+    """Fetch a sitemap.xml directly (own httpx call, not the transport ladder —
+    that ladder's _is_real_response rejects any response without a >200-char
+    <body>, which a well-formed sitemap has neither of). Isolated as its own
+    function so the offline golden harness can mock it to a pinned fixture.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
+            resp = await client.get(url, headers=_BROWSER_HEADERS)
+        return resp.text, resp.status_code
+    except Exception as exc:
+        logger.warning("[DISCOVER] sitemap fetch error for %s: %s", url, exc)
+        return "", 0
+
+
+def _slug_to_title(url: str) -> str:
+    """Derive a human title from a URL's last path segment for BM25 ranking.
+
+    "…/data-protection-obligations" → "data protection obligations".
+    Sitemap <loc> entries carry no titles, so the slug is the only text signal.
+    """
+    path = urllib.parse.urlparse(url).path.rstrip("/")
+    slug = path.rsplit("/", 1)[-1] if path else ""
+    return re.sub(r"[-_]+", " ", slug).strip()
+
+
+async def _discover_sitemap(
+    portal: "Portal",
+    budget_deadline: float,
+) -> list[tuple[str, str]] | None:
+    """
+    Sitemap discovery adapter — for JS-rendered portals (SPAs) that expose a
+    standard sitemap.xml but have no crawlable HTML browse index (e.g. pdpc.gov.sg).
+    Fetches the sitemap, extracts every <loc> page URL, and derives a title from
+    each URL slug. Ranking / exclusion / KNOWN-NEW tagging are done by the shared
+    `_rank_exclude_tag` tail, exactly like every other adapter (D3).
+
+    Returns None on empty/failure → caller falls back to seed KNOWN URLs.
+    """
+    sitemap_url = getattr(portal, "sitemap_url", None)
+    if not sitemap_url:
+        logger.warning("[DISCOVER] portal '%s' has discovery:sitemap but no sitemap_url", portal.name)
+        return None
+
+    if time.monotonic() > budget_deadline:
+        logger.warning("[DISCOVER] budget exhausted before fetching %s", sitemap_url)
+        return None
+
+    logger.info("[DISCOVER] fetching sitemap %s", sitemap_url)
+    xml, status = await _fetch_sitemap_xml(sitemap_url)
+    if status != 200 or not xml:
+        logger.warning("[DISCOVER] sitemap fetch failed (%d) for %s", status, sitemap_url)
+        return None
+
+    # Robust to namespaces/attributes: match <loc> text directly. A nested sitemap
+    # index (<loc> ending .xml) is skipped rather than recursed — flat sitemaps are
+    # the common gov case; add recursion only if a portal needs it.
+    locs = [u.strip() for u in re.findall(r"<loc>\s*(.*?)\s*</loc>", xml, re.DOTALL | re.IGNORECASE)]
+    candidates: dict[str, tuple[str, str]] = {}  # norm_url → (title, url)
+    for url in locs:
+        if not url.lower().startswith("http") or url.lower().endswith(".xml"):
+            continue
+        norm = _normalise_url(url)
+        if norm not in candidates:
+            candidates[norm] = (_slug_to_title(url), url)
+
+    logger.info("[DISCOVER] parsed %d page URLs from sitemap %s", len(candidates), sitemap_url)
+    return list(candidates.values()) or None
 
 
 # ── Shared rank + exclude + KNOWN/NEW tag (adapter-agnostic) ─────────────────────
@@ -551,6 +622,12 @@ async def discover(
             candidates = await _discover_api(portal, pillar, taxonomy, budget_deadline)
             if candidates is None:
                 raw = _seed_fallback(portal, economy_iso, known_urls, "api discovery failed")
+            else:
+                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
+        elif discovery_strategy == "sitemap":
+            candidates = await _discover_sitemap(portal, budget_deadline)
+            if candidates is None:
+                raw = _seed_fallback(portal, economy_iso, known_urls, "sitemap discovery failed")
             else:
                 raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
         elif discovery_strategy == "auto":

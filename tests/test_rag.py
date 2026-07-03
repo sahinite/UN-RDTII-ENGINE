@@ -567,3 +567,102 @@ class TestConfig:
 
         # Hybrid ranking should differ from at least one of the pure methods
         assert hybrid_order != bm25_order or hybrid_order != dense_order
+
+
+class TestSeedGuidedInjection:
+    """Round 1 known sections are forced into the right indicator's chunks."""
+
+    def _rc(self, art, score):
+        return RetrievedChunk(
+            chunk=Chunk(chunk_id=f"c{art}", text=f"section {art} body",
+                        location_reference=LocationReference("Employment Act 1968", "", art)),
+            rerank_score=score, context_window="", retrieval_method="hybrid",
+        )
+
+    def _chunk(self, art, text):
+        return Chunk(chunk_id=f"c{art}", text=text,
+                     location_reference=LocationReference("Employment Act 1968", "", art))
+
+    def test_injects_missing_section_at_front(self):
+        from src.retrieval.rag import _inject_seed_sections
+        retrieved = [self._rc("103", 0.9), self._rc("101", 0.4)]   # drifted to s.103
+        all_chunks = [self._chunk("95", "95. keep records"), self._chunk("103", "x"), self._chunk("101", "y")]
+        out, n = _inject_seed_sections(retrieved, all_chunks, {"95"})
+        assert n == 1
+        assert out[0].chunk.location_reference.article_number == "95"   # leads → survives trim
+        assert out[0].retrieval_method == "seed_guided"
+
+    def test_gentle_leaves_already_present_section_untouched(self):
+        from src.retrieval.rag import _inject_seed_sections
+        # s.95 already retrieved (even if low-ranked) → gentle mode does NOT reorder
+        # or duplicate it (avoids displacing other chunks from the LLM budget).
+        retrieved = [self._rc("101", 0.9), self._rc("103", 0.5), self._rc("95", 0.1)]
+        all_chunks = [self._chunk("95", "95. keep records"),
+                      self._chunk("103", "x"), self._chunk("101", "y")]
+        out, n = _inject_seed_sections(retrieved, all_chunks, {"95"})
+        assert n == 0
+        assert out == retrieved  # unchanged order, no displacement
+
+    def test_alpha_suffix_section_matches(self):
+        from src.retrieval.rag import _inject_seed_sections
+        retrieved = [self._rc("103", 0.9)]
+        all_chunks = [self._chunk("22A", "22A. text"), self._chunk("103", "x")]
+        out, n = _inject_seed_sections(retrieved, all_chunks, {"22a"})
+        assert n == 1
+        assert out[0].chunk.location_reference.article_number == "22A"
+
+    def test_retrieve_batch_injects_known_section(self, mocker):
+        """End-to-end: retrieve_batch pulls the seed section into the right indicator."""
+        from src.retrieval import rag
+        chunks = _make_chunks(6)  # articles "0".."5", act_title "Test Act"
+        mocker.patch.object(rag, "chunk_document", return_value=chunks)
+        mocker.patch.object(rag, "build_index", return_value=MagicMock(
+            dense_search=MagicMock(return_value=[])))
+        mocker.patch.object(rag, "build_bm25", return_value=MagicMock(
+            search=MagicMock(return_value=[])))
+        mocker.patch.object(rag, "rrf_fusion", return_value=[])
+        # rerank returns only article "3" — the seed wants article "5" for P7-I3
+        mocker.patch.object(rag, "rerank", return_value=[
+            RetrievedChunk(chunk=chunks[3], rerank_score=0.9, context_window="", retrieval_method="hybrid"),
+        ])
+        doc = _make_translated()
+        doc.act_title = "Test Act"
+        ksbi = {"P7-I3": {"test act": {"5"}}}
+        results = rag.retrieve_batch(["P7-I3"], doc, known_sections_by_indicator=ksbi)
+        arts = [rc.chunk.location_reference.article_number for rc in results["P7-I3"]]
+        assert "5" in arts  # seed section injected even though rerank missed it
+        assert arts[0] == "5"
+
+
+class TestFindSectionChunkByText:
+    """Locating a section when the chunker left article_number empty (large acts)."""
+
+    def _c(self, art, text):
+        return Chunk(chunk_id=f"c{art or hash(text)%9999}", text=text,
+                     location_reference=LocationReference("Act", "", art))
+
+    def test_prefers_operative_over_toc(self):
+        from src.retrieval.rag import _find_section_chunk
+        toc = self._c("", "Contents\n24. Protection\n25. Retention of data\n26. Access")
+        operative = self._c("", "25. An organisation must cease to retain its documents "
+                                 "containing personal data once the purpose has ended and retention "
+                                 "is no longer necessary for legal or business purposes.")
+        got = _find_section_chunk([toc, operative], "25")
+        assert got is operative  # long body beats the short TOC title
+
+    def test_matches_subsectioned_heading(self):
+        from src.retrieval.rag import _find_section_chunk
+        op = self._c("", "95.—(1) An employer must make, and keep for the prescribed period, "
+                         "employee records containing the prescribed particulars for each employee.")
+        assert _find_section_chunk([op], "95") is op  # "95.—(1)" (em-dash, not space)
+
+    def test_rejects_pure_toc(self):
+        from src.retrieval.rag import _find_section_chunk
+        toc = self._c("", "24. Protection\n25. Retention\n26. Access")
+        assert _find_section_chunk([toc], "25") is None  # body < 80 → not a real provision
+
+    def test_article_number_label_takes_priority(self):
+        from src.retrieval.rag import _find_section_chunk
+        labelled = self._c("25", "some retention text long enough to be a body of a provision here.")
+        other = self._c("", "25. a different chunk mentioning the section heading in its text body.")
+        assert _find_section_chunk([labelled, other], "25") is labelled

@@ -5,10 +5,16 @@ Tests for resolve_provision_tag() and infer_article_anchor(). [86ey13cyh Seam 2]
 from __future__ import annotations
 
 from src.crawler.crawler import _normalise_url as normalise_url
-from src.mapping.provision_tag import infer_article_anchor, resolve_provision_tag
+from src.mapping.provision_tag import (
+    infer_article_anchor,
+    infer_section_token,
+    resolve_provision_tag,
+)
 
 BASE_URL = "https://sso.agc.gov.sg/Act/PDPA2012"
 KNOWN = {normalise_url(BASE_URL + "#pr26-")}
+# Round 1 prose sections have no anchor URL — matched on (act title, section).
+KNOWN_SECTIONS = {"personal data protection act": {"11", "25"}}
 
 
 class TestResolveProvisionTag:
@@ -44,6 +50,63 @@ class TestResolveProvisionTag:
         )
         assert tag == "KNOWN"
         assert unresolvable is False
+
+
+class TestResolveProvisionTagBySection:
+    """KNOWN via Round 1 prose section citations (no anchor URL)."""
+
+    def test_prose_section_match_returns_known(self):
+        # Round 1 cited PDPA "Section 11(3)" in prose → KNOWN even with no anchor.
+        tag, unresolvable = resolve_provision_tag(
+            BASE_URL + "?ViewType=Pdf", None, "KNOWN", set(),
+            law_name="Personal Data Protection Act 2012",
+            article="Section 11(3)",
+            known_sections=KNOWN_SECTIONS,
+        )
+        assert tag == "KNOWN"
+        assert unresolvable is False
+
+    def test_section_not_in_round1_returns_new(self):
+        # PDPA s.22A was not a Round 1 known provision → a valid NEW discovery.
+        tag, unresolvable = resolve_provision_tag(
+            BASE_URL + "?ViewType=Pdf", infer_article_anchor("Section 22A(1)"),
+            "KNOWN", set(),
+            law_name="Personal Data Protection Act 2012",
+            article="Section 22A(1)",
+            known_sections=KNOWN_SECTIONS,
+        )
+        assert tag == "NEW"
+        assert unresolvable is False
+
+    def test_section_match_is_act_scoped(self):
+        # Section 11 is known for the PDPA, not for a different act.
+        tag, _ = resolve_provision_tag(
+            "https://sso.agc.gov.sg/Act/CoA1967", None, "KNOWN", set(),
+            law_name="Companies Act 1967",
+            article="Section 11",
+            known_sections=KNOWN_SECTIONS,
+        )
+        assert tag == "NEW"
+
+    def test_new_doc_ignores_section_match(self):
+        tag, _ = resolve_provision_tag(
+            BASE_URL, None, "NEW", set(),
+            law_name="Personal Data Protection Act 2012",
+            article="Section 11(3)",
+            known_sections=KNOWN_SECTIONS,
+        )
+        assert tag == "NEW"
+
+
+class TestInferSectionToken:
+    def test_drops_subparagraph(self):
+        assert infer_section_token("Section 11(3)") == "11"
+
+    def test_alpha_suffix_lowercased(self):
+        assert infer_section_token("s. 22A(1)") == "22a"
+
+    def test_no_number_returns_none(self):
+        assert infer_section_token("Preamble") is None
 
 
 class TestInferArticleAnchor:

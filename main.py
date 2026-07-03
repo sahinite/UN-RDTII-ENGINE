@@ -145,10 +145,17 @@ def run_pipeline(
             economy_name=economy_config.economy_name,
         )
         known_provisions = _seed.known_provisions
-        p.done(f"Seed data — {len(_seed.known_titles)} known acts, {len(known_provisions)} provisions")
+        known_sections = _seed.known_sections
+        known_sections_by_indicator = _seed.known_sections_by_indicator
+        p.done(
+            f"Seed data — {len(_seed.known_titles)} known acts, {len(known_provisions)} anchored "
+            f"provisions, {len(known_sections)} act(s) with prose sections"
+        )
     except Exception as exc:
         p.warn(f"Seed data unavailable ({exc}) — continuing without")
         known_provisions = set()
+        known_sections = {}
+        known_sections_by_indicator = {}
 
     # ── Zone 1: Evidence Discovery OR single-PDF mode ──────────────────────────
     if pdf_path:
@@ -213,7 +220,10 @@ def run_pipeline(
             p.step(f"{prefix} RAG retrieval — {len(indicator_ids)} indicators")
             _t = time.monotonic()
             try:
-                rag_results = retrieve_batch(indicator_ids, translated)
+                rag_results = retrieve_batch(
+                    indicator_ids, translated,
+                    known_sections_by_indicator=known_sections_by_indicator,
+                )
                 p.done(f"{prefix} RAG retrieval done")
             except Exception as exc:
                 p.fail(f"{prefix} RAG failed — {exc}")
@@ -224,8 +234,12 @@ def run_pipeline(
             p.step(f"{prefix} LLM extraction — {pinned.provider_name}/{pinned.model}")
             _t = time.monotonic()
             try:
-                results, llm_cost = extract_provisions(rag_results, translated, known_provisions)
-                found = sum(1 for r in results if getattr(r, "found", False))
+                results, llm_cost = extract_provisions(
+                    rag_results, translated, known_provisions, known_sections,
+                )
+                # Count distinct indicators that yielded ≥1 provision (ExtractionResult
+                # has no "found" flag — its existence in the list is the match signal).
+                found = len({r.indicator_id for r in results})
                 p.done(f"{prefix} LLM extraction — {found}/{len(indicator_ids)} indicators matched")
             except Exception as exc:
                 p.fail(f"{prefix} LLM extraction failed — {exc}")
@@ -262,6 +276,17 @@ def run_pipeline(
                     output_tokens=call_data.get("output_tokens", 0),
                     latency_ms=call_data.get("latency_ms", 0),
                 )
+
+    # ── Cross-document dedup ────────────────────────────────────────────────────
+    # The mapper dedups within one document, but the SAME act can be fetched under
+    # two URLs (e.g. Cybersecurity Act as consolidated /Act/CA2018 AND as-enacted
+    # /acts-supp/9-2018), yielding identical provisions in separate documents. Fold
+    # those together, keeping the copy from the consolidated act with the better
+    # location reference.
+    before = len(all_records)
+    all_records = _dedup_cross_document(all_records)
+    if before != len(all_records):
+        p.info(f"Cross-document dedup — {before - len(all_records)} duplicate provision(s) removed")
 
     # ── Null assessments ────────────────────────────────────────────────────────
     # RDTII scores EVERY indicator (0/0.5/1). For an indicator the Round 1 DB
@@ -412,6 +437,35 @@ def _run_zone1(economy: str, pillar: int, economy_config, p: "Progress | None" =
         ]
 
     return zone1_results
+
+
+def _dedup_cross_document(records: list) -> list:
+    """
+    Remove provisions duplicated ACROSS documents — the same act fetched under two
+    URLs (consolidated /Act/ vs as-enacted /acts-supp/) produces identical rows in
+    separate documents that the per-document mapper dedup never sees.
+
+    Key: (law_name, indicator_id, article, snippet[:80]) — whitespace/case-folded,
+    so genuinely distinct provisions are never merged. On collision keep the higher
+    quality copy: consolidated /Act/ source > higher confidence > a concrete
+    (non-"unknown") location reference. Insertion order of first-seen keys is kept.
+    """
+    def _norm(s: str | None) -> str:
+        return " ".join((s or "").split()).lower()
+
+    def _quality(r) -> tuple:
+        url = (getattr(r, "source_url", "") or "").lower()
+        loc = (getattr(r, "location_reference", "") or "").lower()
+        consolidated = 1 if ("/act/" in url and "/acts-supp/" not in url) else 0
+        concrete_loc = 0 if (not loc or "unknown" in loc) else 1
+        return (consolidated, getattr(r, "confidence", None) or 0.0, concrete_loc)
+
+    best: dict[tuple, object] = {}
+    for r in records:
+        key = (_norm(r.law_name), r.indicator_id, _norm(r.article), _norm(r.verbatim_snippet)[:80])
+        if key not in best or _quality(r) > _quality(best[key]):
+            best[key] = r
+    return list(best.values())
 
 
 def _emit_null_assessments(all_records, seed, economy_name, economy_config) -> list:

@@ -53,6 +53,7 @@ def extract_provisions(
     rag_results,
     doc,
     known_provisions: "set[str] | None" = None,
+    known_sections: "dict[str, set[str]] | None" = None,
 ) -> tuple[list[ExtractionResult], LLMCostEntry]:
     """
     Main entry point called by the pipeline orchestrator.
@@ -129,6 +130,7 @@ def extract_provisions(
         provisions = parse_llm_response(
             response, indicator_id, top_chunks, doc_metadata,
             known_provisions=known_provisions or set(),
+            known_sections=known_sections or {},
         )
         provisions = expand_non_consecutive(provisions)
         all_results.extend(provisions)

@@ -24,6 +24,24 @@
     "discovery_tag": "KNOWN"
   },
   {
+    "url": "https://www.pdpc.gov.sg/about/the-legislation",
+    "economy": "SG",
+    "act_title": "the legislation",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/about/the-legislation/enforcement-of-the-act",
+    "economy": "SG",
+    "act_title": "enforcement of the act",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/organisations/e-services/appoint-or-update-a-data-protection-officer-dpo",
+    "economy": "SG",
+    "act_title": "appoint or update a data protection officer dpo",
+    "discovery_tag": "NEW"
+  },
+  {
     "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act",
     "economy": "SG",
     "act_title": "",

@@ -76,3 +76,61 @@ def test_no_seed_mapping_returns_empty(sg_config):
         known_titles_by_indicator: dict = {}
     nulls = _emit_null_assessments([], _EmptySeed(), "Singapore", sg_config)
     assert nulls == []
+
+
+# ── Cross-document dedup (_dedup_cross_document) ────────────────────────────────
+
+class _ProvRec:
+    """Minimal record with the fields _dedup_cross_document reads."""
+    def __init__(self, law_name, indicator_id, article, snippet, source_url,
+                 confidence=1.0, location_reference=""):
+        self.law_name = law_name
+        self.indicator_id = indicator_id
+        self.article = article
+        self.verbatim_snippet = snippet
+        self.source_url = source_url
+        self.confidence = confidence
+        self.location_reference = location_reference
+
+
+def test_dedup_removes_same_act_fetched_under_two_urls():
+    from main import _dedup_cross_document
+    # Same provision, two documents: consolidated /Act/ vs as-enacted /acts-supp/.
+    consolidated = _ProvRec(
+        "Cybersecurity Act 2018", "P7-I3", "Section 29(1)(b)",
+        "retain every such record for a period of not less than 3 years.",
+        "https://sso.agc.gov.sg/Act/CA2018?ViewType=Pdf",
+        location_reference="Page 80",
+    )
+    as_enacted = _ProvRec(
+        "Cybersecurity Act 2018", "P7-I3", "Section 29(1)(b)",
+        "retain every such record for a period of not less than 3 years.",
+        "https://sso.agc.gov.sg/acts-supp/9-2018/?ViewType=Pdf",
+        location_reference="Page unknown",
+    )
+    out = _dedup_cross_document([consolidated, as_enacted])
+    assert len(out) == 1
+    # keeps the consolidated /Act/ copy with the concrete location
+    assert "/Act/" in out[0].source_url
+    assert "unknown" not in out[0].location_reference.lower()
+
+
+def test_dedup_keeps_distinct_provisions():
+    from main import _dedup_cross_document
+    a = _ProvRec("Companies Act 1967", "P7-I3", "Section 199(2)", "keep records 5 years.",
+                 "https://sso.agc.gov.sg/Act/CoA1967")
+    b = _ProvRec("Companies Act 1967", "P7-I3", "Section 344H(1)", "retain after dissolution.",
+                 "https://sso.agc.gov.sg/Act/CoA1967")
+    # same act+indicator but different article/snippet → NOT duplicates
+    assert len(_dedup_cross_document([a, b])) == 2
+
+
+def test_dedup_whitespace_and_case_insensitive():
+    from main import _dedup_cross_document
+    a = _ProvRec("Income Tax Act 1947", "P7-I3", "Section 67(1)(a)", "keep records for 5 years",
+                 "https://sso.agc.gov.sg/Act/ITA1947", confidence=0.9)
+    b = _ProvRec("income tax act 1947", "P7-I3", "Section  67(1)(a)", "keep   records for 5 years",
+                 "https://sso.agc.gov.sg/Act/ITA1947", confidence=1.0)
+    out = _dedup_cross_document([a, b])
+    assert len(out) == 1
+    assert out[0].confidence == 1.0  # higher-confidence copy wins the tie-break

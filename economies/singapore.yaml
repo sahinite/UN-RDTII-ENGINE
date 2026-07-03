@@ -22,6 +22,22 @@ portals:
     pdf_view_suffix: "?ViewType=Pdf"
     # Escalate to stealth Playwright only if header_spoof is also blocked
     transport_fallback: playwright_stealth
+  - name: Personal Data Protection Commission
+    # Regulator guidance/advisory pages (PDPA overview, data-protection obligations,
+    # advisory-guideline PDFs). It's a JS SPA with no crawlable HTML browse index,
+    # but publishes a standard sitemap.xml (advertised in robots.txt) — the reliable
+    # discovery path. sitemap → extract <loc> URLs → shared BM25 rank/exclude/tag.
+    url: https://www.pdpc.gov.sg
+    type: secondary
+    # Plain httpx already returns 200 (no bot block) — no header spoof needed.
+    anti_bot: none
+    discovery: sitemap
+    sitemap_url: https://www.pdpc.gov.sg/sitemap.xml
+    # HTML pages are JS-rendered SPAs whose stripped body is <200 chars (verified
+    # 2026-07-03): 42–95 chars raw vs 4206 after Playwright render. classify_render
+    # mis-reads them as SSR, so `auto` would skip rendering — html_js renders every
+    # HTML page unconditionally. PDF advisory guidelines are unaffected (PDF path).
+    fetch: html_js
   - name: Singapore Government Gazette
     url: https://www.egazette.gov.sg
     type: secondary

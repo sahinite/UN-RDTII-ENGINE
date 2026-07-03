@@ -73,6 +73,16 @@ class SeedData:
     known_urls: set[str] = field(default_factory=set)
     known_titles: set[str] = field(default_factory=set)
     known_provisions: set[str] = field(default_factory=set)  # anchor-level URLs e.g. "sso.agc.gov.sg/act/pdpa2012#pr26-"
+    # normalised act title → set of section-number tokens Round 1 cited in prose
+    # (e.g. {"personal data protection act": {"11", "25"}}). Round 1 identifies
+    # most known provisions by prose section number, not anchored URLs, so this is
+    # what drives provision-level KNOWN tagging. See [[known-provision-matching-gap]].
+    known_sections: dict[str, set[str]] = field(default_factory=dict)
+    # engine indicator id ("P7-I3") → {normalised act → section tokens} — the SAME
+    # prose sections but partitioned by the indicator Round 1 filed them under.
+    # Drives seed-guided retrieval so the right section reaches the right indicator
+    # (e.g. Employment s.95 → I3 retention, not I5 access). [[indicator-drift]]
+    known_sections_by_indicator: dict[str, dict[str, set[str]]] = field(default_factory=dict)
     # indicator_id (raw DB form, e.g. "7.3") → normalised act titles that are the
     # Round 1 ground-truth seed acts for that indicator. Drives indicator-aware
     # act selection so one indicator's many seed acts (P7-I3 has 5) don't crowd
@@ -106,6 +116,27 @@ def _extract_anchor_urls(raw: str) -> list[str]:
     """Split a cell value on ';' and newlines, return strings containing '#'."""
     parts = re.split(r"[;\n]", raw)
     return [p.strip() for p in parts if "#" in p.strip()]
+
+
+# Section citations in Round 1 prose: "Section 199", "Sec. 26", "s. 12A", "§ 47".
+# Capture the number + optional single letter suffix; the (subparagraph) is dropped
+# so it matches infer_section_token() on the extraction side.
+_SECTION_RE = re.compile(r"(?:section|sec\.?|s\.|§)\s*(\d+[A-Za-z]?)\b", re.IGNORECASE)
+
+
+def _extract_section_tokens(raw: str) -> set[str]:
+    """All section-number tokens cited in prose, lowercased (e.g. {"199", "11"})."""
+    return {m.group(1).lower() for m in _SECTION_RE.finditer(raw or "")}
+
+
+def _db_indicator_to_engine(raw_indic: str) -> str | None:
+    """Convert a Round 1 DB indicator id ("7.3") to the engine form ("P7-I3").
+
+    RDTII numbers indicators "<pillar>.<n>"; the engine/taxonomy uses "P<pillar>-I<n>".
+    Returns None when the cell is blank or unparseable (e.g. a pillar-level "7").
+    """
+    m = re.match(r"\s*(\d+)\.(\d+)", raw_indic or "")
+    return f"P{int(m.group(1))}-I{int(m.group(2))}" if m else None
 
 
 def _extract_ref_urls(raw: str) -> list[str]:
@@ -169,6 +200,10 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
         col_pillar  = _find_col(headers, ["pillar_id", "pillar", "pillar.name"])
         col_refs    = _find_col(headers, ["references", "reference"])
         col_indic   = _find_col(headers, ["indicator_id", "indicator"])
+        # Round 1 cites known provisions by prose section number in the comment /
+        # coverage columns (e.g. "According to Section 199, every company …").
+        col_comment = _find_col(headers, ["impact or comments", "comments", "comment"])
+        col_cover   = _find_col(headers, ["coverage"])
 
         for row in rows:
             if not any(row):
@@ -194,6 +229,7 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
             if has_url:
                 seed.known_urls.add(normalise_url(row_url))
                 count += 1
+            row_act_norms: list[str] = []
             if row_title:
                 # Round 1 cells often pack several acts into one "act and/or
                 # practice" string joined by ';' (e.g. "Personal Data Protection
@@ -204,11 +240,28 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
                     part = part.strip()
                     if part:
                         norm = normalise_title(part)
+                        row_act_norms.append(norm)
                         seed.known_titles.add(norm)
                         if row_indic:
                             seed.known_titles_by_indicator.setdefault(row_indic, set()).add(norm)
                 if not has_url:
                     count += 1  # count title-only rows so we know seeds loaded
+
+            # Harvest prose section numbers from this row (title + comment +
+            # coverage) and attribute them to every act named in the row. Round 1
+            # gives no anchor URLs for these, so this is the primary KNOWN signal.
+            row_comment = str(row[col_comment] or "").strip() if col_comment is not None else ""
+            row_cover   = str(row[col_cover]  or "").strip() if col_cover  is not None else ""
+            row_sections = _extract_section_tokens(" ".join((row_title, row_comment, row_cover)))
+            if row_sections and row_act_norms:
+                eng_indic = _db_indicator_to_engine(row_indic)
+                for act_norm in row_act_norms:
+                    seed.known_sections.setdefault(act_norm, set()).update(row_sections)
+                    # Partition by indicator too (skips pillar-level/blank rows), so
+                    # seed-guided retrieval knows which indicator each section serves.
+                    if eng_indic:
+                        seed.known_sections_by_indicator.setdefault(eng_indic, {}).setdefault(
+                            act_norm, set()).update(row_sections)
 
             # URLs from the References column: bare act URLs → known_urls (so the
             # act is fetched even if the browse index never surfaces it); anchored
@@ -305,8 +358,9 @@ def load_seed_data(
         logger.warning("WARN: No seed data found for %s %s", economy_iso, pillar)
     else:
         logger.info(
-            "[SEED] %s %s: %d known URLs loaded from Round 1 DB; %d from Sample CSV",
-            economy_iso, pillar, db_count, csv_count,
+            "[SEED] %s %s: %d known URLs loaded from Round 1 DB; %d from Sample CSV; "
+            "%d act(s) with prose sections",
+            economy_iso, pillar, db_count, csv_count, len(seed.known_sections),
         )
 
     return seed

@@ -106,11 +106,16 @@ def _latest_version_start(api_base: str, title_id: str, timeout: int = 30) -> st
 
 def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
     """Best-effort JS render of a SPA document page via Crawl4AI/Playwright.
-    Returns '' on failure. Used by fetch: auto when the page is a JS shell."""
+    Returns '' on failure. Used by fetch: auto/html_js when the page is a JS shell.
+
+    Uses fetch_isolated (a dedicated per-call crawler), NOT the shared singleton:
+    this runs under its own asyncio.run() loop, and the shared crawler bound to an
+    earlier loop would hang until the ceiling on reuse (~80s). See fetch_isolated.
+    """
     import asyncio
     try:
-        from src.crawler.crawl4ai_runner import fetch_with_playwright
-        html, _status = asyncio.run(fetch_with_playwright(url, None, timeout_ms))
+        from src.crawler.crawl4ai_runner import fetch_isolated
+        html, _status = asyncio.run(fetch_isolated(url, timeout_ms))
         return html or ""
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning({"event": "auto_render_failed", "url": url, "error": str(exc)})
@@ -373,6 +378,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     fetch_url = zone1_result.url
     single_act_fetch = False
     auto_render = False
+    force_render = False
     portal = _find_portal_for_url(fetch_url, economy_config)
     if portal is not None:
         fetch_strategy = getattr(portal, "fetch", "TBD")
@@ -415,6 +421,13 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # Best-effort: download as-is; if the page is a JS SPA shell, the HTML
             # branch below renders it with Playwright before extraction.
             auto_render = True
+        elif fetch_strategy == "html_js":
+            # Portal whose HTML pages ALWAYS require JS to populate content (e.g.
+            # pdpc.gov.sg). Unlike `auto`, this does not consult classify_render —
+            # that probe measures body text WITHOUT stripping nav/footer chrome, so
+            # a content-less SPA shell wrapped in a large menu reads as SSR and the
+            # render is skipped. html_js renders unconditionally before extraction.
+            force_render = True
 
     raw_bytes, content_type, resolved_url = download(fetch_url)
 
@@ -433,6 +446,16 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         raise UnsupportedDocTypeError(zone1_result.url, doc_type)
 
     if doc_type == "HTML":
+        # fetch: html_js — this portal's pages always need JS; render unconditionally.
+        if force_render:
+            rendered = _render_spa_sync(resolved_url)
+            if rendered:
+                logger.info({"event": "forced_js_render", "url": resolved_url,
+                             "economy": zone1_result.economy})
+                return extract_html(rendered.encode("utf-8"), zone1_result_resolved,
+                                    content_type="text/html")
+            logger.warning({"event": "forced_js_render_failed", "url": resolved_url,
+                            "economy": zone1_result.economy})
         # fetch: auto — if the static HTML is a JS SPA shell, render it first.
         if auto_render:
             from src.crawler.spa_probe import classify_render

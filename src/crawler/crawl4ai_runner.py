@@ -129,6 +129,50 @@ async def close_shared_crawler() -> None:
         logger.info("[CRAWL] shared Chromium closed")
 
 
+async def fetch_isolated(url: str, timeout_ms: int) -> tuple[str, int]:
+    """
+    Render one URL with a DEDICATED crawler created and closed within the caller's
+    current event loop. Returns ``(html, status)`` (200 ok / 503 crawl failure /
+    0 timeout-or-error).
+
+    Why not the shared crawler: the module-level ``_shared_crawler`` is bound to
+    whichever event loop first ``start()``ed it. Zone-2 fetch wraps each page in
+    its own ``asyncio.run()`` (a fresh loop per call), so the SECOND render would
+    reuse a browser whose transport lives on the first, now-closed loop — every
+    Playwright op then hangs until the hard ceiling (~80s). A per-call crawler,
+    born and closed in the same loop, avoids that cross-loop reuse entirely.
+    """
+    from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
+
+    try:
+        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
+    except ImportError as exc:
+        raise CrawlerError(
+            "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"
+        ) from exc
+
+    hard_ceiling = (timeout_ms / 1000) + 10
+    crawler = AsyncWebCrawler(config=_stealth_browser_config())
+    await crawler.start()
+    try:
+        run_cfg = _build_run_config(wait_for=None, timeout_ms=timeout_ms)
+        result = await asyncio.wait_for(crawler.arun(url=url, config=run_cfg), timeout=hard_ceiling)
+        if getattr(result, "success", False):
+            return (result.html or result.cleaned_html or ""), 200
+        return "", 503
+    except asyncio.TimeoutError:
+        logger.info("isolated render timed out: %s", url)
+        return "", 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("isolated render failed for %s: %s", url, exc)
+        return "", 0
+    finally:
+        try:
+            await crawler.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 # ── Crawl4AI page fetch ────────────────────────────────────────────────────────
 
 async def probe_js_page(url: str) -> tuple[str, bool]:

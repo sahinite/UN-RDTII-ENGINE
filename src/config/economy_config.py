@@ -87,11 +87,14 @@ class Portal(BaseModel):
     anti_bot: Literal["none", "header_spoof", "playwright_stealth"] = "none"
     # How to find pillar-relevant instruments. Default "auto": an undeclared portal
     # is crawled best-effort (SPA/SSR auto-detected). Set "TBD" to deliberately skip.
-    discovery: Literal["index", "api", "auto", "search", "search_js", "seed_only", "TBD"] = "auto"
+    discovery: Literal["index", "api", "sitemap", "auto", "search", "search_js", "seed_only", "TBD"] = "auto"
     # How to obtain complete document text
     fetch: Literal["pdf_endpoint", "api_versioned_pdf", "html", "html_wholedoc", "html_js", "pdf_link", "auto", "TBD"] = "TBD"
     # URLs of in-force browse indexes (used when discovery: index)
     index_urls: list[str] = Field(default_factory=list)
+    # sitemap.xml URL for a JS-rendered portal with no crawlable HTML index
+    # (used when discovery: sitemap) — e.g. pdpc.gov.sg
+    sitemap_url: str | None = None
     # Query-string suffix to rewrite act URL to its PDF view (used when fetch: pdf_endpoint)
     pdf_view_suffix: str | None = None
     # OData/JSON API base + collection (used when discovery: api / fetch: api_versioned_pdf)

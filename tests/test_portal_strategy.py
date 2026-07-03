@@ -13,6 +13,7 @@ Seams tested (no network — all fixtures/mocks):
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -132,9 +133,17 @@ class TestPortalStrategyFields:
     def test_singapore_gazette_has_tbd_strategy(self):
         from src.config.economy_config import load_economy
         cfg = load_economy("singapore")
-        gazette = cfg.portals[1]
+        gazette = next(p for p in cfg.portals if "egazette" in str(p.url))
         assert gazette.discovery == "TBD"
         assert gazette.fetch == "TBD"
+
+    def test_singapore_pdpc_uses_sitemap_discovery(self):
+        from src.config.economy_config import load_economy
+        cfg = load_economy("singapore")
+        pdpc = next(p for p in cfg.portals if "pdpc.gov.sg" in str(p.url))
+        assert pdpc.discovery == "sitemap"
+        assert pdpc.sitemap_url == "https://www.pdpc.gov.sg/sitemap.xml"
+        assert pdpc.fetch == "html_js"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -777,3 +786,78 @@ class TestGracefulDegradation:
         assert all(isinstance(r, Zone1Result) for r in results)
         assert all(r.economy == "SG" for r in results)
         assert all(r.discovery_tag in ("KNOWN", "NEW") for r in results)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. Sitemap discovery (JS-SPA portals, e.g. pdpc.gov.sg)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PDPC_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.pdpc.gov.sg/data-protection-obligations</loc></url>
+  <url><loc>https://www.pdpc.gov.sg/about/the-legislation/pdpa-overview</loc></url>
+  <url><loc>https://www.pdpc.gov.sg/media-events/pdpc-hosts-annual-dinner</loc></url>
+  <url><loc>https://www.pdpc.gov.sg/sitemap-nested.xml</loc></url>
+</urlset>
+"""
+
+_PDPC_PORTAL = Portal(
+    name="PDPC",
+    url="https://www.pdpc.gov.sg",
+    type="secondary",
+    anti_bot="none",
+    discovery="sitemap",
+    sitemap_url="https://www.pdpc.gov.sg/sitemap.xml",
+    fetch="html_js",
+)
+
+
+class TestSitemapDiscovery:
+    def test_slug_to_title_derives_words_from_last_segment(self):
+        from src.crawler.discover import _slug_to_title
+        assert _slug_to_title("https://www.pdpc.gov.sg/data-protection-obligations") == "data protection obligations"
+        assert _slug_to_title("https://www.pdpc.gov.sg/about/the-legislation/pdpa-overview") == "pdpa overview"
+
+    def test_discover_sitemap_parses_locs_and_skips_nested_xml(self):
+        from src.crawler.discover import _discover_sitemap
+
+        async def mock_sitemap(url):
+            return _PDPC_SITEMAP, 200
+
+        with patch("src.crawler.discover._fetch_sitemap_xml", side_effect=mock_sitemap):
+            cands = asyncio.run(_discover_sitemap(_PDPC_PORTAL, time.monotonic() + 30))
+
+        urls = {u for _, u in cands}
+        assert "https://www.pdpc.gov.sg/data-protection-obligations" in urls
+        assert "https://www.pdpc.gov.sg/about/the-legislation/pdpa-overview" in urls
+        # nested sitemap (.xml) is not a page → excluded
+        assert not any(u.endswith(".xml") for u in urls)
+
+    def test_discover_sitemap_missing_url_returns_none(self):
+        from src.crawler.discover import _discover_sitemap
+        portal = Portal(name="x", url="https://x.gov", discovery="sitemap")  # no sitemap_url
+        assert asyncio.run(_discover_sitemap(portal, time.monotonic() + 30)) is None
+
+    def test_discover_sitemap_fetch_failure_returns_none(self):
+        from src.crawler.discover import _discover_sitemap
+
+        async def mock_fail(url):
+            return "", 0
+
+        with patch("src.crawler.discover._fetch_sitemap_xml", side_effect=mock_fail):
+            assert asyncio.run(_discover_sitemap(_PDPC_PORTAL, time.monotonic() + 30)) is None
+
+    def test_sitemap_candidate_tagged_known_when_url_is_seed(self):
+        """A sitemap page whose URL matches a Round 1 seed is tagged KNOWN."""
+        from src.crawler.discover import _discover_sitemap, _rank_exclude_tag
+
+        async def mock_sitemap(url):
+            return _PDPC_SITEMAP, 200
+
+        with patch("src.crawler.discover._fetch_sitemap_xml", side_effect=mock_sitemap):
+            cands = asyncio.run(_discover_sitemap(_PDPC_PORTAL, time.monotonic() + 30))
+
+        seed = {"https://www.pdpc.gov.sg/data-protection-obligations"}
+        tagged = _rank_exclude_tag(cands, 7, _MINI_TAXONOMY, known_urls=seed)
+        known = [(t, u) for t, u, tag in tagged if tag == "KNOWN"]
+        assert any("data-protection-obligations" in u for _, u in known)

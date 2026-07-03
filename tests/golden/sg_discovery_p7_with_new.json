@@ -78,6 +78,18 @@
     "discovery_tag": "KNOWN"
   },
   {
+    "url": "https://www.pdpc.gov.sg/about/the-legislation/enforcement-of-the-act",
+    "economy": "SG",
+    "act_title": "enforcement of the act",
+    "discovery_tag": "NEW"
+  },
+  {
+    "url": "https://www.pdpc.gov.sg/organisations/regulations-decisions/personal-data-protection-act-pdpa",
+    "economy": "SG",
+    "act_title": "personal data protection act pdpa",
+    "discovery_tag": "NEW"
+  },
+  {
     "url": "https://www.pdpc.gov.sg/overview-of-pdpa/the-legislation/personal-data-protection-act",
     "economy": "SG",
     "act_title": "",

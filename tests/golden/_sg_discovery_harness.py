@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = Path(__file__).resolve().parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
 _SSO_INDEX_HTML = (FIXTURES / "sso_browse_index.html").read_text(encoding="utf-8")
+_PDPC_SITEMAP_XML = (FIXTURES / "pdpc_sitemap.xml").read_text(encoding="utf-8")
 _SEED_DB = GOLDEN_DIR / "round1_db_sg.snapshot.xlsx"
 
 # (pillar, mode label, max_new) — the full baseline matrix.
@@ -67,8 +68,12 @@ def run_sg_discovery(pillar: int, max_new: int) -> list[dict]:
     async def _mock_fetch(url, portal):  # noqa: ANN001
         return _SSO_INDEX_HTML, 200
 
+    async def _mock_sitemap(url):  # noqa: ANN001
+        return _PDPC_SITEMAP_XML, 200
+
     with (
         patch("src.crawler.discover.transport_fetch", side_effect=_mock_fetch),
+        patch("src.crawler.discover._fetch_sitemap_xml", side_effect=_mock_sitemap),
         patch("src.crawler.discover._MAX_NEW_ACTS", max_new),
     ):
         results = asyncio.run(

@@ -25,7 +25,7 @@ Updated as stories are completed — future agents should read this before touch
 | **CER** | Character Error Rate — OCR quality metric. Stage-2 OCR triggers at CER ≥ 5%. |
 | **RAG pipeline** | Hybrid BM25 + dense retrieval with cross-encoder reranking; top-5 chunks per indicator, each with `location_reference`. |
 | **location_reference** | `(act_name, part, article_number)` tuple for verifiable citations. |
-| **SeedData** | `known_urls`, `known_titles`, `known_provisions` — loaded from Round 1 DB xlsx + Sample CSV. Compound titles split on `;`/newline. |
+| **SeedData** | `known_urls`, `known_titles`, `known_provisions` (anchored URLs), `known_sections` (act title → prose section tokens) — loaded from Round 1 DB xlsx + Sample CSV. Compound titles split on `;`/newline. |
 
 ---
 
@@ -115,6 +115,24 @@ New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; 
 ### ADR-048 — Validated economies protected by golden-output snapshots
 "Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
 
+### ADR-054 — Seed-guided retrieval (gentle) + indicator drift is an LLM-extraction limit
+`seed_loader` builds `known_sections_by_indicator` (`P7-I3 → {act → sections}`, DB `7.3`→`P7-I3` via `_db_indicator_to_engine`). `retrieve_batch` uses it: per indicator, `_inject_seed_sections` locates the Round 1 section chunk for THIS act (`_find_section_chunk` — exact `article_number`, else the `N.` heading in text scored by body length so the operative provision beats the Contents/TOC listing; handles empty article_number on large acts like Employment s.95 / PDPA s.25) and, **only if entirely absent**, prepends it. **Gentle by decision:** an earlier promote-to-front variant that reordered already-retrieved sections displaced other chunks from the LLM token budget and drove total records *down* (24→19) without changing the LLM's verdict, so present sections are now left untouched. Investigation showed the "drift" is mostly an **LLM extraction** issue, not retrieval: the target sections ARE retrieved, but the LLM declines them — correctly for PDPA s.25 (a retention *limitation*, not a *minimum*; Round 1 scored it 0), over-strictly for Employment s.95 ("keep for the *prescribed* period" → delegated). True recovery of the Employment-style cases needs I3 prompt tuning (tracked as future work), not retrieval. KNOWN-only, additive, never removes NEW discoveries.
+
+### ADR-053 — Cross-document provision dedup at output
+The mapper's `_deduplicate` only folds duplicates WITHIN one document. The same act can be fetched under two URLs — consolidated `/Act/CA2018` (from SSO index title-match) and as-enacted `/acts-supp/9-2018` (from a Round 1 seed ref) — producing identical provisions in separate documents. `main._dedup_cross_document` folds `all_records` on `(law_name, indicator_id, article, snippet[:80])` (whitespace/case-folded), keeping the higher-quality copy: consolidated `/Act/` source > higher confidence > concrete (non-"unknown") location. Runs before null assessments + the PDPA gate. Root-cause act-identity dedup at discovery (mapping `9-2018`→`CA2018`) is deferred — output dedup fixes correctness and catches any cross-doc dupe.
+
+### ADR-052 — Zone-2 SPA render uses an isolated per-call crawler, not the shared one
+`_render_spa_sync` wraps each page in its own `asyncio.run()` (a fresh event loop per call). The module-level `_shared_crawler` is bound to whichever loop first `start()`ed it, so the *second* Zone-2 render reused a Playwright browser whose transport lived on the first, now-closed loop — every op then hung until the 2×(timeout+10) hard ceiling (~80s), failing exactly one PDPC page per run (the pattern: first render OK, next times out). `crawl4ai_runner.fetch_isolated()` creates and closes a dedicated crawler inside the caller's loop; `_render_spa_sync` uses it. The shared singleton stays for the BFS crawler / discovery, which run under a single `asyncio.run`. Verified: three PDPC pages render back-to-back in ~3s each.
+
+### ADR-051 — `discovery: sitemap` for JS-SPA portals with no crawlable index
+A JS SPA (pdpc.gov.sg) returns a content-less shell to httpx, so `index` (needs HTML anchor links) and `auto` (its `classify_render` probe mis-reads the shell as SSR) both fail to enumerate pages. Such portals commonly publish a standard `sitemap.xml` (advertised in robots.txt). `_discover_sitemap` fetches it directly (own httpx call — the transport ladder's `_is_real_response` rejects bodyless XML), extracts every `<loc>` page URL, derives a BM25 title from the URL slug, and hands `(title, url)` candidates to the shared `_rank_exclude_tag` tail like any other adapter. Nested sitemap-index `.xml` locs are skipped (flat sitemaps are the gov norm). With `ZONE2_MAX_NEW_ACTS=0` (build-gate default) the sitemap adds nothing — its candidates are all NEW and dropped, and known pages still arrive via seed injection; its value is realized when NEW discovery is enabled. Offline golden harness mocks `_fetch_sitemap_xml` to a pinned `tests/fixtures/pdpc_sitemap.xml`.
+
+### ADR-050 — `fetch: html_js` renders JS-only portals unconditionally
+`fetch: auto` gates its Playwright render on `classify_render(...).is_spa`. That probe measures `body.get_text()` **without** stripping nav/footer chrome, so a content-less SPA shell wrapped in a large menu (pdpc.gov.sg: 42–95 chars of real content but a big nav) reads as SSR and the render is skipped — then `extract_html` (which DOES strip chrome) sees <200 chars and raises "JS-rendered". Rather than retune the shared heuristic (risk to validated AU/SG paths), the declared-but-unimplemented `html_js` Literal is now wired in `router.py` to render every HTML page via Playwright with no probe gate. Portals whose pages always require JS declare `fetch: html_js`; PDFs on the same domain are unaffected (they take the PDF branch). Verified end-to-end on the two PDPC pages that failed the 2026-07-02 SG P7 run (95 → 4250 chars).
+
+### ADR-049 — Provision KNOWN matching uses Round 1 prose sections, not just anchor URLs
+Round 1 identifies most known provisions by prose section number in the act/comment columns ("Section 199", "Section 11(3)"), NOT by `#`-anchored URLs. Anchor-only matching (`known_provisions`) therefore left Pillar 7 with an empty match set and tagged every provision NEW — false-NEWs that graders reclassify. `seed_loader` now also builds `known_sections` (act title → section tokens), and `resolve_provision_tag()` tags KNOWN when `(normalised law_name, section)` is present, **indicator-agnostic** (KNOWN = the provision is in Round 1 and the run found it, regardless of which indicator surfaced it). Anchor-URL matching is retained as a second KNOWN path.
+
 ---
 
 ## Implementation State
@@ -126,9 +144,9 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 | Module | Purpose |
 |--------|---------|
 | `src/config/economy_config.py` | `EconomyConfig` + `Portal` Pydantic models; `load_economy(name)` with fuzzy matching; `load_economy_by_iso()`; `iso_code`/`un_name` fields |
-| `src/crawler/discover.py` | **Active Zone 1 entry point.** `discover()` routes per-portal strategy (`index`/`seed_only`/`TBD`). `build_pillar_keywords()` filters by `P{pillar}-`. `build_pillar_excludes()` gathers exclude lists. `_discover_index()` fetches browse indexes, BM25-ranks, applies exclusion BEFORE KNOWN check, merges seeds. |
+| `src/crawler/discover.py` | **Active Zone 1 entry point.** `discover()` routes per-portal strategy (`index`/`api`/`sitemap`/`auto`/`seed_only`/`TBD`). `build_pillar_keywords()` filters by `P{pillar}-`. `build_pillar_excludes()` gathers exclude lists. `_discover_index()` fetches browse indexes; `_discover_sitemap()` fetches `sitemap.xml` for JS-SPA portals (slug→title, skips nested `.xml`); both BM25-rank + exclude + tag via the shared `_rank_exclude_tag` tail. |
 | `src/crawler/transport.py` | Transport ladder: plain httpx → httpx+browser headers → Playwright stealth. `_is_real_response()` detects 403/JS-shell. |
-| `src/crawler/seed_loader.py` | `SeedData` with `known_urls`, `known_titles`, `known_provisions`. Splits compound titles on `;`/newline. Generic `_pillar_matches()` for any Pn. |
+| `src/crawler/seed_loader.py` | `SeedData` with `known_urls`, `known_titles`, `known_provisions`, `known_sections`, `known_sections_by_indicator`. Splits compound titles on `;`/newline. `_extract_section_tokens()` harvests prose section numbers from the act/comment/coverage columns; `_db_indicator_to_engine()` maps `7.3`→`P7-I3`. Generic `_pillar_matches()` for any Pn. |
 | `src/crawler/crawl4ai_runner.py` | Stealth Crawl4AI/Playwright. Shared browser singleton. Two-attempt fetch (with/without selector). |
 | `src/crawler/probe.py` | Legacy probe — `load_taxonomy()` / `validate_taxonomy()` still used at startup. |
 | `src/crawler/crawler.py` | Legacy BFS crawler — shared `_normalise_url()` imported by other modules. |
@@ -139,7 +157,7 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 
 | Module | Purpose |
 |--------|---------|
-| `src/fetcher/router.py` | Zone 2 entry: `route()` dispatches TEXT_PDF/SCANNED_PDF/HTML. `pdf_endpoint` URL rewrite. `single_act_fetch` skips volume detection. |
+| `src/fetcher/router.py` | Zone 2 entry: `route()` dispatches TEXT_PDF/SCANNED_PDF/HTML. `pdf_endpoint` URL rewrite. `single_act_fetch` skips volume detection. `fetch: auto` renders SPA shells only when `classify_render.is_spa`; `fetch: html_js` renders **every** HTML page via Playwright unconditionally (for portals whose SPA shell fools `classify_render`, e.g. pdpc.gov.sg). |
 | `src/fetcher/extractors/pdf_text.py` | pdfplumber extraction + `legislation_meta.py` (law_number_ref/last_amended). Section hierarchy parser. |
 | `src/fetcher/extractors/ocr_stage1.py` | Tesseract/PaddleOCR with CER gate. Raises `OCRQualityError` at ≥5% for Stage 2. |
 | `src/fetcher/extractors/html_extractor.py` | BeautifulSoup + `location_reference_map` from URL anchors. |
@@ -154,7 +172,7 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 | `src/mapping/llm_client.py` | `PROVIDER_CASCADE`, `pin_active_provider()`, `call_llm_with_cascade()`, `get_active_model_version(ocr_engine=)`. |
 | `src/mapping/parser.py` | `parse_llm_response()` with verbatim assertion (hard discard), provision-level `resolve_provision_tag()`, law-name abbreviation check, cross-reference auto-flagging. |
 | `src/mapping/prompts.py` | `SYSTEM_PROMPT` with Rules 1–9 (incl. law name expansion, rationale format, leave-blank-if-uncertain). |
-| `src/mapping/provision_tag.py` | `resolve_provision_tag()` (KNOWN/NEW per provision), `infer_article_anchor()` heuristic. |
+| `src/mapping/provision_tag.py` | `resolve_provision_tag()` (KNOWN/NEW per provision — matches on anchor URL OR `(act title, section)` against `known_sections`, indicator-agnostic), `infer_article_anchor()` / `infer_section_token()` heuristics. |
 | `src/mapping/providers/` | `AnthropicProvider`, `OpenAIProvider`, `DeepSeekProvider` (deepseek-chat, DEEPSEEK_API_KEY), `GroqProvider` (qwen/qwen3-32b + qwen/qwen3.6-27b fallback), `QwenProvider` (qwen-plus via DashScope, DASHSCOPE_API_KEY), `OllamaProvider` (qwen2.5:7b P6, granite3-8b P7). |
 | `src/output/writer.py` | `write_csv()` (13-col UTF-8-BOM), `write_json()` (document-level + `provisions[]` envelope per UN slide 18). `pdf_is_scanned`, `retrieval_method`, per-provision `discovery_tag`. `validate_record()` with portal domain allowlist. |
 | `src/output/validator.py` | URL validation + Wayback/local archiving (deduped per URL). Confidence flagging (<0.80 → review note). |
@@ -177,7 +195,7 @@ All declare `iso_code` and `un_name`. Adding a new economy requires only creatin
 
 | Economy | ISO | Portal Strategy | Status |
 |---------|-----|----------------|--------|
-| Singapore | SG | SSO: `index` + `pdf_endpoint` + `header_spoof`; Gazette: `TBD` | Reference / Phase 1 gate |
+| Singapore | SG | SSO: `index` + `pdf_endpoint` + `header_spoof`; PDPC: `sitemap` discovery + `html_js` fetch (JS SPA regulator guidance, discovered via sitemap.xml); Gazette: `TBD` | Reference / Phase 1 gate |
 | Australia | AU | legislation.gov.au + OAIC | Minimal config |
 | Malaysia | MY | — | Minimal config |
 | Thailand | TH | — | Minimal config (BE conversion) |

@@ -85,7 +85,10 @@ def test_load_singapore():
     cfg = load_economy("singapore")
     assert cfg.economy_name == "Singapore"
     assert cfg.ocr_engine == "tesseract"
-    assert len(cfg.portals) == 2
+    # SSO (primary), PDPC regulator (html_js), Gazette (secondary)
+    assert len(cfg.portals) == 3
+    pdpc = next(p for p in cfg.portals if "pdpc.gov.sg" in str(p.url))
+    assert pdpc.fetch == "html_js"
 
 
 def test_load_thailand():

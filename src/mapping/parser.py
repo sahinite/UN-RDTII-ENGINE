@@ -37,6 +37,7 @@ def parse_llm_response(
     top_chunks: list[RetrievedChunk],
     doc_metadata: dict,
     known_provisions: "set[str] | None" = None,
+    known_sections: "dict[str, set[str]] | None" = None,
 ) -> list[ExtractionResult]:
     """
     Parses LLM JSON response → list[ExtractionResult].
@@ -64,8 +65,9 @@ def parse_llm_response(
 
     results = []
     kp = known_provisions or set()
+    ks = known_sections or {}
     for prov in parsed["provisions"]:
-        result = _build_extraction_result(prov, indicator_id, top_chunks, doc_metadata, response, kp)
+        result = _build_extraction_result(prov, indicator_id, top_chunks, doc_metadata, response, kp, ks)
         if result is not None:
             results.append(result)
 
@@ -153,6 +155,7 @@ def _build_extraction_result(
     doc_metadata: dict,
     response: LLMResponse,
     known_provisions: "set[str]" = frozenset(),
+    known_sections: "dict[str, set[str]] | None" = None,
 ) -> Optional[ExtractionResult]:
     snippet = prov.get("verbatim_snippet", "").strip()
     article = prov.get("article", "").strip()
@@ -215,6 +218,9 @@ def _build_extraction_result(
         article_anchor=anchor,
         doc_discovery_tag=doc_metadata.get("discovery_tag", "KNOWN"),
         known_provisions=known_provisions,
+        law_name=law_name,
+        article=article,
+        known_sections=known_sections or {},
     )
     if tag_unresolvable:
         flag_for_review = True
