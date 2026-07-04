@@ -68,6 +68,8 @@ def _rewrite_to_pdf_url(url: str, pdf_view_suffix: str) -> str:
 
 # AU register id, e.g. C2004A03712 (Act) or F2021L00289 (legislative instrument).
 _TITLE_ID_RE = re.compile(r"[cf]\d{4}[a-z]\d{5}", re.IGNORECASE)
+# Max compilation versions to probe for an existing PDF before giving up (bounds latency).
+_MAX_PDF_VERSION_TRIES = 10
 
 
 def _extract_title_id(url: str) -> str | None:
@@ -104,6 +106,52 @@ def _latest_version_start(api_base: str, title_id: str, timeout: int = 30) -> st
     return start.split("T")[0] if start else None
 
 
+def _inforce_version_dates(api_base: str, title_id: str, timeout: int = 30) -> list[str]:
+    """All in-force compilation start dates (YYYY-MM-DD), latest first. FRL frequently
+    has NOT yet generated the text/original/pdf for the newest compilations (they 404),
+    so the caller walks this list until it finds a date whose PDF actually exists.
+    Rows with a registerId are registered compilations; future/unregistered rows
+    (registerId=null) are skipped."""
+    import urllib.parse
+    crit = urllib.parse.quote("affects(Amend,Disallow)")
+    filt = urllib.parse.quote(f"titleId eq '{title_id}'")
+    order = urllib.parse.quote("start desc")
+    url = (
+        f"{api_base}/versions/search(criteria='{crit}')"
+        f"?$filter={filt}&$select=start,isLatest,registerId&$orderby={order}&$top=20"
+    )
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(url, headers={"Accept": "application/json"})
+        if resp.status_code != 200:
+            return []
+        rows = resp.json().get("value", [])
+    except (httpx.HTTPError, ValueError):
+        return []
+    dates: list[str] = []
+    for r in rows:
+        if r.get("registerId") and r.get("start"):
+            d = r["start"].split("T")[0]
+            if d not in dates:
+                dates.append(d)
+    return dates
+
+
+def _url_serves_pdf(url: str, timeout: int = 30) -> bool:
+    """True when url returns a real PDF (checks the %PDF magic bytes), streaming only
+    the first chunk so we never download a full multi-MB file just to probe it."""
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return False
+                for chunk in resp.iter_bytes():
+                    return chunk[:5] == b"%PDF-"
+    except httpx.HTTPError:
+        return False
+    return False
+
+
 def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
     """Best-effort JS render of a SPA document page via Crawl4AI/Playwright.
     Returns '' on failure. Used by fetch: auto/html_js when the page is a JS shell.
@@ -130,12 +178,23 @@ def _resolve_versioned_pdf_url(act_url: str, portal) -> str | None:
     api_base = getattr(portal, "api_base", None)
     if not title_id or not api_base:
         return None
-    start = _latest_version_start(api_base, title_id)
-    if not start:
+    dates = _inforce_version_dates(api_base, title_id)
+    if not dates:
         return None
     suffix = (getattr(portal, "pdf_path_suffix", None) or "text/original/pdf").strip("/")
     portal_base = str(portal.url).rstrip("/")
-    return f"{portal_base}/{title_id}/{start}/{start}/{suffix}"
+    # Walk newest→older until a compilation whose PDF exists (FRL lags on generating
+    # PDFs for the newest compilations → the latest date often 404s, older ones serve).
+    for d in dates[:_MAX_PDF_VERSION_TRIES]:
+        candidate = f"{portal_base}/{title_id}/{d}/{d}/{suffix}"
+        if _url_serves_pdf(candidate):
+            if d != dates[0]:
+                logger.info({
+                    "event": "api_versioned_pdf_older_compilation",
+                    "title_id": title_id, "latest": dates[0], "used": d,
+                })
+            return candidate
+    return None
 
 
 # ── Custom exceptions ──────────────────────────────────────────────────────────

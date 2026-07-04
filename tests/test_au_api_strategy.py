@@ -138,14 +138,41 @@ class TestVersionResolution:
 
     @respx.mock
     def test_resolve_versioned_pdf_url_builds_dated_url(self):
-        from src.fetcher.router import _resolve_versioned_pdf_url
+        from src.fetcher import router
         respx.get(url__startswith=f"{API}/versions/search").mock(
             return_value=httpx.Response(200, json={"value": [
                 {"start": "2026-06-04T00:00:00", "isLatest": True, "registerId": "C2026C00227"},
             ]})
         )
-        url = _resolve_versioned_pdf_url(f"{FRL}/C2004A03712", _au_portal())
+        with patch.object(router, "_url_serves_pdf", return_value=True):
+            url = router._resolve_versioned_pdf_url(f"{FRL}/C2004A03712", _au_portal())
         assert url == f"{FRL}/C2004A03712/2026-06-04/2026-06-04/text/original/pdf"
+
+    @respx.mock
+    def test_resolve_falls_back_to_older_compilation_when_latest_pdf_404s(self):
+        """FRL often hasn't generated the newest compilation's PDF (404) — walk older."""
+        from src.fetcher import router
+        respx.get(url__startswith=f"{API}/versions/search").mock(
+            return_value=httpx.Response(200, json={"value": [
+                {"start": "2026-06-04T00:00:00", "isLatest": True, "registerId": "C1"},
+                {"start": "2025-04-04T00:00:00", "isLatest": False, "registerId": "C2"},
+            ]})
+        )
+        # latest date's PDF is missing; the older compilation's exists.
+        with patch.object(router, "_url_serves_pdf", side_effect=lambda u, timeout=30: "2025-04-04" in u):
+            url = router._resolve_versioned_pdf_url(f"{FRL}/C2004A02124", _au_portal())
+        assert url == f"{FRL}/C2004A02124/2025-04-04/2025-04-04/text/original/pdf"
+
+    @respx.mock
+    def test_resolve_returns_none_when_no_compilation_has_pdf(self):
+        from src.fetcher import router
+        respx.get(url__startswith=f"{API}/versions/search").mock(
+            return_value=httpx.Response(200, json={"value": [
+                {"start": "2026-06-04T00:00:00", "isLatest": True, "registerId": "C1"},
+            ]})
+        )
+        with patch.object(router, "_url_serves_pdf", return_value=False):
+            assert router._resolve_versioned_pdf_url(f"{FRL}/C2004A05145", _au_portal()) is None
 
     @respx.mock
     def test_resolve_returns_none_on_api_error(self):
@@ -174,7 +201,8 @@ class TestRouterApiVersionedPdf:
             return pdf_bytes, "application/pdf", url
 
         with (
-            patch.object(router, "_latest_version_start", return_value="2026-06-04"),
+            patch.object(router, "_inforce_version_dates", return_value=["2026-06-04"]),
+            patch.object(router, "_url_serves_pdf", return_value=True),
             patch.object(router, "download", side_effect=mock_download),
             patch.object(router, "is_consolidated_volume", return_value=False),
         ):

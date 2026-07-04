@@ -294,17 +294,37 @@ def run_pipeline(
     # never assigns them to (only when a correct-indicator copy survives). NEW is left
     # untouched. Mis-maps are logged for root-cause analysis (see memory).
     all_records, _mismaps = _prune_known_cross_indicator(all_records, known_sections_by_indicator)
+    _diag_dir = Path("logs") / "diagnostics"
+    _diag_tag = f"{economy_iso}_P{pillar}"
     if _mismaps:
         _dropped = sum(1 for m in _mismaps if m["dropped"])
-        Path("logs").mkdir(exist_ok=True)
-        (Path("logs") / "known_mismaps.json").write_text(
+        _diag_dir.mkdir(parents=True, exist_ok=True)
+        # Per-economy-pillar filename so successive runs accumulate evidence (over-fire).
+        (_diag_dir / f"{_diag_tag}_mismaps.json").write_text(
             json.dumps({"economy": economy_config.economy_name, "pillar": pillar,
                         "mismaps": _mismaps}, indent=2),
             encoding="utf-8",
         )
         p.info(
             f"KNOWN indicator prune — {_dropped} wrong-indicator row(s) removed, "
-            f"{len(_mismaps)} confirmed mis-map(s) → logs/known_mismaps.json"
+            f"{len(_mismaps)} confirmed mis-map(s) → logs/diagnostics/{_diag_tag}_mismaps.json"
+        )
+
+    # ── KNOWN-recall audit (diagnostic only — no output change) ──────────────────
+    # For every Round 1 (act, section, indicator), record whether the run emitted it,
+    # and classify misses (act_missing = fetch/discovery; provision_missing = LLM
+    # rejected / retrieval missed). Evidence for the drift/recall decision (issue A).
+    _recall = _audit_known_recall(all_records, known_sections_by_indicator)
+    if _recall["found"] or _recall["missing"]:
+        _diag_dir.mkdir(parents=True, exist_ok=True)
+        (_diag_dir / f"{_diag_tag}_recall.json").write_text(
+            json.dumps({"economy": economy_config.economy_name, "pillar": pillar, **_recall}, indent=2),
+            encoding="utf-8",
+        )
+        _pm = sum(1 for m in _recall["missing"] if m["reason"] == "provision_missing")
+        p.info(
+            f"KNOWN recall audit — {len(_recall['found'])} found, {len(_recall['missing'])} missing "
+            f"({_pm} provision_missing) → logs/diagnostics/{_diag_tag}_recall.json"
         )
 
     # ── Null assessments ────────────────────────────────────────────────────────
@@ -556,6 +576,42 @@ def _prune_known_cross_indicator(records: list, known_sections_by_indicator: dic
     order = {id(r): i for i, r in enumerate(records)}
     kept.sort(key=lambda r: order.get(id(r), len(records)))
     return kept, mismaps
+
+
+def _audit_known_recall(records: list, known_sections_by_indicator: dict) -> dict:
+    """
+    Diagnostic (no output change): for every Round 1 KNOWN (act, section, indicator),
+    record whether the run emitted it, and classify each miss:
+      - "act_missing"       → the act produced no output row at all (fetch/discovery gap)
+      - "provision_missing" → the act IS in the output but not this (section, indicator)
+                              → the LLM rejected it or retrieval never surfaced it
+
+    This is the under-recall counterpart to the over-fire mis-map log — together they
+    tell us which way the drift/recall problem (issue A) actually leans. See
+    [[known-wrong-indicator-rootcause]] and [[indicator-drift]].
+    """
+    from src.crawler.seed_loader import normalise_title
+    from src.mapping.provision_tag import infer_section_token
+
+    ksbi = known_sections_by_indicator or {}
+    acts_present = {normalise_title(r.law_name or "") for r in records}
+    emitted = set()
+    for r in records:
+        tok = infer_section_token(r.article)
+        if tok:
+            emitted.add((normalise_title(r.law_name or ""), tok, r.indicator_id))
+
+    found, missing = [], []
+    for indicator, acts in ksbi.items():
+        for act, sections in acts.items():
+            for section in sections:
+                entry = {"act": act, "section": section, "indicator": indicator}
+                if (act, section, indicator) in emitted:
+                    found.append(entry)
+                else:
+                    entry["reason"] = "act_missing" if act not in acts_present else "provision_missing"
+                    missing.append(entry)
+    return {"found": found, "missing": missing}
 
 
 def _emit_null_assessments(all_records, seed, economy_name, economy_config) -> list:

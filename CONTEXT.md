@@ -115,6 +115,26 @@ New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; 
 ### ADR-048 — Validated economies protected by golden-output snapshots
 "Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
 
+### ADR-058 — FRL versioned-PDF resolver walks compilations until a PDF exists
+`api_versioned_pdf` built one dated URL from the LATEST compilation date and 404'd whenever
+FRL hadn't generated that compilation's `text/original/pdf` yet (Telecom I&A C2004A02124,
+C2004A05145 — the newest ~4 compilations 404, older ones serve a real PDF). `_resolve_versioned_pdf_url`
+now walks `_inforce_version_dates` (registered compilations, newest first) and returns the
+first date whose URL passes `_url_serves_pdf` (streams the first chunk, checks `%PDF` magic —
+never downloads a full multi-MB file to probe). Recovered Telecom I&A (→2025-04-04), ASIO,
+DATA into AU P7 (act_missing 17→13); acts with no PDF at any compilation (C2004A05145)
+correctly return None. The recovered acts' Round 1 sections then surface as `provision_missing`
+in the recall audit — i.e. fetch is fixed, the remaining gap is LLM extraction (issue A).
+
+### ADR-059 — Diagnostics: per-economy-pillar mis-map + KNOWN-recall audit
+Both root-cause logs now write to `logs/diagnostics/{ISO}_P{pillar}_{mismaps,recall}.json`
+(per-run, no clobber). `main._audit_known_recall` is the under-recall counterpart to the
+over-fire mis-map log: for every Round 1 (act, section, indicator) it records found vs missing,
+classifying misses as `act_missing` (fetch/discovery) or `provision_missing` (act present but
+section not extracted → LLM-reject/retrieval-miss). Evidence across SG+AU × P6+P7 (2026-07-04):
+over-fire=2 (rare, auto-pruned), real under-recall≈2–3, but `act_missing`=25 dominates — so the
+biggest recall lever was fetch (ADR-058), not the LLM. Parks issue A with data.
+
 ### ADR-057 — Citation-label guards (C-safe)
 Compilation-PDF chunking leaks non-section values into the citation. Two deterministic
 guards: (1) `parser` drops a chunk-derived `Art. N` from `location_reference` when N is a
