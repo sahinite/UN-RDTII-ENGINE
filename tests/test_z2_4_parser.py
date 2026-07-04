@@ -305,3 +305,32 @@ def test_extraction_result_validate_catches_bad_indicator():
     )
     with pytest.raises(ValueError, match="Invalid indicator_id"):
         r.validate()
+
+
+# ── C-safe: location_reference year/page-as-article guard ───────────────────────
+
+def _loc_ref_for(article_number, page):
+    """Run one provision through the parser and return its location_reference."""
+    from src.mapping.parser import parse_llm_response
+    resp = make_llm_response(VALID_LLM_JSON)  # article "Section 26", snippet from PDPA_CHUNK_TEXT
+    chunk = make_retrieved_chunk(article=article_number, page=page)
+    results = parse_llm_response(resp, "P6-I1", [chunk], DOC_METADATA)
+    assert results, "expected one provision"
+    return results[0].location_reference or ""
+
+
+def test_location_ref_drops_year_as_article():
+    loc = _loc_ref_for("2020", 538)          # chunker leaked a year into article_number
+    assert "Art. 2020" not in loc
+    assert "Page 539" in loc
+
+
+def test_location_ref_drops_page_as_article():
+    loc = _loc_ref_for("539", 538)           # article_number == page+1
+    assert "Art. 539" not in loc
+    assert "Page 539" in loc
+
+
+def test_location_ref_keeps_real_section():
+    loc = _loc_ref_for("26", 538)            # plausible section survives
+    assert "Art. 26" in loc

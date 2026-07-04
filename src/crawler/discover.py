@@ -50,6 +50,24 @@ _INDEX_FETCH_TIMEOUT_S = float(os.getenv("INDEX_FETCH_TIMEOUT_S", "30.0"))
 # (e.g. "Personal" in "Personal Mobility Devices") rank as P7 matches.
 _NEW_SCORE_THRESHOLD = float(os.getenv("NEW_SCORE_THRESHOLD", "0.2"))
 
+# legislation.gov.au registration id (kept in sync with router._TITLE_ID_RE). Used to
+# collapse variant URLs of the SAME act (/details/, /latest/text, bare) to one identity.
+_REG_ID_RE = re.compile(r"[cf]\d{4}[a-z]\d{5}", re.IGNORECASE)
+
+
+def _canonical_act_key(url: str) -> str:
+    """Dedup key that counts DISTINCT ACTS, not URL forms. For legislation.gov.au the
+    key is the registration id (C/F-number), so `/details/c…`, `/c…/latest/text` and the
+    bare `/C…` form unify — otherwise variants each burn a slot under the KNOWN cap and
+    the same act gets fetched twice. Everything else falls back to `_normalise_url`
+    (unchanged behaviour, e.g. SSO `/Act/CA2018`), so SG discovery is unaffected.
+    """
+    if "legislation.gov.au" in url.lower():
+        m = _REG_ID_RE.search(url)
+        if m:
+            return m.group(0).lower()
+    return _normalise_url(url)
+
 
 # ── Pillar-scoped exclusion lists ──────────────────────────────────────────────
 
@@ -646,14 +664,14 @@ async def discover(
             raw = _seed_fallback(portal, economy_iso, known_urls, f"strategy '{discovery_strategy}' not implemented")
 
         for title, url, tag in raw:
-            norm = _normalise_url(url)
+            norm = _canonical_act_key(url)
             if norm not in seen_norm:
                 seen_norm.add(norm)
                 all_results.append((title, url, tag))
 
     # Ensure all KNOWN seed URLs are included even if not discovered from portals
     for url in known_urls:
-        norm = _normalise_url(url)
+        norm = _canonical_act_key(url)
         if norm not in seen_norm:
             seen_norm.add(norm)
             all_results.append(("", url, "KNOWN"))

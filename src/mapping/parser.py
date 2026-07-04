@@ -250,8 +250,15 @@ def _build_extraction_result(
         parts = []
         if loc.page is not None:
             parts.append(f"Page {loc.page + 1}")
-        if loc.article_number:
-            parts.append(f"Art. {loc.article_number}")
+        # Only cite a chunk article number when it's a plausible section — the chunker
+        # mislabels compilation PDFs, leaking a 4-digit YEAR ("Art. 2020") or the PAGE
+        # number ("Art. 371 | Page 371") into article_number. Drop those; the LLM
+        # `article` field remains the authoritative citation.
+        an = (loc.article_number or "").strip()
+        _is_year = an.isdigit() and 1800 <= int(an) <= 2099
+        _is_page = loc.page is not None and an.isdigit() and int(an) in (loc.page, loc.page + 1)
+        if an and not _is_year and not _is_page:
+            parts.append(f"Art. {an}")
         chunk_location_ref = " | ".join(parts) if parts else None
 
     if chunk_location_ref:

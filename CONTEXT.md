@@ -115,6 +115,27 @@ New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; 
 ### ADR-048 — Validated economies protected by golden-output snapshots
 "Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
 
+### ADR-057 — Citation-label guards (C-safe)
+Compilation-PDF chunking leaks non-section values into the citation. Two deterministic
+guards: (1) `parser` drops a chunk-derived `Art. N` from `location_reference` when N is a
+4-digit YEAR (1800–2099, e.g. "Art. 2020") or equals the page number ("Art. 371 | Page 371")
+— the LLM `article` field stays authoritative; (2) `html_extractor` now mirrors `pdf_text`'s
+`derive_act_title(full_text, url)` fallback so URL-only seeds (e.g. AU `/details/` pages that
+fall back to HTML) no longer emit an empty `law_name` → schema-violation → dropped row. The
+uglier `article`-field garbles ("Section 8.1 and 8.2", Act-title leakage) are LLM output,
+deferred to the drift/prompt work (ADR-054/known-wrong-indicator-rootcause).
+
+### ADR-056 — Canonical act-identity key in discovery
+Discovery deduped and capped by `_normalise_url`, so variant URLs of ONE act each burned a
+slot: legislation.gov.au `/details/c…`, `/c…/latest/text` and bare `/C…` are the same act.
+AU P7 had 14 seed URLs → only 12 distinct acts, but the two `/latest/text` duplicates pushed
+real acts (ASIO C2004A02123, DATA C2022A00011) past the `ZONE2_MAX_KNOWN_ACTS=12` cap.
+`_canonical_act_key` keys legislation.gov.au URLs by registration id (C/F-number) and
+everything else by `_normalise_url` (SG/SSO unchanged — `/Act/CA2018` ≠ `/acts-supp/9-2018`,
+so SG's consolidated-vs-supplement duplicate is still handled at output by ADR-053). Result:
+all 5 Round-1 AU P7 acts now reach fetch; DATA Act appears in output. Remaining AU absences
+(ASIO, Telecom I&A) are the separate `api_versioned_pdf` 404/`/details/` resolver bug.
+
 ### ADR-055 — KNOWN cross-indicator prune (ground-truth) + mis-map logging
 The same provision can legitimately serve multiple indicators (Round 1 files My Health s.77
 under BOTH 6.1 and 6.2), so blind "one provision → one indicator" dedup would delete valid

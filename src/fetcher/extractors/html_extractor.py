@@ -14,6 +14,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
+from src.fetcher.extractors.legislation_meta import derive_act_title
 from src.fetcher.logger import get_logger
 from src.fetcher.models import CostLogEntry, FetchedDocument
 
@@ -179,7 +180,9 @@ def extract_html(raw_bytes: bytes, zone1_result: "Zone1Result", content_type: st
         source_url=zone1_result.url,
         resolved_url=base_url,
         economy=zone1_result.economy,
-        act_title=zone1_result.act_title,
+        # Mirror the PDF path: URL-only seeds arrive with no title, which would emit an
+        # empty law_name (schema violation → row dropped). Fall back to the cover-page title.
+        act_title=zone1_result.act_title or derive_act_title(full_text, zone1_result.url),
         discovery_tag=zone1_result.discovery_tag,  # type: ignore[arg-type]
         archive_url=zone1_result.archive_url,
         doc_type="HTML",

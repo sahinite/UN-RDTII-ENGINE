@@ -322,6 +322,26 @@ class TestHtmlExtractor:
         with pytest.raises(ExtractionError, match="JS-rendered"):
             extract_html(empty_html, sg_zone1)
 
+    def test_empty_title_falls_back_to_cover_page_title(self):
+        # URL-only seed → empty act_title. HTML path must derive it (not emit "" law_name).
+        from src.fetcher.extractors.html_extractor import extract_html
+        from src.fetcher.models import Zone1Result
+        z = Zone1Result(url="https://www.legislation.gov.au/details/c2021a00098",
+                        economy="AU", act_title="", discovery_tag="KNOWN", archive_url="")
+        html = b"""
+        <html><body>
+          <h1>My Health Records Act 2012</h1>
+          <p>An Act about the My Health Record system, and for related purposes. This
+             paragraph exists only to provide enough visible body text so the extractor
+             does not treat the page as a bare JavaScript shell: the guard requires at
+             least two hundred characters of stripped text before it will parse the
+             document, so we pad it out with a second full sentence of filler content.</p>
+        </body></html>
+        """
+        doc = extract_html(html, z, "text/html; charset=utf-8")
+        assert doc.act_title and doc.act_title != ""
+        assert "My Health Records Act" in doc.act_title
+
     def test_relative_anchor_resolved_to_absolute(self, sg_zone1):
         from src.fetcher.extractors.html_extractor import extract_html
         html = b"""
