@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import time
 from collections import defaultdict
@@ -288,6 +289,24 @@ def run_pipeline(
     if before != len(all_records):
         p.info(f"Cross-document dedup — {before - len(all_records)} duplicate provision(s) removed")
 
+    # ── KNOWN cross-indicator prune ─────────────────────────────────────────────
+    # KNOWN is ground-truth: drop KNOWN provisions filed under an indicator Round 1
+    # never assigns them to (only when a correct-indicator copy survives). NEW is left
+    # untouched. Mis-maps are logged for root-cause analysis (see memory).
+    all_records, _mismaps = _prune_known_cross_indicator(all_records, known_sections_by_indicator)
+    if _mismaps:
+        _dropped = sum(1 for m in _mismaps if m["dropped"])
+        Path("logs").mkdir(exist_ok=True)
+        (Path("logs") / "known_mismaps.json").write_text(
+            json.dumps({"economy": economy_config.economy_name, "pillar": pillar,
+                        "mismaps": _mismaps}, indent=2),
+            encoding="utf-8",
+        )
+        p.info(
+            f"KNOWN indicator prune — {_dropped} wrong-indicator row(s) removed, "
+            f"{len(_mismaps)} confirmed mis-map(s) → logs/known_mismaps.json"
+        )
+
     # ── Null assessments ────────────────────────────────────────────────────────
     # RDTII scores EVERY indicator (0/0.5/1). For an indicator the Round 1 DB
     # assessed but where we found no qualifying provision, emit an explicit
@@ -466,6 +485,77 @@ def _dedup_cross_document(records: list) -> list:
         if key not in best or _quality(r) > _quality(best[key]):
             best[key] = r
     return list(best.values())
+
+
+def _prune_known_cross_indicator(records: list, known_sections_by_indicator: dict) -> tuple[list, list]:
+    """
+    Drop KNOWN provisions filed under an indicator Round 1 never assigns them to.
+
+    KNOWN is ground-truth: `known_sections_by_indicator` says exactly which indicator(s)
+    each (act, section) belongs to. A KNOWN row whose indicator is outside that set is a
+    CONFIRMED mis-map. We drop it — but ONLY when the same provision still survives under
+    a correct (in-set) indicator, so a known provision is never lost outright.
+
+    NEW provisions are untouched: a NEW may legitimately serve multiple indicators and we
+    have no ground truth to prune it safely (dropping one could kill a real 20-pt finding).
+
+    Returns (kept_records, mismaps) where mismaps is a ground-truth-verified list for
+    root-cause analysis, each carrying the source chunk's retrieval signal
+    (retrieval over-match vs LLM over-fire). See [[known-wrong-indicator-rootcause]].
+    """
+    from collections import defaultdict
+
+    from src.crawler.seed_loader import normalise_title
+    from src.mapping.provision_tag import infer_section_token
+
+    ksbi = known_sections_by_indicator or {}
+    if not ksbi:
+        return records, []
+
+    def _round1_indicators(act_norm: str, token: str) -> set:
+        return {ind for ind, acts in ksbi.items() if token and token in acts.get(act_norm, set())}
+
+    groups: dict = defaultdict(list)
+    passthrough: list = []
+    for r in records:
+        token = infer_section_token(r.article) if r.discovery_tag == "KNOWN" else None
+        act_norm = normalise_title(r.law_name or "")
+        # Only rows we have ground truth for (KNOWN + resolvable section + in the R1 map)
+        if token and _round1_indicators(act_norm, token):
+            groups[(act_norm, token)].append(r)
+        else:
+            passthrough.append(r)
+
+    kept = list(passthrough)
+    mismaps: list = []
+
+    def _record_mismap(r, allowed, dropped):
+        mismaps.append({
+            "economy": r.economy, "law_name": r.law_name, "article": r.article,
+            "wrong_indicator": r.indicator_id, "round1_indicators": sorted(allowed),
+            "confidence": r.confidence,
+            "source_retrieval_method": getattr(r, "source_retrieval_method", None),
+            "source_rerank_score": getattr(r, "source_rerank_score", None),
+            "dropped": dropped,
+        })
+
+    for (act_norm, token), rows in groups.items():
+        allowed = _round1_indicators(act_norm, token)
+        in_set = [r for r in rows if r.indicator_id in allowed]
+        out_set = [r for r in rows if r.indicator_id not in allowed]
+        if in_set and out_set:
+            kept.extend(in_set)                        # keep the correct copies
+            for r in out_set:
+                _record_mismap(r, allowed, dropped=True)   # drop the confirmed wrong ones
+        else:
+            kept.extend(rows)                          # all in-set, OR only wrong copies → keep
+            for r in out_set:
+                _record_mismap(r, allowed, dropped=False)  # confirmed mis-map but sole evidence
+
+    # Preserve original record order.
+    order = {id(r): i for i, r in enumerate(records)}
+    kept.sort(key=lambda r: order.get(id(r), len(records)))
+    return kept, mismaps
 
 
 def _emit_null_assessments(all_records, seed, economy_name, economy_config) -> list:

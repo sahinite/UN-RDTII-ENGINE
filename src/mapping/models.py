@@ -61,6 +61,10 @@ class ExtractionResult:
     flag_for_review: bool = False
     flag_reason: Optional[str] = None
     non_consecutive: bool = False
+    # Diagnostic-only: retrieval signal of the source chunk (top retrieved chunk for
+    # this indicator) — lets us explain KNOWN cross-indicator mis-maps later.
+    source_rerank_score: Optional[float] = None
+    source_retrieval_method: Optional[str] = None
 
     def validate(self) -> None:
         if not self.verbatim_snippet or not self.verbatim_snippet.strip():

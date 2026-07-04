@@ -115,6 +115,21 @@ New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; 
 ### ADR-048 — Validated economies protected by golden-output snapshots
 "Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
 
+### ADR-055 — KNOWN cross-indicator prune (ground-truth) + mis-map logging
+The same provision can legitimately serve multiple indicators (Round 1 files My Health s.77
+under BOTH 6.1 and 6.2), so blind "one provision → one indicator" dedup would delete valid
+findings. `main._prune_known_cross_indicator` uses `known_sections_by_indicator` as ground
+truth: for a **KNOWN** provision it keeps exactly the indicator(s) Round 1 assigns and drops
+out-of-set copies — but only when a correct-indicator copy survives (never loses a known
+provision outright; sole wrong-indicator copies are kept). **NEW** provisions are untouched
+(a NEW may also serve 2 indicators and there is no ground truth to prune it — dropping one
+risks a real 20-pt finding). Every out-of-set KNOWN row is a *confirmed* mis-map, logged to
+`logs/known_mismaps.json` with the source chunk's retrieval signal (`source_rerank_score` +
+`source_retrieval_method`, threaded ExtractionResult→OutputRecord). Runs after cross-doc
+dedup, before null assessments. Early evidence (SG s.26, AU s.77): mis-maps have HIGH
+confidence but strongly NEGATIVE rerank scores → **LLM over-fire**, not retrieval over-match.
+Root-cause fix is deferred (see memory known-wrong-indicator-rootcause).
+
 ### ADR-054 — Seed-guided retrieval (gentle) + indicator drift is an LLM-extraction limit
 `seed_loader` builds `known_sections_by_indicator` (`P7-I3 → {act → sections}`, DB `7.3`→`P7-I3` via `_db_indicator_to_engine`). `retrieve_batch` uses it: per indicator, `_inject_seed_sections` locates the Round 1 section chunk for THIS act (`_find_section_chunk` — exact `article_number`, else the `N.` heading in text scored by body length so the operative provision beats the Contents/TOC listing; handles empty article_number on large acts like Employment s.95 / PDPA s.25) and, **only if entirely absent**, prepends it. **Gentle by decision:** an earlier promote-to-front variant that reordered already-retrieved sections displaced other chunks from the LLM token budget and drove total records *down* (24→19) without changing the LLM's verdict, so present sections are now left untouched. Investigation showed the "drift" is mostly an **LLM extraction** issue, not retrieval: the target sections ARE retrieved, but the LLM declines them — correctly for PDPA s.25 (a retention *limitation*, not a *minimum*; Round 1 scored it 0), over-strictly for Employment s.95 ("keep for the *prescribed* period" → delegated). True recovery of the Employment-style cases needs I3 prompt tuning (tracked as future work), not retrieval. KNOWN-only, additive, never removes NEW discoveries.
 

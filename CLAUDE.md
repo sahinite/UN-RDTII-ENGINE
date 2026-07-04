@@ -124,3 +124,12 @@ Each portal in `economies/*.yaml` declares `discovery` and `fetch` strategies (d
 ## For Round 1 and 2 databases:
 - for round 1 always throughly read the complete file from data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx
 - for round 2 always throughly read the complete file from data/database/ESCAP-RDTII-2.1_ Round 2 Database.xlsx
+
+## VALIDATION
+- Always check if seed data loaded correctly from Round 1 database of the asked economy.
+- Always check if taxonomy.json has correct keywords and mapping.
+
+## NOTE:
+- dont provide long summary.
+- your response should be easiy to understand in a way such that a 20 years can easily understand.
+- try to give short/consice bullets in response.

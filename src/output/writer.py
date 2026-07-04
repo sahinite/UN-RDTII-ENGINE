@@ -413,4 +413,6 @@ def build_output_record(
         archive_url=validated_result.archive_url,
         doc_type=getattr(rec, "doc_type", None),
         doc_discovery_tag=getattr(rec, "doc_discovery_tag", "KNOWN"),
+        source_rerank_score=getattr(rec, "source_rerank_score", None),
+        source_retrieval_method=getattr(rec, "source_retrieval_method", None),
     )

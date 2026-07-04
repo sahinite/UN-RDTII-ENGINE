@@ -84,6 +84,10 @@ class OutputRecord:
     archive_url: str                          # Wayback Machine URL or ""
     doc_type: Optional[str] = None            # "TEXT_PDF" | "SCANNED_PDF" | "HTML" | etc. (not written to CSV)
     doc_discovery_tag: str = "KNOWN"          # document-level KNOWN/NEW for the JSON envelope (not a CSV column)
+    # Diagnostic-only (not written to CSV/JSON): retrieval signal of the source chunk,
+    # used to explain KNOWN cross-indicator mis-maps (retrieval over-match vs LLM over-fire).
+    source_rerank_score: Optional[float] = None
+    source_retrieval_method: Optional[str] = None
 
     def as_csv_row(self) -> dict:
         """Return ordered dict matching CSV_COLUMNS exactly."""

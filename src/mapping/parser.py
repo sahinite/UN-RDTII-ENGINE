@@ -288,6 +288,8 @@ def _build_extraction_result(
         flag_for_review=flag_for_review,
         flag_reason="; ".join(flag_reasons) if flag_reasons else None,
         non_consecutive=non_consecutive,
+        source_rerank_score=getattr(source_chunk, "rerank_score", None) if source_chunk else None,
+        source_retrieval_method=getattr(source_chunk, "retrieval_method", None) if source_chunk else None,
     )
 
     result.validate()
