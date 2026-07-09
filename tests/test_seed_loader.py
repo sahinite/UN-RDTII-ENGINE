@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from src.crawler.seed_loader import load_seed_data, normalise_title
+from src.crawler.seed_loader import canonical_pillar, load_seed_data, normalise_title
 
 _ROUND1_DB = Path("data/database/ESCAP-RDTII-2.1_ Round 1 Database.xlsx")
 
@@ -49,3 +49,47 @@ def test_unrelated_economy_does_not_borrow_singapore_seeds():
     sg = load_seed_data("SGP", "P7", round1_db_path=str(_ROUND1_DB))
     au = load_seed_data("AUS", "P7", round1_db_path=str(_ROUND1_DB))
     assert sg.known_titles != au.known_titles
+
+
+# ── Pillar-format silent-empty bug ─────────────────────────────────────────────
+# The Round 1 DB stores the pillar as a bare number ("7"); a caller that passes
+# "7" (or 7, "pillar 7") instead of "P7" used to match nothing and return empty
+# seeds silently. canonical_pillar() normalises every form to "P<n>".
+
+@pytest.mark.parametrize(
+    "form", ["7", 7, "P7", "p7", "pillar 7", "Pillar7"],
+)
+def test_pillar_forms_are_equivalent(form):
+    """Any reasonable spelling of pillar 7 must load the same seeds as 'P7'."""
+    canonical = load_seed_data("Malaysia", "P7", round1_db_path=str(_ROUND1_DB))
+    got = load_seed_data("Malaysia", form, round1_db_path=str(_ROUND1_DB))
+    assert got.known_titles == canonical.known_titles
+    assert got.known_titles, f"pillar form {form!r} loaded no seeds"
+
+
+@pytest.mark.parametrize("pillar", ["6", "7"])
+def test_malaysia_seeds_load_for_p6_and_p7(pillar):
+    """Malaysia Round 1 rows must resolve to non-empty seeds for both pillars."""
+    seed = load_seed_data("Malaysia", pillar, round1_db_path=str(_ROUND1_DB))
+    assert seed.known_titles, f"no Malaysia seeds for pillar {pillar}"
+    assert seed.known_urls, f"no Malaysia known_urls for pillar {pillar}"
+
+
+def test_malaysia_p7_includes_core_privacy_acts():
+    """The statutes the MY P7 run depends on must be title-matchable as KNOWN.
+
+    Round 1 packs the act number into the title ("... Act (Act 709)"), so match
+    on substring rather than an exact normalised title.
+    """
+    seed = load_seed_data("Malaysia", "P7", round1_db_path=str(_ROUND1_DB))
+    assert any("personal data protection act" in t for t in seed.known_titles)
+
+
+def test_canonical_pillar_normalisation():
+    """Unit-level guard for the normaliser used by the matcher."""
+    assert canonical_pillar("7") == "P7"
+    assert canonical_pillar(6) == "P6"
+    assert canonical_pillar("pillar 6") == "P6"
+    assert canonical_pillar("P6+P7") == "P6+P7"
+    assert canonical_pillar("6+7") == "P6+P7"
+    assert canonical_pillar("") == ""

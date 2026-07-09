@@ -150,10 +150,44 @@ def test_ollama_not_available_when_model_not_pulled():
 
 def test_ollama_provider_names():
     from src.mapping.providers.ollama_provider import OllamaProvider
-    assert OllamaProvider(6).provider_name == "ollama"
-    assert OllamaProvider(7).provider_name == "ollama"
-    assert "qwen" in OllamaProvider(6).model
-    assert "granite" in OllamaProvider(7).model
+    # Clear LLM_MODEL so we assert the tier DEFAULTS, not a .env override.
+    with patch.dict(os.environ, {"LLM_MODEL": ""}):
+        assert OllamaProvider(6).provider_name == "ollama"
+        assert OllamaProvider(7).provider_name == "ollama"
+        assert "qwen" in OllamaProvider(6).model
+        assert "granite" in OllamaProvider(7).model
+
+
+def test_ollama_is_reasoning_model_detection():
+    from src.mapping.providers.ollama_provider import _is_reasoning_model
+    assert _is_reasoning_model("deepseek-r1:8b")
+    assert _is_reasoning_model("qwq:32b")
+    assert not _is_reasoning_model("granite3-8b")
+    assert not _is_reasoning_model("qwen2.5:7b")
+
+
+def test_ollama_reasoning_model_gets_num_predict_headroom():
+    """Reasoning models need extra num_predict so <think> doesn't starve the JSON
+    answer; non-reasoning models keep the caller's budget unchanged."""
+    from src.mapping.providers.ollama_provider import OllamaProvider, _REASONING_THINK_HEADROOM
+    captured = {}
+
+    def _fake_post(url, json, timeout):
+        captured["payload"] = json
+        m = MagicMock()
+        m.raise_for_status = lambda: None
+        m.json.return_value = {"response": '{"found": false, "provisions": []}',
+                               "prompt_eval_count": 1, "eval_count": 1}
+        return m
+
+    with patch("src.mapping.providers.ollama_provider.requests.post", side_effect=_fake_post):
+        p = OllamaProvider(6)
+        p._model = "deepseek-r1:8b"          # reasoning
+        p.complete("s", "u", max_tokens=1000)
+        assert captured["payload"]["options"]["num_predict"] == 1000 + _REASONING_THINK_HEADROOM
+        p._model = "granite3-8b"             # non-reasoning
+        p.complete("s", "u", max_tokens=1000)
+        assert captured["payload"]["options"]["num_predict"] == 1000
 
 
 def test_anthropic_provider_name_and_model():

@@ -92,11 +92,23 @@ class Portal(BaseModel):
     fetch: Literal["pdf_endpoint", "api_versioned_pdf", "html", "html_wholedoc", "html_js", "pdf_link", "auto", "TBD"] = "TBD"
     # URLs of in-force browse indexes (used when discovery: index)
     index_urls: list[str] = Field(default_factory=list)
+    # Case-insensitive substrings that identify an act/instrument link on this
+    # portal's browse index, matched against each link's path+query (used when
+    # discovery: index). Keeps portal-shape knowledge in config, not code —
+    # e.g. Singapore SSO ["/Act/", "/SL/"], AGC LOM ["act-detail.php"], JPDP
+    # ["/akta/"]. When empty, the parser falls back to direct document links
+    # (.pdf/.doc/.docx) — a format-based default with no economy-specific tokens.
+    index_link_pattern: list[str] = Field(default_factory=list)
     # sitemap.xml URL for a JS-rendered portal with no crawlable HTML index
     # (used when discovery: sitemap) — e.g. pdpc.gov.sg
     sitemap_url: str | None = None
     # Query-string suffix to rewrite act URL to its PDF view (used when fetch: pdf_endpoint)
     pdf_view_suffix: str | None = None
+    # Optional CSS selector hint for fetch: pdf_link, used ONLY when the standard
+    # embed/iframe/anchor cascade can't find the PDF on a portal's act page. Most
+    # portals need no selector — the resolver handles <embed>, pdf.js viewers and
+    # .pdf anchors generically. Declarative escape hatch, not per-portal code.
+    pdf_link_selector: str | None = None
     # OData/JSON API base + collection (used when discovery: api / fetch: api_versioned_pdf)
     # e.g. api_base="https://api.prod.legislation.gov.au/v1", api_collection="Act"
     api_base: str | None = None
@@ -141,6 +153,14 @@ class EconomyConfig(BaseModel):
     # Optional overrides — None means use the global cascade / default
     llm_override: str | None = None
     translation_provider: _SUPPORTED_TRANSLATION_PROVIDERS | None = None
+
+    # Redirect a Round 1 seed URL to a cleaner authoritative source. Round 1 often
+    # cites stale mirrors (dead links, law-firm/NGO copies); this maps such a URL to
+    # its canonical primary (e.g. an AGC act-detail page) so the pipeline fetches
+    # the authoritative text and the output records the correct provenance. Keyed by
+    # the seed URL, valued by the replacement URL — pure config data, applied
+    # generically by discover(); no economy-specific logic lives in code.
+    seed_url_remap: dict[str, str] = Field(default_factory=dict)
 
     # ── Validators ────────────────────────────────────────────────────────────
 

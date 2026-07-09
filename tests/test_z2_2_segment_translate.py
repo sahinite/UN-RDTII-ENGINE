@@ -23,7 +23,6 @@ from src.fetcher.models import (
 )
 from src.fetcher.segmenter import extract_article_references
 from src.fetcher.translator import (
-    convert_be_years,
     normalise_law_reference,
     translate_act_title,
     translate_document,
@@ -45,35 +44,24 @@ def sg_config() -> EconomyConfig:
 
 
 @pytest.fixture
-def th_config() -> EconomyConfig:
+def my_config() -> EconomyConfig:
     return EconomyConfig.model_validate({
-        "economy_name": "Thailand",
-        "script_type": "asian",
-        "languages": ["th", "en"],
-        "be_year_conversion": True,
+        "economy_name": "Malaysia",
+        "iso_code": "MY",
+        "script_type": "latin",
+        "languages": ["ms", "en"],
         "translation_provider": "deepl",
-        "portals": [{"name": "Ratchakitcha", "url": "https://ratchakitcha.soc.go.th", "type": "primary"}],
+        "portals": [{"name": "JPDP", "url": "https://www.pdp.gov.my", "type": "primary"}],
     })
 
 
-@pytest.fixture
-def lao_config() -> EconomyConfig:
-    return EconomyConfig.model_validate({
-        "economy_name": "LaoPDR",
-        "script_type": "asian",
-        "languages": ["lo", "en"],
-        "translation_provider": "google",
-        "portals": [{"name": "LaoPDR Gov", "url": "https://www.laogov.la", "type": "primary"}],
-    })
-
-
-def _make_doc(raw_text: str = "Sample legal text.", economy: str = "TH") -> FetchedDocument:
+def _make_doc(raw_text: str = "Sample legal text.", economy: str = "MY") -> FetchedDocument:
     cost = CostLogEntry(engine="pdfplumber", pages=1, cost_usd=0.0, processing_time_ms=10.0)
     return FetchedDocument(
         source_url="https://example.com/act.pdf",
         resolved_url="https://example.com/act.pdf",
         economy=economy,
-        act_title="พระราชบัญญัติ ข้อมูลส่วนบุคคล",
+        act_title="Akta Perlindungan Data Peribadi",
         discovery_tag="KNOWN",
         archive_url="https://web.archive.org/web/2024/https://example.com/act.pdf",
         doc_type="TEXT_PDF",
@@ -83,32 +71,6 @@ def _make_doc(raw_text: str = "Sample legal text.", economy: str = "TH") -> Fetc
         section_hierarchy=[],
         cost_log_entry=cost,
     )
-
-
-# ── ST5: Buddhist Era conversion ───────────────────────────────────────────────
-
-class TestConvertBeYears:
-    def test_converts_single_be_year(self):
-        text, conversions = convert_be_years("กฎหมาย 2567")
-        assert "2024" in text
-        assert conversions == [("2567", 2024)]
-
-    def test_converts_multiple_years(self):
-        text, conversions = convert_be_years("2566 and 2567")
-        assert "2023" in text
-        assert "2024" in text
-        assert len(conversions) == 2
-
-    def test_no_be_year_unchanged(self):
-        text, conversions = convert_be_years("No year here")
-        assert text == "No year here"
-        assert conversions == []
-
-    def test_gregorian_year_not_converted(self):
-        # CE 2024 is not in the 2400–2599 range → unchanged
-        text, conversions = convert_be_years("Year 1990")
-        assert text == "Year 1990"
-        assert conversions == []
 
 
 # ── ST5: Law title normalisation ───────────────────────────────────────────────
@@ -152,8 +114,13 @@ class TestTranslateText:
         assert provider == "none"
         assert cost == 0.0
 
+    # NOTE: Argos is now the primary translator, so these DeepL/Google-cascade tests
+    # disable it (_argos_translate → None) to isolate the fallback path.
     def test_deepl_success(self):
-        with patch("src.fetcher.translator._deepl_translate", return_value="translated text"):
+        with (
+            patch("src.fetcher.translator._argos_translate", return_value=None),
+            patch("src.fetcher.translator._deepl_translate", return_value="translated text"),
+        ):
             text, provider, cost = translate_text("ข้อความ", "th")
         assert text == "translated text"
         assert provider == "deepl"
@@ -161,6 +128,7 @@ class TestTranslateText:
 
     def test_deepl_fail_google_fallback(self):
         with (
+            patch("src.fetcher.translator._argos_translate", return_value=None),
             patch("src.fetcher.translator._deepl_translate", return_value=None),
             patch("src.fetcher.translator._google_translate", return_value="google result"),
         ):
@@ -171,6 +139,7 @@ class TestTranslateText:
 
     def test_both_providers_fail(self):
         with (
+            patch("src.fetcher.translator._argos_translate", return_value=None),
             patch("src.fetcher.translator._deepl_translate", return_value=None),
             patch("src.fetcher.translator._google_translate", return_value=None),
         ):
@@ -181,6 +150,7 @@ class TestTranslateText:
 
     def test_force_google_skips_deepl(self):
         with (
+            patch("src.fetcher.translator._argos_translate", return_value=None),
             patch("src.fetcher.translator._deepl_translate") as mock_deepl,
             patch("src.fetcher.translator._google_translate", return_value="google result"),
         ):
@@ -239,38 +209,30 @@ class TestTranslateDocument:
         assert result.translation_cost_entry.cost_usd == 0.0
         assert result.be_year_conversions == []
 
-    def test_non_english_translates_layer3(self, th_config):
-        doc = _make_doc(raw_text="ข้อความภาษาไทย", economy="TH")
+    def test_non_english_translates_layer3(self, my_config):
+        doc = _make_doc(raw_text="teks undang-undang Bahasa Melayu", economy="MY")
         with (
-            patch("src.fetcher.translator.translate_text", return_value=("Thai legal text", "deepl", 0.01)),
+            patch("src.fetcher.translator.translate_text", return_value=("Malay legal text", "deepl", 0.01)),
             patch("src.fetcher.translator.translate_act_title", return_value=("Personal Data Act", 0.001)),
             patch("src.fetcher.translator.translate_keywords", return_value=([], 0.0)),
         ):
-            result = translate_document(doc, th_config)
+            result = translate_document(doc, my_config)
 
-        assert result.verbatim_original == "ข้อความภาษาไทย"
-        assert result.translated_text == "Thai legal text"
+        assert result.verbatim_original == "teks undang-undang Bahasa Melayu"
+        assert result.translated_text == "Malay legal text"
 
-    def test_be_year_conversion_applied(self, th_config):
-        doc = _make_doc(raw_text="กฎหมาย พ.ศ. 2567 ฉบับที่ 1", economy="TH")
-        with patch("src.fetcher.translator.translate_text", return_value=("Law 2024 No. 1", "deepl", 0.0)):
-            result = translate_document(doc, th_config)
-
-        assert len(result.be_year_conversions) > 0
-        assert result.be_year_conversions[0] == ("2567", 2024)
-
-    def test_verbatim_original_always_preserved(self, th_config):
-        original = "ข้อมูลส่วนบุคคล"
-        doc = _make_doc(raw_text=original, economy="TH")
+    def test_verbatim_original_always_preserved(self, my_config):
+        original = "data peribadi"
+        doc = _make_doc(raw_text=original, economy="MY")
         with patch("src.fetcher.translator.translate_text", return_value=("personal data", "google", 0.0)):
-            result = translate_document(doc, th_config)
+            result = translate_document(doc, my_config)
 
         assert result.verbatim_original == original
 
-    def test_long_text_chunked(self, lao_config):
-        long_text = "ຂໍ້ " * 60_000  # > 100_000 chars
-        doc = _make_doc(raw_text=long_text, economy="LA")
-        doc.act_title = "ກົດໝາຍ"
+    def test_long_text_chunked(self, my_config):
+        long_text = "data " * 60_000  # > 100_000 chars
+        doc = _make_doc(raw_text=long_text, economy="MY")
+        doc.act_title = "Akta Data"
 
         call_count = 0
 
@@ -280,37 +242,39 @@ class TestTranslateDocument:
             return ("chunk translated", "google", 0.0)
 
         with patch("src.fetcher.translator.translate_text", side_effect=fake_translate):
-            result = translate_document(doc, lao_config)
+            result = translate_document(doc, my_config)
 
         # Should have been called at least twice (text > 100_000 chars)
         assert call_count >= 2
         assert "chunk translated" in result.translated_text
 
-    def test_translation_cost_entry_populated(self, th_config):
-        doc = _make_doc(raw_text="ข้อความ", economy="TH")
+    def test_translation_cost_entry_populated(self, my_config):
+        doc = _make_doc(raw_text="teks Melayu", economy="MY")
         with patch("src.fetcher.translator.translate_text", return_value=("text", "deepl", 0.002)):
-            result = translate_document(doc, th_config)
+            result = translate_document(doc, my_config)
 
         assert isinstance(result.translation_cost_entry, TranslationCostEntry)
-        assert result.translation_cost_entry.source_language == "th"
+        assert result.translation_cost_entry.source_language == "ms"
         assert result.translation_cost_entry.chars_translated > 0
 
-    def test_keywords_layer1_translated(self, th_config):
-        doc = _make_doc(economy="TH")
+    def test_keywords_layer1_translated(self, my_config):
+        doc = _make_doc(economy="MY")
         with (
             patch("src.fetcher.translator.translate_text", return_value=("x", "deepl", 0.0)),
         ):
-            result = translate_document(doc, th_config, taxonomy_keywords=["ความเป็นส่วนตัว"])
+            result = translate_document(doc, my_config, taxonomy_keywords=["privasi"])
 
         assert len(result.keywords_translated) == 1
 
-    def test_google_provider_forced(self, lao_config):
-        doc = _make_doc(raw_text="ຂໍ້ຄວາມ", economy="LA")
+    def test_google_provider_forced(self, my_config):
+        my_config.translation_provider = "google"
+        doc = _make_doc(raw_text="teks Melayu", economy="MY")
         with (
+            patch("src.fetcher.translator._argos_translate", return_value=None),
             patch("src.fetcher.translator._deepl_translate") as mock_deepl,
-            patch("src.fetcher.translator._google_translate", return_value="lao text"),
+            patch("src.fetcher.translator._google_translate", return_value="malay text"),
         ):
-            result = translate_document(doc, lao_config)
+            result = translate_document(doc, my_config)
 
         mock_deepl.assert_not_called()
 
@@ -417,3 +381,94 @@ class TestDataclassIntegrity:
         assert ref.act_title == "PDPA"
         assert ref.part == "PART I"
         assert ref.article_number == "12"
+
+
+class TestGoogleTranslateAsyncFallback:
+    """googletrans >= 4.0 made translate() async — _google_translate must await the
+    returned coroutine instead of crashing with 'coroutine has no attribute text'."""
+
+    def test_awaits_coroutine_result(self):
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        async def _fake_translate(text, src, dest):
+            r = MagicMock()
+            r.text = "translated english"
+            return r
+
+        fake_translator = MagicMock()
+        fake_translator.translate = _fake_translate
+        fake_mod = types.ModuleType("googletrans")
+        fake_mod.Translator = MagicMock(return_value=fake_translator)
+
+        with patch.dict(sys.modules, {"googletrans": fake_mod}):
+            from src.fetcher.translator import _google_translate
+            out = _google_translate("teks bahasa melayu", "ms")
+        assert out == "translated english"
+
+    def test_sync_result_still_supported(self):
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        r = MagicMock()
+        r.text = "sync english"
+        fake_translator = MagicMock()
+        fake_translator.translate = MagicMock(return_value=r)  # 3.x sync
+        fake_mod = types.ModuleType("googletrans")
+        fake_mod.Translator = MagicMock(return_value=fake_translator)
+
+        with patch.dict(sys.modules, {"googletrans": fake_mod}):
+            from src.fetcher.translator import _google_translate
+            out = _google_translate("teks", "ms")
+        assert out == "sync english"
+
+
+class TestArgosPrimaryTranslation:
+    """Argos Translate is the primary (offline, free); DeepL is the fallback."""
+
+    def test_lang_root_normalisation(self):
+        from src.fetcher.translator import _lang_root
+        assert _lang_root("ms") == "ms"
+        assert _lang_root("ms-MY") == "ms"
+        assert _lang_root("MS_my") == "ms"
+
+    def test_translate_text_uses_argos_first(self):
+        import src.fetcher.translator as tr
+        with (
+            patch.object(tr, "_argos_translate", return_value="english text") as argos,
+            patch.object(tr, "_deepl_translate") as deepl,
+        ):
+            out, provider, cost = tr.translate_text("teks melayu", "ms")
+        assert (out, provider, cost) == ("english text", "argos", 0.0)
+        argos.assert_called_once()
+        deepl.assert_not_called()  # argos succeeded → DeepL never tried
+
+    def test_argos_failure_falls_back_to_deepl(self):
+        import src.fetcher.translator as tr
+        with (
+            patch.object(tr, "_argos_translate", return_value=None),      # argos fails
+            patch.object(tr, "_deepl_translate", return_value="via deepl") as deepl,
+        ):
+            out, provider, _ = tr.translate_text("teks melayu", "ms")
+        assert out == "via deepl" and provider == "deepl"
+        deepl.assert_called_once()
+
+    def test_argos_then_deepl_then_google(self):
+        import src.fetcher.translator as tr
+        with (
+            patch.object(tr, "_argos_translate", return_value=None),
+            patch.object(tr, "_deepl_translate", return_value=None),
+            patch.object(tr, "_google_translate", return_value="via google") as g,
+        ):
+            out, provider, _ = tr.translate_text("teks", "ms")
+        assert out == "via google" and provider == "google"
+        g.assert_called_once()
+
+    def test_english_source_skips_all_providers(self):
+        import src.fetcher.translator as tr
+        with patch.object(tr, "_argos_translate") as argos:
+            out, provider, _ = tr.translate_text("already english", "en")
+        assert provider == "none"
+        argos.assert_not_called()

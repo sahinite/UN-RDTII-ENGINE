@@ -170,6 +170,79 @@ def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
         return ""
 
 
+# pdf.js viewers wrap the real PDF in a ?file=<pdf> query param, e.g.
+# "pdfjs/web/viewer.html?file=../../../ilims/.../Act 854.pdf&embedded=true".
+_PDF_VIEWER_FILE_RE = re.compile(r"[?&]file=([^&]+)", re.IGNORECASE)
+
+
+def _pdf_candidate(raw: str | None, base_url: str) -> str | None:
+    """Turn one embed/anchor value into an absolute PDF URL, or None.
+
+    Unwraps a pdf.js `?file=` param, resolves `../` relative paths against the
+    page URL, and %-encodes spaces (AGC filenames contain literal spaces). Returns
+    the URL only if it actually points at a .pdf.
+    """
+    import urllib.parse
+    if not raw:
+        return None
+    cand = raw.strip()
+    m = _PDF_VIEWER_FILE_RE.search(cand)
+    if m:
+        cand = urllib.parse.unquote(m.group(1))
+    abs_url = urllib.parse.urljoin(base_url, cand)
+    if ".pdf" not in urllib.parse.urlparse(abs_url).path.lower():
+        return None
+    # Re-encode spaces without double-encoding existing %xx (% is in `safe`).
+    return urllib.parse.quote(abs_url, safe=":/?&=#%+")
+
+
+def _resolve_pdf_link(html_bytes: bytes, base_url: str, portal) -> str | None:
+    """Standard HTML→PDF resolver for `fetch: pdf_link`.
+
+    Many government portals publish an act as an HTML landing page that *embeds or
+    links* the PDF (rather than serving it at a rewritable URL). They all share one
+    shape, so a single resolver handles every such portal — new ones need no code,
+    only `fetch: pdf_link`. Resolution cascade (first hit wins):
+
+      1. portal.pdf_link_selector (CSS) — declarative hint for stubborn pages.
+      2. <embed>/<object>/<iframe> whose src is a PDF or a pdf.js viewer —
+         covers JPDP <embed> and AGC LOM pdf.js (?file=).
+      3. First <a href> ending in .pdf — covers "Download PDF" links (LHDN).
+
+    Returns an absolute PDF URL, or None if the page embeds/links no PDF.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:  # pragma: no cover - bs4 is a hard dep of html_extractor
+        return None
+    soup = BeautifulSoup(html_bytes, "html.parser")
+
+    # Lazy-loaded embeds put the URL in data-src, not src (AGC LOM's pdf.js
+    # iframes are class="lazy" with data-src=...), so check both.
+    def _src_of(tag) -> str | None:
+        return (tag.get("src") or tag.get("data-src") or tag.get("data")
+                or tag.get("href"))
+
+    selector = getattr(portal, "pdf_link_selector", None)
+    if selector:
+        el = soup.select_one(selector)
+        if el is not None:
+            got = _pdf_candidate(_src_of(el), base_url)
+            if got:
+                return got
+
+    for tag in soup.find_all(["embed", "iframe", "object"]):
+        got = _pdf_candidate(_src_of(tag), base_url)
+        if got:
+            return got
+
+    for a in soup.find_all("a", href=True):
+        got = _pdf_candidate(a["href"], base_url)
+        if got:
+            return got
+    return None
+
+
 def _resolve_versioned_pdf_url(act_url: str, portal) -> str | None:
     """Build the dated PDF URL for an api_versioned_pdf portal, or None if it
     can't be resolved (caller then downloads the original URL and lets detect_type
@@ -438,6 +511,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     single_act_fetch = False
     auto_render = False
     force_render = False
+    resolve_pdf_link = False
     portal = _find_portal_for_url(fetch_url, economy_config)
     if portal is not None:
         fetch_strategy = getattr(portal, "fetch", "TBD")
@@ -487,6 +561,13 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # a content-less SPA shell wrapped in a large menu reads as SSR and the
             # render is skipped. html_js renders unconditionally before extraction.
             force_render = True
+        elif fetch_strategy == "pdf_link":
+            # Portal whose act page embeds/links a PDF (JPDP <embed>, AGC pdf.js,
+            # LHDN .pdf anchor). We download the HTML, resolve the PDF URL from it
+            # (see HTML branch below), then fetch that PDF. The resolved PDF is a
+            # single act, not a consolidated volume — skip segmentation.
+            single_act_fetch = True
+            resolve_pdf_link = True
 
     raw_bytes, content_type, resolved_url = download(fetch_url)
 
@@ -505,6 +586,30 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         raise UnsupportedDocTypeError(zone1_result.url, doc_type)
 
     if doc_type == "HTML":
+        # fetch: pdf_link — the act text lives in a PDF the page embeds/links, not
+        # in the HTML. Resolve that PDF URL, download it, and route to the PDF path.
+        # Falls through to HTML extraction only if no PDF is found (best effort).
+        if resolve_pdf_link:
+            pdf_url = _resolve_pdf_link(raw_bytes, resolved_url, portal)
+            if pdf_url:
+                logger.info({"event": "pdf_link_resolved", "page_url": resolved_url,
+                             "pdf_url": pdf_url, "economy": zone1_result.economy})
+                pdf_bytes, pdf_ctype, pdf_resolved = download(pdf_url)
+                pdf_type = detect_type(pdf_bytes, pdf_ctype)
+                if pdf_type in ("TEXT_PDF", "SCANNED_PDF"):
+                    zone1_pdf = Zone1Result(
+                        url=pdf_resolved,
+                        economy=zone1_result.economy,
+                        act_title=zone1_result.act_title,
+                        discovery_tag=zone1_result.discovery_tag,
+                        archive_url=zone1_result.archive_url,
+                    )
+                    return _extract_single_pdf(pdf_bytes, pdf_type, zone1_pdf, economy_config)
+                logger.warning({"event": "pdf_link_not_pdf", "pdf_url": pdf_url,
+                                "doc_type": pdf_type, "economy": zone1_result.economy})
+            else:
+                logger.warning({"event": "pdf_link_unresolved", "page_url": resolved_url,
+                                "economy": zone1_result.economy})
         # fetch: html_js — this portal's pages always need JS; render unconditionally.
         if force_render:
             rendered = _render_spa_sync(resolved_url)
@@ -565,15 +670,28 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
                 results.append(doc)
             return results
 
-        if doc_type == "TEXT_PDF":
-            try:
-                return extract_text_pdf(raw_bytes, zone1_result_resolved, economy_config)
-            except ReclassifyToScannedError:
-                return _try_ocr(raw_bytes, zone1_result_resolved, economy_config)
-
-        return _try_ocr(raw_bytes, zone1_result_resolved, economy_config)
+        return _extract_single_pdf(raw_bytes, doc_type, zone1_result_resolved, economy_config)
 
     raise UnsupportedDocTypeError(zone1_result.url, doc_type)
+
+
+def _extract_single_pdf(
+    raw_bytes: bytes,
+    doc_type: "DocType",
+    zone1_result: Zone1Result,
+    economy_config: "EconomyConfig",
+) -> FetchedDocument:
+    """Extract one non-volume act PDF: text-layer first, OCR on failure/scan.
+
+    Shared by the direct-PDF path and the fetch: pdf_link path so both handle
+    text-vs-scanned identically.
+    """
+    if doc_type == "TEXT_PDF":
+        try:
+            return extract_text_pdf(raw_bytes, zone1_result, economy_config)
+        except ReclassifyToScannedError:
+            return _try_ocr(raw_bytes, zone1_result, economy_config)
+    return _try_ocr(raw_bytes, zone1_result, economy_config)
 
 
 def _try_ocr(
@@ -582,23 +700,37 @@ def _try_ocr(
     economy_config: "EconomyConfig",
     is_segment: bool = False,
 ) -> FetchedDocument:
-    """Run OCR Stage 1; on CER failure automatically escalates to Stage 2."""
+    """Run OCR Stage 1; escalate to Stage 2 (cloud) on quality failure OR any
+    Stage 1 engine failure — a missing local language pack (e.g. Tesseract has no
+    `msa` data) or a missing binary must fall through to Azure DI / Mistral, not
+    fail the document."""
     try:
         return extract_ocr_stage1(raw_bytes, zone1_result, economy_config, is_segment=is_segment)
     except OCRQualityError as exc:
+        stage1_cer, stage1_engine = exc.cer, exc.engine_used
         logger.info({
             "event": "ocr_stage1_quality_failed_escalating",
-            "stage1_cer": round(exc.cer, 4),
-            "stage1_engine": exc.engine_used,
+            "stage1_cer": round(stage1_cer, 4),
+            "stage1_engine": stage1_engine,
             "url": zone1_result.url,
             "economy": zone1_result.economy,
         })
-        from src.ocr.processor import run_ocr_stage2
-        return run_ocr_stage2(
-            raw_bytes=raw_bytes,
-            zone1_result=zone1_result,
-            economy_config=economy_config,
-            stage1_cer=exc.cer,
-            stage1_engine=exc.engine_used,
-            is_segment=is_segment,
-        )
+    except Exception as exc:
+        # Stage 1 could not run at all (missing language pack / tesseract binary /
+        # image preprocessing crash). Cloud Stage 2 is exactly the fallback for this.
+        stage1_cer, stage1_engine = 1.0, "stage1_unavailable"
+        logger.warning({
+            "event": "ocr_stage1_engine_failed_escalating",
+            "error": str(exc)[:300],
+            "url": zone1_result.url,
+            "economy": zone1_result.economy,
+        })
+    from src.ocr.processor import run_ocr_stage2
+    return run_ocr_stage2(
+        raw_bytes=raw_bytes,
+        zone1_result=zone1_result,
+        economy_config=economy_config,
+        stage1_cer=stage1_cer,
+        stage1_engine=stage1_engine,
+        is_segment=is_segment,
+    )

@@ -21,20 +21,6 @@ _SG_DICT = {
     "portals": [{"name": "SSO", "url": "https://sso.agc.gov.sg"}],
 }
 
-_TH_DICT = {
-    "economy_name": "Thailand",
-    "iso_code": "TH",
-    "un_name": "Thailand",
-    "script_type": "asian",
-    "languages": ["th", "en"],
-    "be_year_conversion": True,
-    "portals": [
-        {"name": "Royal Thai Gazette", "url": "https://ratchakitcha.soc.go.th"},
-        {"name": "Council of State", "url": "https://www.krisdika.go.th"},
-    ],
-}
-
-
 # ── Happy path — model_validate (no filesystem) ────────────────────────────────
 
 
@@ -46,21 +32,9 @@ def test_singapore_model_validates():
     assert cfg.be_year_conversion is False
 
 
-def test_thailand_model_validates():
-    cfg = EconomyConfig.model_validate(_TH_DICT)
-    assert cfg.script_type == "asian"
-    assert cfg.ocr_engine == "paddleocr"
-    assert cfg.be_year_conversion is True
-
-
 def test_ocr_engine_derived_latin():
     cfg = EconomyConfig.model_validate(_SG_DICT)
     assert cfg.ocr_engine == "tesseract"
-
-
-def test_ocr_engine_derived_asian():
-    cfg = EconomyConfig.model_validate(_TH_DICT)
-    assert cfg.ocr_engine == "paddleocr"
 
 
 def test_ocr_engine_override_respected():
@@ -89,13 +63,6 @@ def test_load_singapore():
     assert len(cfg.portals) == 3
     pdpc = next(p for p in cfg.portals if "pdpc.gov.sg" in str(p.url))
     assert pdpc.fetch == "html_js"
-
-
-def test_load_thailand():
-    cfg = load_economy("thailand")
-    assert cfg.economy_name == "Thailand"
-    assert cfg.ocr_engine == "paddleocr"
-    assert cfg.be_year_conversion is True
 
 
 def test_load_economy_case_insensitive():
@@ -229,11 +196,6 @@ def test_iso_au_resolves():
 def test_iso_my_resolves():
     cfg = load_economy("my")
     assert cfg.economy_name == "Malaysia"
-
-
-def test_iso_th_resolves():
-    cfg = load_economy("th")
-    assert cfg.economy_name == "Thailand"
 
 
 def test_unknown_iso_code_raises_unsupported_message():

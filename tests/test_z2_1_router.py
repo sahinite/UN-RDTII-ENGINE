@@ -32,18 +32,6 @@ def sg_config() -> EconomyConfig:
 
 
 @pytest.fixture
-def th_config() -> EconomyConfig:
-    return EconomyConfig.model_validate({
-        "economy_name": "Thailand",
-        "script_type": "asian",
-        "languages": ["th", "en"],
-        "be_year_conversion": True,
-        "translation_provider": "deepl",
-        "portals": [{"name": "Gazette", "url": "https://ratchakitcha.soc.go.th", "type": "primary"}],
-    })
-
-
-@pytest.fixture
 def sg_zone1() -> Zone1Result:
     return Zone1Result(
         url="https://sso.agc.gov.sg/Act/PDPA2012",
@@ -51,17 +39,6 @@ def sg_zone1() -> Zone1Result:
         act_title="Personal Data Protection Act 2012",
         discovery_tag="KNOWN",
         archive_url="https://web.archive.org/web/2024/https://sso.agc.gov.sg/Act/PDPA2012",
-    )
-
-
-@pytest.fixture
-def th_zone1() -> Zone1Result:
-    return Zone1Result(
-        url="https://ratchakitcha.soc.go.th/act.pdf",
-        economy="TH",
-        act_title="Thai Personal Data Protection Act",
-        discovery_tag="KNOWN",
-        archive_url="https://web.archive.org/web/2024/https://ratchakitcha.soc.go.th/act.pdf",
     )
 
 
@@ -379,10 +356,6 @@ class TestOcrStage1:
     def test_sg_yaml_selects_tesseract(self, sg_config):
         from src.fetcher.extractors.ocr_stage1 import get_ocr_engine
         assert get_ocr_engine(sg_config) == "tesseract"
-
-    def test_th_yaml_selects_paddleocr(self, th_config):
-        from src.fetcher.extractors.ocr_stage1 import get_ocr_engine
-        assert get_ocr_engine(th_config) == "paddleocr"
 
     def test_missing_ocr_engine_raises_config_error(self):
         from src.fetcher.extractors.ocr_stage1 import ConfigError, get_ocr_engine
@@ -743,10 +716,6 @@ class TestOcrInternals:
         assert TESSERACT_LANG_MAP["en"] == "eng"
         assert TESSERACT_LANG_MAP["ms"] == "msa"
 
-    def test_paddleocr_lang_map_thai(self):
-        from src.fetcher.extractors.ocr_stage1 import PADDLEOCR_LANG_MAP
-        assert PADDLEOCR_LANG_MAP["th"] == "th"
-
     def test_run_tesseract_mocked(self):
         """Tests run_tesseract using dict output (no pandas dependency)."""
         import types
@@ -817,16 +786,6 @@ class TestOcrInternals:
         with patch.object(ocr_stage1, "run_tesseract", return_value=("PNG content text extracted.", 0.01)):
             doc = ocr_stage1.extract_ocr_stage1(png_bytes, sg_zone1, sg_config)
         assert doc.doc_type == "IMAGE"
-
-    def test_paddleocr_path_selected_for_thai(self, th_zone1, th_config):
-        from src.fetcher.extractors import ocr_stage1
-        with (
-            patch.object(ocr_stage1, "pdf_to_images", return_value=[b"PNG"]),
-            patch.object(ocr_stage1, "run_paddleocr", return_value=("Thai text content extracted from document.", 0.01)),
-        ):
-            doc = ocr_stage1.extract_ocr_stage1(b"%PDF-1.4 fake", th_zone1, th_config)
-        assert doc.extraction_method == "paddleocr"
-
 
 class TestHtmlExtractorBranches:
     def test_detect_encoding_from_content_type_header(self):
@@ -993,10 +952,6 @@ class TestSegmenterInternals:
         assert _matches_act_header("Ordinance 5 of 1985")
         assert not _matches_act_header("Section 26. Interpretation")
 
-    def test_matches_act_header_thai(self):
-        from src.fetcher.segmenter import _matches_act_header
-        assert _matches_act_header("พระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล")
-
 
 class TestModelsToDict:
     def test_to_dict_excludes_raw_text(self):
@@ -1033,7 +988,7 @@ class TestModelsToDict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Deep coverage: pdf_to_images, run_paddleocr, segmenter merge, router branches
+# Deep coverage: pdf_to_images, segmenter merge, router branches
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestPdfToImages:
@@ -1106,85 +1061,6 @@ class TestPdfToImages:
                 ocr_stage1.run_tesseract(b"PNG", lang="eng")
 
 
-class TestRunPaddleOCR:
-    def test_run_paddleocr_returns_text_and_cer(self):
-        import types
-        from src.fetcher.extractors import ocr_stage1
-
-        # Clear any cached instance
-        ocr_stage1._paddle_instance.clear()
-
-        mock_paddle_cls = MagicMock()
-        mock_paddle_inst = MagicMock()
-        mock_paddle_inst.ocr.return_value = [
-            [
-                [[[0, 0]], ("Personal data protection act content", 0.95)],
-                [[[0, 10]], ("Section 26 interpretation clause", 0.92)],
-            ]
-        ]
-        mock_paddle_cls.return_value = mock_paddle_inst
-
-        paddle_mod = types.ModuleType("paddleocr")
-        paddle_mod.PaddleOCR = mock_paddle_cls
-
-        with patch.dict("sys.modules", {"paddleocr": paddle_mod}):
-            text, cer = ocr_stage1.run_paddleocr(b"PNG", lang="th")
-
-        assert "Personal data" in text
-        assert 0.0 <= cer < 0.15  # cer = 1 - 0.935
-
-    def test_run_paddleocr_runtime_error_raises_dependency(self):
-        import types
-        from src.fetcher.extractors import ocr_stage1
-        from src.fetcher.extractors.ocr_stage1 import DependencyError
-
-        ocr_stage1._paddle_instance.clear()
-        mock_paddle_cls = MagicMock(side_effect=RuntimeError("model not found"))
-        paddle_mod = types.ModuleType("paddleocr")
-        paddle_mod.PaddleOCR = mock_paddle_cls
-
-        with patch.dict("sys.modules", {"paddleocr": paddle_mod}):
-            with pytest.raises(DependencyError, match="PaddleOCR model missing"):
-                ocr_stage1.run_paddleocr(b"PNG", lang="zh")
-
-    def test_run_paddleocr_import_error_raises_dependency(self):
-        import sys
-        from src.fetcher.extractors import ocr_stage1
-        from src.fetcher.extractors.ocr_stage1 import DependencyError
-
-        ocr_stage1._paddle_instance.clear()
-        # Remove paddleocr from sys.modules to force ImportError
-        with patch.dict("sys.modules", {"paddleocr": None}):
-            with pytest.raises((DependencyError, ImportError)):
-                ocr_stage1.run_paddleocr(b"PNG", lang="ms")
-
-    def test_run_paddleocr_cached_instance_reused(self):
-        import types
-        from src.fetcher.extractors import ocr_stage1
-
-        ocr_stage1._paddle_instance.clear()
-        mock_inst = MagicMock()
-        mock_inst.ocr.return_value = []
-        ocr_stage1._paddle_instance["en_cached"] = mock_inst
-
-        # Should use cached instance without calling PaddleOCR()
-        text, cer = ocr_stage1.run_paddleocr(b"PNG", lang="en_cached")
-        mock_inst.ocr.assert_called_once()
-
-    def test_run_paddleocr_empty_result_returns_full_cer(self):
-        import types
-        from src.fetcher.extractors import ocr_stage1
-
-        ocr_stage1._paddle_instance.clear()
-        mock_inst = MagicMock()
-        mock_inst.ocr.return_value = []  # empty result
-        ocr_stage1._paddle_instance["empty_lang"] = mock_inst
-
-        text, cer = ocr_stage1.run_paddleocr(b"PNG", lang="empty_lang")
-        assert text == ""
-        assert cer == 1.0
-
-
 class TestRouterBranches:
     def test_download_request_error_raises_download_error(self, sg_zone1):
         import httpx
@@ -1213,7 +1089,7 @@ class TestRouterBranches:
         from src.fetcher.models import ActSegment
 
         fake_seg = ActSegment(
-            segment_index=0, act_title="Thai Act", start_page=0, end_page=10,
+            segment_index=0, act_title="Test Act", start_page=0, end_page=10,
             raw_bytes=scanned_pdf_bytes, economy="SG", source_url=sg_zone1.url,
         )
         with (
@@ -1314,3 +1190,93 @@ class TestSegmenterMergeAndFallback:
             )
         assert 0 in boundaries
         assert len(boundaries) >= 2  # page 0 and page 2 match "Custom Law N"
+
+
+# ── fetch: pdf_link resolver (standardized HTML→PDF) ───────────────────────────
+# One generic resolver serves every portal that publishes an act as an HTML page
+# embedding/linking a PDF (JPDP <embed>, AGC LOM pdf.js data-src, LHDN .pdf
+# anchor). New such portals need only `fetch: pdf_link` — no per-portal code.
+
+class _Portal:
+    def __init__(self, pdf_link_selector=None):
+        self.pdf_link_selector = pdf_link_selector
+
+
+class TestResolvePdfLink:
+    def test_embed_direct_pdf(self):
+        """JPDP shape: <embed> pointing straight at a wp-content .pdf."""
+        from src.fetcher.router import _resolve_pdf_link
+        html = (b'<html><body><embed '
+                b'src="https://x.gov.my/wp-content/uploads/2024/08/code.pdf">'
+                b'</body></html>')
+        got = _resolve_pdf_link(html, "https://x.gov.my/en/akta/code/", _Portal())
+        assert got == "https://x.gov.my/wp-content/uploads/2024/08/code.pdf"
+
+    def test_pdfjs_lazy_data_src_with_relative_path_and_space(self):
+        """AGC shape: lazy pdf.js iframe, data-src, ../ path, space in filename."""
+        from src.fetcher.router import _resolve_pdf_link
+        html = (b'<html><body><iframe class="lazy" '
+                b'data-src="pdfjs/web/viewer.html?file=../../../ilims/upload/Act 854.pdf&embedded=true">'
+                b'</iframe></body></html>')
+        got = _resolve_pdf_link(html, "https://lom.agc.gov.my/act-detail.php?act=854", _Portal())
+        assert got == "https://lom.agc.gov.my/ilims/upload/Act%20854.pdf"
+
+    def test_anchor_pdf_fallback(self):
+        """LHDN shape: a 'Download PDF' anchor when there is no embed."""
+        from src.fetcher.router import _resolve_pdf_link
+        html = (b'<html><body><a href="/media/x/act-53.pdf">Download</a></body></html>')
+        got = _resolve_pdf_link(html, "https://www.hasil.gov.my/en/legislation/act/", _Portal())
+        assert got == "https://www.hasil.gov.my/media/x/act-53.pdf"
+
+    def test_selector_hint_takes_priority(self):
+        """A declared pdf_link_selector wins over the generic cascade."""
+        from src.fetcher.router import _resolve_pdf_link
+        html = (b'<html><body>'
+                b'<embed src="https://x.gov.my/wrong.pdf">'
+                b'<a class="dl" href="https://x.gov.my/right.pdf">PDF</a>'
+                b'</body></html>')
+        got = _resolve_pdf_link(html, "https://x.gov.my/", _Portal(pdf_link_selector="a.dl"))
+        assert got == "https://x.gov.my/right.pdf"
+
+    def test_no_pdf_returns_none(self):
+        """A page with no embedded/linked PDF resolves to None (HTML fallback)."""
+        from src.fetcher.router import _resolve_pdf_link
+        html = b'<html><body><a href="/other-page">More</a></body></html>'
+        assert _resolve_pdf_link(html, "https://x.gov.my/", _Portal()) is None
+
+
+class TestOcrEngineFailureEscalation:
+    """A Stage 1 engine failure (missing language pack / binary), not just a CER
+    quality failure, must escalate to Stage 2 cloud OCR — never fail the document."""
+
+    def _zone1(self):
+        return Zone1Result(url="https://x.gov.my/act.pdf", economy="MY",
+                           act_title="Act 563", discovery_tag="KNOWN", archive_url="")
+
+    def test_missing_language_pack_escalates_to_stage2(self):
+        from src.fetcher import router
+        sentinel = object()
+        # Simulate Tesseract's "Failed loading language 'msa'" crash.
+        with (
+            patch.object(router, "extract_ocr_stage1",
+                         side_effect=RuntimeError("Failed loading language 'msa'")),
+            patch("src.ocr.processor.run_ocr_stage2", return_value=sentinel) as mock_s2,
+        ):
+            out = router._try_ocr(b"%PDF-1.4 scanned", self._zone1(), MagicMock())
+        assert out is sentinel
+        assert mock_s2.call_args.kwargs["stage1_engine"] == "stage1_unavailable"
+        assert mock_s2.call_args.kwargs["stage1_cer"] == 1.0
+
+    def test_quality_failure_still_escalates_with_real_cer(self):
+        from src.fetcher import router
+        from src.fetcher.extractors.ocr_stage1 import OCRQualityError
+        sentinel = object()
+        with (
+            patch.object(router, "extract_ocr_stage1",
+                         side_effect=OCRQualityError(cer=0.42, engine_used="tesseract")),
+            patch("src.ocr.processor.run_ocr_stage2", return_value=sentinel) as mock_s2,
+        ):
+            out = router._try_ocr(b"%PDF-1.4", self._zone1(), MagicMock())
+        assert out is sentinel
+        assert mock_s2.call_args.kwargs["stage1_cer"] == 0.42
+        assert mock_s2.call_args.kwargs["stage1_engine"] == "tesseract"

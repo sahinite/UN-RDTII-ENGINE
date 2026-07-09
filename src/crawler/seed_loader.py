@@ -54,11 +54,31 @@ def _normalise_economy(raw: str) -> str:
     return _ECONOMY_ALIASES.get(raw.lower().strip(), raw.strip().upper()[:2])
 
 
+def canonical_pillar(target) -> str:
+    """Normalise any caller-supplied pillar to canonical 'P<n>' (or 'P6+P7').
+
+    Accepts every form the pipeline and callers pass in the wild: 7, "7", "P7",
+    "p7", "pillar 7", "Pillar7", and combined "P6+P7" / "6+7". Returns "" for a
+    blank/unparseable value. This is what makes seed loading generic — a caller
+    that passes "7" instead of "P7" must not silently get zero seeds.
+    """
+    t = str(target or "").strip().lower()
+    if not t:
+        return ""
+    if "+" in t:  # combined pillars, e.g. "p6+p7" / "6 + 7"
+        nums = re.findall(r"\d+", t)
+        if nums:
+            return "+".join(f"P{int(n)}" for n in nums)
+    m = re.search(r"\d+", t)
+    return f"P{int(m.group())}" if m else t.upper()
+
+
 def _pillar_matches(raw_pillar: str, target: str) -> bool:
-    if raw_pillar.lower().strip() in _PILLAR_MATCH.get(target, frozenset()):
+    canon = canonical_pillar(target)
+    if raw_pillar.lower().strip() in _PILLAR_MATCH.get(canon, frozenset()):
         return True
-    # Generic fallback for any pillar not in the static map (e.g. P8, P9)
-    m = re.match(r"^P(\d+)$", target, re.IGNORECASE)
+    # Generic fallback for any single pillar not in the static map (e.g. P8, P9)
+    m = re.match(r"^P(\d+)$", canon)
     if m:
         n = m.group(1)
         generic = {f"p{n}", n, f"pillar {n}", f"pillar{n}"}

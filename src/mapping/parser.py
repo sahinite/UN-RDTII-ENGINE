@@ -76,8 +76,24 @@ def parse_llm_response(
     return results
 
 
+# Reasoning models (deepseek-r1, qwen3, …) prepend chain-of-thought wrapped in
+# <think>…</think> before the JSON answer. Braces inside that reasoning corrupt the
+# greedy {…} match below, so strip it first. Provider-agnostic — any model in the
+# cascade that "thinks out loud" is handled here, not per-provider.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove <think>…</think> reasoning; the answer follows the final close tag."""
+    lower = text.lower()
+    if "</think>" in lower:
+        text = text[lower.rfind("</think>") + len("</think>"):]
+    return _THINK_BLOCK_RE.sub("", text).strip()
+
+
 def _extract_json(raw_text: str) -> dict:
-    """Handles plain JSON, markdown fences, and noisy prose wrapping."""
+    """Handles plain JSON, markdown fences, reasoning blocks, and noisy prose."""
+    raw_text = _strip_reasoning(raw_text)
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError:

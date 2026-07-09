@@ -175,6 +175,35 @@ def test_invalid_json_raises_parse_error():
         _extract_json("this is not json at all!!!")
 
 
+def test_reasoning_model_think_block_stripped():
+    """deepseek-r1 / qwq wrap chain-of-thought in <think>…</think> — braces inside
+    the reasoning must not corrupt JSON extraction."""
+    from src.mapping.parser import _extract_json
+
+    r1 = (
+        '<think>\nAnalyse indicator. Output should be {"found": true} shaped. '
+        'The section says {retention}. Let me decide...\n</think>\n'
+        '```json\n{"found": true, "provisions": [{"indicator_id": "P7-I3"}]}\n```'
+    )
+    result = _extract_json(r1)
+    assert result["found"] is True
+    assert result["provisions"][0]["indicator_id"] == "P7-I3"
+
+
+def test_think_block_without_fence():
+    from src.mapping.parser import _extract_json
+
+    r1 = '<think>reasoning with a { stray brace</think>{"found": false, "provisions": []}'
+    assert _extract_json(r1)["found"] is False
+
+
+def test_strip_reasoning_keeps_answer_after_last_close_tag():
+    from src.mapping.parser import _strip_reasoning
+
+    assert _strip_reasoning('<think>a{b}c</think>  {"x": 1}') == '{"x": 1}'
+    assert _strip_reasoning('no think tags here') == 'no think tags here'
+
+
 def test_non_consecutive_provisions_expanded_to_two_rows():
     from src.mapping.parser import expand_non_consecutive, parse_llm_response
 

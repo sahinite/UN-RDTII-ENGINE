@@ -7,11 +7,104 @@ un_name: "Malaysia"
 script_type: latin
 languages: [ms, en]
 translation_provider: deepl
+# Pillar 6 & 7 scope — verified 2026-07-05 (live probe + Round 1 DB).
+# Three government primaries carry all P6/P7 statutes:
+#   1. JPDP (pdp.gov.my)      — PDPA Act 709, Amendment 2024, Codes of Practice  [P6 + P7 core]
+#   2. AGC LOM (agc.gov.my)   — Cyber Security 854, Computer Crimes 563,
+#                               Security Offences 747, Criminal Procedure 593, + PDPA 709  [P7 coverage]
+#   3. LHDN (hasil.gov.my)    — Income Tax Act 53 (tax-data privacy)            [P6.2 / P7.3]
+# All three are server-rendered, not SPAs. Only pdp/hasil/AGC serve text-layer PDFs (no OCR needed).
 portals:
-  - name: Attorney General's Chambers (MyUndang-Undang)
-    url: https://agc.gov.my
+  # ── PRIMARY: Personal Data Protection Dept (JPDP) — build-gate portal ──────────
+  # WordPress SSR, bilingual (MY default, /en/ prefix). Each act/code sub-page embeds a
+  # direct text-layer PDF at /ppdpv1/wp-content/uploads/YYYY/MM/*.pdf (<embed> + <a>).
+  # ACT 709 hub + Code-of-Practice index list every provision/code as a sub-page link.
+  - name: Personal Data Protection Dept (JPDP)
+    url: https://www.pdp.gov.my/ppdpv1/en/akta/pdp-act-2010-en/
     type: primary
-  - name: Federal Gazette (AGC)
-    url: https://www.federalgazette.agc.gov.my
+    anti_bot: none
+    discovery: index
+    index_urls:
+      - https://www.pdp.gov.my/ppdpv1/en/akta/pdp-act-2010-en/
+      - https://www.pdp.gov.my/ppdpv1/en/akta/code-of-practice/
+    index_link_pattern: ["/akta/"]   # act/code sub-pages live under /en/akta/<slug>/
+    fetch: pdf_link            # extract embedded/anchored .pdf from each sub-page
+
+  # ── P7 COVERAGE: AGC Laws of Malaysia (authoritative full-statute repository) ──
+  # SSR PHP, no anti-bot. Acts addressed by number: act-detail.php?language=BI&act=<N>
+  # (BI=English / BM=Malay). Each detail page embeds a pdf.js viewer whose file= param
+  # resolves to a direct text-layer PDF under /ilims/upload/portal/akta/.../Act <N>.pdf.
+  # principal.php lists all principal acts. Covers 854/563/747/593 + 709.
+  - name: Attorney General's Chambers — Laws of Malaysia (LOM)
+    url: https://lom.agc.gov.my/principal.php
+    type: primary
+    anti_bot: none
+    discovery: index
+    # The homepage lists recent principal + amendment acts as act-detail links;
+    # principal.php's full list is JS-rendered (no crawlable static links), so it
+    # is not usable as a browse index. Older in-force acts (e.g. 854/563/747/593)
+    # come via seeds, not browse.
+    index_urls:
+      - https://lom.agc.gov.my/
+    index_link_pattern: ["act-detail.php"]
+    fetch: pdf_link            # act-detail.php → pdf.js file= param → direct PDF
+
+  # ── SECONDARY: Inland Revenue Board (LHDN / HASiL) — Income Tax Act 53 ─────────
+  # SSR, no anti-bot. Legislation index → direct dated text-layer PDF /media/.../*.pdf
+  - name: Inland Revenue Board (LHDN / HASiL)
+    url: https://www.hasil.gov.my/en/legislation/act/
     type: secondary
+    anti_bot: none
+    discovery: index
+    index_urls:
+      - https://www.hasil.gov.my/en/legislation/act/
+    # No index_link_pattern → parser default catches the direct .pdf act links
+    # under /media/ that this page publishes.
+    fetch: pdf_link
+
+  # ── SEED-SOURCE portals (Round 1 cited these hosts) ───────────────────────────
+  # Not browsable primaries — they appear only as Round 1 seed URLs. Declared here
+  # (discovery: seed_only) so the pipeline fetches each with an explicit strategy
+  # instead of blind auto. All serve a single act as a direct text-layer PDF, so
+  # fetch: pdf_link (a no-op on already-PDF content; resolves if a landing page).
+  - name: MITI InvestMalaysia (Service Tax Act 807)
+    url: https://www.investmalaysia.gov.my
+    type: secondary
+    anti_bot: none
+    discovery: seed_only
+    fetch: pdf_link
+  - name: Royal Malaysia Police CCID (Computer Crimes Act 563)
+    url: https://ccid.rmp.gov.my
+    type: secondary
+    anti_bot: none
+    discovery: seed_only
+    fetch: pdf_link
+  - name: Cyrilla Legal Database (Security Offences 747, Criminal Procedure) [mirror]
+    url: https://cyrilla.org
+    type: secondary
+    anti_bot: none
+    discovery: seed_only
+    fetch: pdf_link
+  - name: Loke King Goh (Cyber Security Act 854) [mirror]
+    url: https://lokekinggoh.com
+    type: secondary
+    anti_bot: none
+    discovery: seed_only
+    fetch: pdf_link
+  - name: Universiti Malaya repository (PDPA 709) [mirror]
+    url: https://mohre.um.edu.my
+    type: secondary
+    anti_bot: none
+    discovery: seed_only
+    fetch: pdf_link
+# ── Seed URL remap (Round 1 mirror → canonical primary) ─────────────────────────
+# These Round 1 seed URLs are dead (HTTP 404) mirror copies. Their acts are live on
+# the AGC Laws of Malaysia primary, so redirect to the authoritative act-detail page
+# (fetch: pdf_link resolves the pdf.js viewer → text-layer PDF). Pure config data.
+seed_url_remap:
+  "https://lokekinggoh.com/layout2/wp-content/uploads/2024/06/act-854.pdf": "https://lom.agc.gov.my/act-detail.php?language=BI&act=854"
+  # Computer Crimes Act 563: RMP hosts a text-layer reprint at the case-sensitive
+  # path (the lowercase Round 1 URL 404s). Preferred over AGC's scanned original.
+  "https://ccid.rmp.gov.my/laws/computer_crime_act_1997.pdf": "https://ccid.rmp.gov.my/Laws/Computer_Crime_Act_1997.pdf"
+  "https://mohre.um.edu.my/img/files/personal data protection (pdpa) act 2010.pdf": "https://lom.agc.gov.my/act-detail.php?language=BI&act=709"
 llm_override: null

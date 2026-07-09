@@ -337,6 +337,7 @@ _SG_ECONOMY = EconomyConfig.model_validate({
             "anti_bot": "header_spoof",
             "discovery": "index",
             "index_urls": ["https://sso.agc.gov.sg/Browse/Act/Current/All?PageSize=500"],
+            "index_link_pattern": ["/Act/", "/SL/"],
             "fetch": "pdf_endpoint",
             "pdf_view_suffix": "?ViewType=Pdf",
             "transport_fallback": "playwright_stealth",
@@ -352,10 +353,15 @@ _SG_ECONOMY = EconomyConfig.model_validate({
 })
 
 
+# SSO act/SL link patterns now come from config (singapore.yaml
+# index_link_pattern), not a hardcoded default in _parse_index_links.
+_SSO_PATTERNS = ["/Act/", "/SL/"]
+
+
 class TestIndexDiscovery:
     def test_parse_index_links_extracts_act_and_sl_hrefs(self):
         from src.crawler.discover import _parse_index_links
-        links = _parse_index_links(_SSO_INDEX_HTML, "https://sso.agc.gov.sg")
+        links = _parse_index_links(_SSO_INDEX_HTML, "https://sso.agc.gov.sg", _SSO_PATTERNS)
         urls = [u for _, u in links]
         assert any("/Act/PDPA2012" in u for u in urls)
         assert any("/SL/PDPA2012-S362" in u for u in urls)
@@ -366,7 +372,7 @@ class TestIndexDiscovery:
 
     def test_parse_index_links_returns_titles(self):
         from src.crawler.discover import _parse_index_links
-        links = _parse_index_links(_SSO_INDEX_HTML, "https://sso.agc.gov.sg")
+        links = _parse_index_links(_SSO_INDEX_HTML, "https://sso.agc.gov.sg", _SSO_PATTERNS)
         titles = [t for t, _ in links]
         assert any("Personal Data Protection Act" in t for t in titles)
 
@@ -379,9 +385,31 @@ class TestIndexDiscovery:
         </body></html>
         """
         from src.crawler.discover import _parse_index_links
-        links = _parse_index_links(html, "https://sso.agc.gov.sg")
+        links = _parse_index_links(html, "https://sso.agc.gov.sg", _SSO_PATTERNS)
         pdpa_links = [u for _, u in links if "PDPA2012" in u]
         assert len(pdpa_links) == 1
+
+    def test_pattern_is_config_driven_not_hardcoded(self):
+        """Different portals declare different link shapes — AGC LOM act-detail
+        and JPDP /akta/ must work with no SSO-specific code."""
+        from src.crawler.discover import _parse_index_links
+        agc = ('<a href="act-detail.php?language=BI&act=854">Cyber Security Act 2024</a>'
+               '<a href="principal.php">Principal</a>')
+        got = _parse_index_links(agc, "https://lom.agc.gov.my/", ["act-detail.php"])
+        assert [u for _, u in got] == ["https://lom.agc.gov.my/act-detail.php?language=BI&act=854"]
+
+        jpdp = ('<a href="/en/akta/pdp-act-2010/">PDPA 2010</a>'
+                '<a href="/en/faq/">FAQ</a>')
+        got = _parse_index_links(jpdp, "https://www.pdp.gov.my", ["/akta/"])
+        assert [u for _, u in got] == ["https://www.pdp.gov.my/en/akta/pdp-act-2010/"]
+
+    def test_no_pattern_defaults_to_document_links(self):
+        """With no declared pattern, only direct .pdf/.doc links are kept."""
+        from src.crawler.discover import _parse_index_links
+        html = ('<a href="/media/x/income-tax-act-53.pdf">Income Tax Act</a>'
+                '<a href="/en/about">About</a>')
+        got = _parse_index_links(html, "https://www.hasil.gov.my")
+        assert [u for _, u in got] == ["https://www.hasil.gov.my/media/x/income-tax-act-53.pdf"]
 
     def test_rank_by_keywords_known_high_relevance(self):
         """PDPA should score high against personal-data keywords."""
@@ -861,3 +889,88 @@ class TestSitemapDiscovery:
         tagged = _rank_exclude_tag(cands, 7, _MINI_TAXONOMY, known_urls=seed)
         known = [(t, u) for t, u, tag in tagged if tag == "KNOWN"]
         assert any("data-protection-obligations" in u for _, u in known)
+
+
+class TestSeedDomainAudit:
+    """audit_seed_domains maps each seed URL's domain to the portal that governs
+    its fetch, and flags domains with no config (→ blind auto)."""
+
+    def _cfg(self):
+        from src.config.economy_config import EconomyConfig
+        return EconomyConfig(**{
+            "economy_name": "Malaysia", "iso_code": "MY", "un_name": "Malaysia",
+            "script_type": "latin", "languages": ["ms", "en"],
+            "portals": [
+                {"name": "JPDP", "url": "https://www.pdp.gov.my/ppdpv1/",
+                 "type": "primary", "discovery": "index", "fetch": "pdf_link"},
+                {"name": "Cyrilla [mirror]", "url": "https://cyrilla.org",
+                 "type": "secondary", "discovery": "seed_only", "fetch": "pdf_link"},
+            ],
+        })
+
+    def test_covered_domain_reports_portal_strategy(self):
+        from src.crawler.discover import audit_seed_domains
+        urls = {"https://www.pdp.gov.my/ppdpv1/en/akta/x.pdf",
+                "https://cyrilla.org/api/files/y.pdf"}
+        rows = {d: (name, disc, fetch) for d, _c, name, disc, fetch in
+                audit_seed_domains(urls, self._cfg())}
+        assert rows["pdp.gov.my"] == ("JPDP", "index", "pdf_link")
+        assert rows["cyrilla.org"] == ("Cyrilla [mirror]", "seed_only", "pdf_link")
+
+    def test_uncovered_domain_flagged_as_none(self):
+        from src.crawler.discover import audit_seed_domains
+        urls = {"https://lokekinggoh.com/act-854.pdf"}
+        rows = {d: name for d, _c, name, _disc, _f in audit_seed_domains(urls, self._cfg())}
+        assert rows["lokekinggoh.com"] is None  # no config → blind auto, surfaced
+
+    def test_counts_and_ordering_by_frequency(self):
+        from src.crawler.discover import audit_seed_domains
+        urls = {"https://cyrilla.org/a.pdf", "https://cyrilla.org/b.pdf",
+                "https://www.pdp.gov.my/x.pdf"}
+        rows = audit_seed_domains(urls, self._cfg())
+        assert rows[0][0] == "cyrilla.org" and rows[0][1] == 2  # most-cited first
+
+
+class TestSeedUrlRemap:
+    """Config-declared seed_url_remap redirects stale/mirror seed URLs to their
+    canonical primary — generically, with no economy logic in code."""
+
+    def _cfg(self, remap):
+        from src.config.economy_config import EconomyConfig
+        return EconomyConfig(**{
+            "economy_name": "Malaysia", "iso_code": "MY", "un_name": "Malaysia",
+            "script_type": "latin", "languages": ["ms", "en"],
+            "portals": [{"name": "Mirror", "url": "https://lokekinggoh.com",
+                         "type": "secondary", "discovery": "seed_only", "fetch": "pdf_link"}],
+            "seed_url_remap": remap,
+        })
+
+    def test_dead_mirror_remapped_to_primary(self):
+        from src.crawler.discover import discover
+        cfg = self._cfg({
+            "https://lokekinggoh.com/x/act-854.pdf":
+                "https://lom.agc.gov.my/act-detail.php?language=BI&act=854",
+        })
+        known = {"https://lokekinggoh.com/x/act-854.pdf"}
+        res = asyncio.run(discover(cfg, 7, _MINI_TAXONOMY, known))
+        urls = [z.url for z in res]
+        assert "https://lom.agc.gov.my/act-detail.php?language=BI&act=854" in urls
+        assert not any("lokekinggoh.com" in u for u in urls)
+
+    def test_encoding_tolerant_match(self):
+        """A %20-encoded seed URL matches a space-form config key (and vice versa)."""
+        from src.crawler.discover import discover
+        cfg = self._cfg({
+            "https://mohre.um.edu.my/files/pdpa act 2010.pdf":
+                "https://lom.agc.gov.my/act-detail.php?language=BI&act=709",
+        })
+        known = {"https://mohre.um.edu.my/files/pdpa%20act%202010.pdf"}
+        res = asyncio.run(discover(cfg, 7, _MINI_TAXONOMY, known))
+        assert any("act=709" in z.url for z in res)
+
+    def test_unremapped_url_passes_through(self):
+        from src.crawler.discover import discover
+        cfg = self._cfg({"https://dead.example/x.pdf": "https://primary.example/y.pdf"})
+        known = {"https://cyrilla.org/api/files/live.pdf"}
+        res = asyncio.run(discover(cfg, 7, _MINI_TAXONOMY, known))
+        assert any("cyrilla.org/api/files/live.pdf" in z.url for z in res)

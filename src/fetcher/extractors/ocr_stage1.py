@@ -66,6 +66,75 @@ PADDLEOCR_LANG_MAP: dict[str, str] = {
 _paddle_instance: dict[str, object] = {}
 
 
+# ── Tesseract language-pack bootstrap ──────────────────────────────────────────
+# Candidate tessdata dirs across platforms; we pick the one Tesseract actually uses
+# (the one already holding eng.traineddata). Purely platform paths — not economy data.
+_TESSDATA_CANDIDATES = (
+    "/opt/homebrew/share/tessdata",       # macOS Apple-silicon Homebrew
+    "/usr/local/share/tessdata",          # macOS Intel Homebrew / manual
+    "/usr/share/tesseract-ocr/5/tessdata",
+    "/usr/share/tesseract-ocr/4.00/tessdata",
+    "/usr/share/tessdata",                # Linux distro packages
+)
+_TESSDATA_URL = "https://github.com/tesseract-ocr/tessdata/raw/main/{code}.traineddata"
+
+
+def _find_tessdata_dir():
+    import os
+    from pathlib import Path
+    prefix = os.environ.get("TESSDATA_PREFIX")
+    candidates = ([prefix] if prefix else []) + list(_TESSDATA_CANDIDATES)
+    # Prefer a dir that already holds eng.traineddata (the active install).
+    for c in candidates:
+        if c and (Path(c) / "eng.traineddata").exists():
+            return Path(c)
+    for c in candidates:
+        if c and Path(c).is_dir():
+            return Path(c)
+    return None
+
+
+def required_tesseract_langs(economy_config) -> list[str]:
+    """Tesseract language codes this economy's OCR needs, derived from its declared
+    languages via TESSERACT_LANG_MAP (e.g. ['ms','en'] → ['eng','msa']). No hardcode."""
+    codes: set[str] = set()
+    for lang in getattr(economy_config, "languages", []) or []:
+        mapped = TESSERACT_LANG_MAP.get(lang)
+        if mapped:
+            codes.update(mapped.split("+"))
+    return sorted(codes)
+
+
+def ensure_tesseract_langs(economy_config) -> None:
+    """Best-effort: download any Tesseract language pack this economy needs but is
+    missing, so local OCR works out of the box (e.g. Malay 'msa'). Config-driven —
+    languages come from the economy YAML, not code. Silent no-op when the engine
+    isn't Tesseract or the pack is already present; on failure logs a warning with
+    the manual command (cloud Stage-2 OCR still covers the gap either way)."""
+    if getattr(economy_config, "ocr_engine", None) != "tesseract":
+        return
+    needed = required_tesseract_langs(economy_config)
+    tdir = _find_tessdata_dir()
+    if not needed or tdir is None:
+        return
+    import urllib.request
+    for code in needed:
+        dest = tdir / f"{code}.traineddata"
+        if dest.exists():
+            continue
+        try:
+            urllib.request.urlretrieve(_TESSDATA_URL.format(code=code), dest)
+            logger.info({"event": "tessdata_installed", "lang": code, "path": str(dest)})
+        except Exception as exc:
+            logger.warning({
+                "event": "tessdata_install_failed",
+                "lang": code,
+                "error": str(exc)[:200],
+                "hint": f"install manually: brew install tesseract-lang "
+                        f"(or place {code}.traineddata in {tdir})",
+            })
+
+
 # ── Engine selection ────────────────────────────────────────────────────────────
 
 def get_ocr_engine(economy_config: "EconomyConfig") -> Literal["tesseract", "paddleocr"]:

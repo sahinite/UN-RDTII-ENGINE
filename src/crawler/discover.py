@@ -114,14 +114,21 @@ def build_pillar_keywords(taxonomy: list[dict], pillar: int) -> list[str]:
 
 # ── Index page parsing ─────────────────────────────────────────────────────────
 
-def _parse_index_links(html: str, base_url: str) -> list[tuple[str, str]]:
+def _parse_index_links(
+    html: str,
+    base_url: str,
+    link_patterns: list[str] | None = None,
+) -> list[tuple[str, str]]:
     """
-    Parse (title, absolute_url) pairs from an SSO-style browse index page.
+    Parse (title, absolute_url) pairs from a portal's browse index page.
 
-    Targets hrefs that contain '/Act/' or '/SL/' — the two entry types on SSO
-    in-force browse indexes. Generic enough for other portals that use similar
-    path patterns.
+    Which links count as acts is declared per-portal, not hardcoded: `link_patterns`
+    is a list of case-insensitive substrings matched against each same-domain link's
+    path+query (e.g. Singapore SSO ["/Act/", "/SL/"], AGC LOM ["act-detail.php"],
+    JPDP ["/akta/"]). When empty, falls back to direct document links
+    (.pdf/.doc/.docx) — a format-based default with no economy-specific tokens.
     """
+    patterns = [p.lower() for p in (link_patterns or [])]
     soup = BeautifulSoup(html, "html.parser")
     portal_domain = urllib.parse.urlparse(base_url).netloc
     candidates: list[tuple[str, str]] = []
@@ -136,11 +143,16 @@ def _parse_index_links(html: str, base_url: str) -> list[tuple[str, str]]:
         abs_url = urllib.parse.urljoin(base_url, href)
         parsed = urllib.parse.urlparse(abs_url)
 
-        # Keep only same-domain links with /Act/ or /SL/ in the path
+        # Keep only same-domain links
         if parsed.netloc != portal_domain:
             continue
-        path = parsed.path
-        if not (("/Act/" in path) or ("/SL/" in path)):
+        path_query = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        pql = path_query.lower()
+        if patterns:
+            if not any(pat in pql for pat in patterns):
+                continue
+        elif not parsed.path.lower().endswith((".pdf", ".doc", ".docx")):
+            # No declared pattern → accept only direct document links.
             continue
 
         norm = _normalise_url(abs_url)
@@ -224,7 +236,7 @@ async def _discover_index(
             continue
 
         base = f"{urllib.parse.urlparse(idx_url).scheme}://{urllib.parse.urlparse(idx_url).netloc}"
-        links = _parse_index_links(html, base)
+        links = _parse_index_links(html, base, getattr(portal, "index_link_pattern", None))
         logger.info("[DISCOVER] parsed %d act links from %s", len(links), idx_url)
 
         for title, url in links:
@@ -511,6 +523,36 @@ async def _discover_auto(
 
 # ── Seed-only fallback ─────────────────────────────────────────────────────────
 
+def audit_seed_domains(known_urls, economy_config) -> list[tuple[str, int, str | None, str | None, str | None]]:
+    """Map each seed URL's registered domain to the portal config that governs its
+    fetch, so gaps are visible at run start.
+
+    Every seed URL is fetched in Zone 2; its fetch strategy comes from the portal
+    whose domain matches (via router._find_portal_for_url). A seed domain with no
+    portal entry falls back to blind `auto` download — surfacing that here lets the
+    strategy/discovery be fixed in config, per economy, before the run spends time.
+
+    Returns rows of (domain, url_count, portal_name|None, discovery|None, fetch|None),
+    most-cited domain first.
+    """
+    from collections import Counter
+    dom_counts = Counter(_registered_domain(u) for u in known_urls)
+    portal_by_domain: dict[str, "Portal"] = {}
+    for portal in economy_config.portals:
+        portal_by_domain.setdefault(_registered_domain(str(portal.url)), portal)
+
+    rows: list[tuple[str, int, str | None, str | None, str | None]] = []
+    for domain, count in sorted(dom_counts.items(), key=lambda x: -x[1]):
+        portal = portal_by_domain.get(domain)
+        rows.append((
+            domain, count,
+            portal.name if portal else None,
+            getattr(portal, "discovery", None) if portal else None,
+            getattr(portal, "fetch", None) if portal else None,
+        ))
+    return rows
+
+
 def _seed_fallback(
     portal: "Portal",
     economy_iso: str,
@@ -617,6 +659,17 @@ async def discover(
     budget_deadline = time.monotonic() + _DISCOVER_BUDGET_S
     known_norm = {_normalise_url(u) for u in known_urls}
 
+    # Config-declared seed remap: stale/mirror seed URL → canonical primary. Applied
+    # to every discovered/seed URL so dedup, fetch strategy and output provenance all
+    # use the authoritative source. Pure config lookup — no economy logic in code.
+    # Match on the percent-decoded, normalised URL so config keys need not reproduce
+    # a seed URL's exact %20 encoding.
+    def _remap_key(url: str) -> str:
+        return _normalise_url(urllib.parse.unquote(url))
+    _remap = {_remap_key(src): dst for src, dst in (economy_config.seed_url_remap or {}).items()}
+    def _remapped(url: str) -> str:
+        return _remap.get(_remap_key(url), url)
+
     all_results: list[tuple[str, str, str]] = []  # (title, url, discovery_tag)
     seen_norm: set[str] = set()
 
@@ -664,6 +717,7 @@ async def discover(
             raw = _seed_fallback(portal, economy_iso, known_urls, f"strategy '{discovery_strategy}' not implemented")
 
         for title, url, tag in raw:
+            url = _remapped(url)
             norm = _canonical_act_key(url)
             if norm not in seen_norm:
                 seen_norm.add(norm)
@@ -671,6 +725,7 @@ async def discover(
 
     # Ensure all KNOWN seed URLs are included even if not discovered from portals
     for url in known_urls:
+        url = _remapped(url)
         norm = _canonical_act_key(url)
         if norm not in seen_norm:
             seen_norm.add(norm)

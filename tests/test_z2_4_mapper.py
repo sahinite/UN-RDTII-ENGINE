@@ -190,7 +190,7 @@ def test_economy_name_mapping():
 
     assert _official_un_name("SG") == "Singapore"
     assert _official_un_name("AU") == "Australia"
-    assert _official_un_name("TH") == "Thailand"
+    assert _official_un_name("MY") == "Malaysia"
 
 
 def test_unknown_economy_raises_config_error():

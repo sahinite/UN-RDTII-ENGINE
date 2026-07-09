@@ -13,6 +13,8 @@ economy_config.be_year_conversion is True.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import os
 import re
 import time
@@ -79,6 +81,69 @@ def _is_english(lang: str) -> bool:
     return lang.lower().strip() == "en"
 
 
+def _lang_root(lang: str) -> str:
+    """'ms', 'ms-MY', 'ms_MY' → 'ms' (Argos/DeepL use bare ISO-639-1 codes)."""
+    return lang.lower().strip().replace("_", "-").split("-")[0]
+
+
+# Argos Translate — offline neural MT, no API key or quota. Primary translator.
+# Runs in a SUBPROCESS (src.fetcher.argos_worker): Argos's ctranslate2/onnxruntime
+# native runtime segfaults when co-resident with the RAG torch/faiss stack, so it
+# must never be imported into the main pipeline process.
+_ARGOS_TIMEOUT = int(os.environ.get("ARGOS_TIMEOUT", "180"))
+
+
+def ensure_argos_langs(economy_config) -> None:
+    """Pre-download the Argos <lang>→en models this economy needs (from its declared
+    languages), so the first Malay document doesn't stall on a mid-run download.
+    Config-driven, best-effort, runs in the subprocess worker — never imports Argos
+    into the main process. Safe no-op when everything is already installed."""
+    langs = sorted({_lang_root(x) for x in getattr(economy_config, "languages", [])
+                    if not _is_english(x)})
+    if not langs:
+        return
+    try:
+        import json
+        import subprocess
+        import sys
+        subprocess.run(
+            [sys.executable, "-m", "src.fetcher.argos_worker"],
+            input=json.dumps({"langs": langs}),
+            capture_output=True, text=True, timeout=max(_ARGOS_TIMEOUT, 600),
+        )
+    except Exception as exc:
+        logger.warning({"event": "argos_bootstrap_failed", "error": str(exc)[:200]})
+
+
+def _argos_translate(text: str, source_lang: str) -> Optional[str]:
+    """Offline neural translation (source → English) via the Argos subprocess
+    worker. Returns None on any failure so the caller falls back to DeepL."""
+    src = _lang_root(source_lang)
+    try:
+        import json
+        import subprocess
+        import sys
+        proc = subprocess.run(
+            [sys.executable, "-m", "src.fetcher.argos_worker"],
+            input=json.dumps({"text": text, "source_lang": src}),
+            capture_output=True, text=True, timeout=_ARGOS_TIMEOUT,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            logger.warning({"event": "argos_translate_failed", "source_lang": src,
+                            "error": (proc.stderr or "no output")[-200:]})
+            return None
+        result = json.loads(proc.stdout.strip())
+        if result.get("ok") and result.get("text", "").strip():
+            return result["text"]
+        logger.info({"event": "argos_unavailable", "source_lang": src,
+                     "reason": result.get("error", "unknown")})
+        return None
+    except Exception as exc:
+        logger.warning({"event": "argos_translate_failed", "source_lang": source_lang,
+                        "error": str(exc)[:200]})
+        return None
+
+
 def _deepl_translate(text: str, source_lang: str) -> Optional[str]:
     """Attempt DeepL translation; return None on any failure."""
     api_key = os.environ.get("DEEPL_API_KEY", "")
@@ -107,6 +172,10 @@ def _google_translate(text: str, source_lang: str) -> Optional[str]:
     try:
         from googletrans import Translator as _GT  # type: ignore[import-untyped]
         result = _GT().translate(text, src=source_lang, dest="en")
+        # googletrans >= 4.0 made translate() async — it returns a coroutine that
+        # must be awaited; 3.x returns the result directly. Support both.
+        if inspect.iscoroutine(result):
+            result = asyncio.run(result)
         return result.text  # type: ignore[union-attr]
     except Exception as exc:
         logger.warning({
@@ -135,6 +204,20 @@ def translate_text(
         return text, "none", 0.0
 
     t0 = time.monotonic()
+
+    # 1. Argos Translate — offline, free, no quota. Primary translator; DeepL is the
+    #    fallback when Argos has no model for the language or errors.
+    translated = _argos_translate(text, source_lang)
+    if translated is not None:
+        logger.info({
+            "event": "translation_completed",
+            "provider": "argos",
+            "source_lang": source_lang,
+            "chars": len(text),
+            "cost_usd": 0.0,
+            "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
+        })
+        return translated, "argos", 0.0
 
     if provider != "google":
         translated = _deepl_translate(text, source_lang)

@@ -17,6 +17,8 @@ portals:
     index_urls:
       - "https://sso.agc.gov.sg/Browse/Act/Current/All?PageSize=500&SortBy=Title&SortOrder=ASC"
       - "https://sso.agc.gov.sg/Browse/SL/Current/All?PageSize=500&SortBy=Title&SortOrder=ASC"
+    # SSO act/subsidiary-legislation links live under /Act/ and /SL/ paths
+    index_link_pattern: ["/Act/", "/SL/"]
     # Fetch complete act text via the PDF print endpoint (text-layer PDF, no OCR needed)
     fetch: pdf_endpoint
     pdf_view_suffix: "?ViewType=Pdf"

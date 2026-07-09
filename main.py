@@ -123,6 +123,23 @@ def run_pipeline(
     economy_iso = economy_config.iso_code
     p.done(f"Economy config — {economy} ({economy_iso})")
 
+    # Ensure the Tesseract language packs this economy needs are installed (e.g.
+    # Malay 'msa'); best-effort, config-driven. Missing packs otherwise crash local
+    # OCR — cloud Stage 2 still covers it, but installing avoids the round-trip.
+    try:
+        from src.fetcher.extractors.ocr_stage1 import ensure_tesseract_langs
+        ensure_tesseract_langs(economy_config)
+    except Exception as exc:  # never let a bootstrap step abort the run
+        p.warn(f"Tesseract language bootstrap skipped: {exc}")
+
+    # Pre-download Argos translation models for this economy's languages (offline
+    # primary translator). Config-driven, best-effort; avoids a mid-run stall.
+    try:
+        from src.fetcher.translator import ensure_argos_langs
+        ensure_argos_langs(economy_config)
+    except Exception as exc:
+        p.warn(f"Argos language bootstrap skipped: {exc}")
+
     # ── Pin LLM provider once ───────────────────────────────────────────────────
     p.step("Connecting to LLM provider")
     try:
@@ -152,6 +169,18 @@ def run_pipeline(
             f"Seed data — {len(_seed.known_titles)} known acts, {len(known_provisions)} anchored "
             f"provisions, {len(known_sections)} act(s) with prose sections"
         )
+        # Audit seed-URL domains against portal config so any domain lacking a
+        # declared fetch strategy (→ blind auto) is surfaced up front, not silently.
+        from src.crawler.discover import audit_seed_domains
+        _audit = audit_seed_domains(_seed.known_urls, economy_config)
+        _uncovered = [d for d, _c, name, _disc, _f in _audit if name is None]
+        for domain, count, name, disc, fetch in _audit:
+            if name:
+                p.info(f"Seed domain {domain} ({count}) → {name} [{disc}/{fetch}]")
+            else:
+                p.warn(f"Seed domain {domain} ({count}) → no portal config — fetched via default auto")
+        if _uncovered:
+            p.warn(f"{len(_uncovered)} seed domain(s) lack a config strategy: {', '.join(_uncovered)}")
     except Exception as exc:
         p.warn(f"Seed data unavailable ({exc}) — continuing without")
         known_provisions = set()

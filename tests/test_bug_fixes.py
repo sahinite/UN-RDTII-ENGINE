@@ -270,14 +270,22 @@ class TestRetrieveBatchUnknownIndicator:
 
 class TestOllamaModelTag:
     def test_priority7_model_is_granite3_8b(self):
+        # Clear LLM_MODEL so we assert the tier DEFAULT, not a .env override.
         from src.mapping.providers.ollama_provider import OllamaProvider
-        provider = OllamaProvider(7)
-        assert provider.model == "granite3-8b"
+        with patch.dict("os.environ", {"LLM_MODEL": ""}):
+            assert OllamaProvider(7).model == "granite3-8b"
 
     def test_priority6_model_is_qwen25(self):
         from src.mapping.providers.ollama_provider import OllamaProvider
-        provider = OllamaProvider(6)
-        assert provider.model == "qwen2.5:7b"
+        with patch.dict("os.environ", {"LLM_MODEL": ""}):
+            assert OllamaProvider(6).model == "qwen2.5:7b"
+
+    def test_llm_model_env_overrides_default(self):
+        """The active model comes from LLM_MODEL — not hardcoded in code."""
+        from src.mapping.providers.ollama_provider import OllamaProvider
+        with patch.dict("os.environ", {"LLM_MODEL": "deepseek-r1:8b"}):
+            assert OllamaProvider(6).model == "deepseek-r1:8b"
+            assert OllamaProvider(7).model == "deepseek-r1:8b"
 
 
 class TestGroqRateLimitFallback:
