@@ -39,10 +39,16 @@ ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "5"))
 # safety ceiling. The strict cap (ZONE2_MAX_NEW_ACTS) applies to speculative NEW
 # discoveries only. ZONE2_MAX_ACTS is kept for back-compat as the NEW default.
 _MAX_KNOWN_ACTS = int(os.getenv("ZONE2_MAX_KNOWN_ACTS", "12"))
-# NEW discoveries default OFF for the Singapore build gate (reproducing Round 1
-# ground truth is KNOWN-only; NEW acts add runtime + precision risk). Set
-# ZONE2_MAX_NEW_ACTS>0 to re-enable speculative discovery.
-_MAX_NEW_ACTS = int(os.getenv("ZONE2_MAX_NEW_ACTS", "0"))
+# Run profile — a named bundle so a run can't be *accidentally* submitted with the
+# safe build-gate settings. RUN_PROFILE selects the speculative-NEW-act cap:
+#   gate    → 0  (KNOWN-only; the Singapore build gate — reproduces Round 1 exactly)
+#   submit  → 3  (KNOWN + a few high-confidence NEW discoveries — the SUBMISSION default)
+#   explore → 8  (aggressive NEW discovery for research)
+# NEW acts are the top scoring differentiator, so submitting under "gate" forfeits
+# them — hence the explicit profile. An explicit ZONE2_MAX_NEW_ACTS overrides it.
+RUN_PROFILE = os.getenv("RUN_PROFILE", "gate").strip().lower()
+_PROFILE_MAX_NEW_ACTS = {"gate": 0, "submit": 3, "explore": 8}
+_MAX_NEW_ACTS = int(os.getenv("ZONE2_MAX_NEW_ACTS", str(_PROFILE_MAX_NEW_ACTS.get(RUN_PROFILE, 0))))
 _DISCOVER_BUDGET_S = float(os.getenv("DISCOVER_BUDGET_S", "120.0"))
 _INDEX_FETCH_TIMEOUT_S = float(os.getenv("INDEX_FETCH_TIMEOUT_S", "30.0"))
 # Normalised BM25 title score a NEW (not-in-seed) act must clear to be kept.

@@ -183,14 +183,16 @@ class TestTranslateKeywords:
 
 class TestTranslateActTitle:
     def test_english_passthrough(self):
-        title, cost = translate_act_title("PDPA 2012", "en")
+        title, provider, cost = translate_act_title("PDPA 2012", "en")
         assert title == "PDPA 2012"
+        assert provider == "none"
         assert cost == 0.0
 
     def test_non_english_translated(self):
         with patch("src.fetcher.translator.translate_text", return_value=("Personal Data Act", "deepl", 0.0005)):
-            title, cost = translate_act_title("พระราชบัญญัติข้อมูล", "th")
+            title, provider, cost = translate_act_title("พระราชบัญญัติข้อมูล", "th")
         assert title == "Personal Data Act"
+        assert provider == "deepl"          # actual provider is now surfaced
         assert cost == pytest.approx(0.0005)
 
 
@@ -213,7 +215,7 @@ class TestTranslateDocument:
         doc = _make_doc(raw_text="teks undang-undang Bahasa Melayu", economy="MY")
         with (
             patch("src.fetcher.translator.translate_text", return_value=("Malay legal text", "deepl", 0.01)),
-            patch("src.fetcher.translator.translate_act_title", return_value=("Personal Data Act", 0.001)),
+            patch("src.fetcher.translator.translate_act_title", return_value=("Personal Data Act", "deepl", 0.001)),
             patch("src.fetcher.translator.translate_keywords", return_value=([], 0.0)),
         ):
             result = translate_document(doc, my_config)
@@ -230,23 +232,49 @@ class TestTranslateDocument:
         assert result.verbatim_original == original
 
     def test_long_text_chunked(self, my_config):
-        long_text = "data " * 60_000  # > 100_000 chars
+        long_text = "data " * 60_000  # 300K chars → many _CHUNK_SIZE (25K) chunks
         doc = _make_doc(raw_text=long_text, economy="MY")
         doc.act_title = "Akta Data"
 
-        call_count = 0
+        captured = {}
 
-        def fake_translate(text, source_lang, provider=None):
-            nonlocal call_count
-            call_count += 1
-            return ("chunk translated", "google", 0.0)
+        def fake_many(texts, src):
+            captured["chunks"] = len(texts)
+            return ["chunk translated"] * len(texts)
 
-        with patch("src.fetcher.translator.translate_text", side_effect=fake_translate):
+        with (
+            patch("src.fetcher.translator._argos_translate_many", side_effect=fake_many),
+            patch("src.fetcher.translator.translate_act_title", return_value=("Data Act", "argos", 0.0)),
+            patch("src.fetcher.translator.translate_keywords", return_value=([], 0.0)),
+        ):
             result = translate_document(doc, my_config)
 
-        # Should have been called at least twice (text > 100_000 chars)
-        assert call_count >= 2
+        # 300K chars split into >= 2 chunks, all translated in one parallel batch
+        assert captured["chunks"] >= 2
         assert "chunk translated" in result.translated_text
+
+    def test_chunk_falls_back_per_chunk_when_argos_fails(self, my_config):
+        """When Argos returns None for some chunks, only those fall back to
+        DeepL/Google — successful chunks keep the Argos result."""
+        long_text = "data " * 60_000  # → several chunks
+        doc = _make_doc(raw_text=long_text, economy="MY")
+
+        def some_fail(texts, src):
+            # first chunk ok, rest fail
+            return ["argos ok"] + [None] * (len(texts) - 1)
+
+        with (
+            patch("src.fetcher.translator._argos_translate_many", side_effect=some_fail),
+            patch("src.fetcher.translator.translate_text",
+                  return_value=("fallback chunk", "deepl", 0.01)) as tt,
+            patch("src.fetcher.translator.translate_act_title", return_value=("Data Act", "argos", 0.0)),
+            patch("src.fetcher.translator.translate_keywords", return_value=([], 0.0)),
+        ):
+            result = translate_document(doc, my_config)
+
+        assert "argos ok" in result.translated_text          # kept the good chunk
+        assert "fallback chunk" in result.translated_text     # fell back for failures
+        assert tt.call_count >= 1                             # fallback was used
 
     def test_translation_cost_entry_populated(self, my_config):
         doc = _make_doc(raw_text="teks Melayu", economy="MY")
@@ -472,3 +500,40 @@ class TestArgosPrimaryTranslation:
             out, provider, _ = tr.translate_text("already english", "en")
         assert provider == "none"
         argos.assert_not_called()
+
+
+class TestArgosPoolRobustness:
+    """The persistent Argos worker must never freeze the pipeline: a hung worker
+    times out and returns None (→ DeepL/Google fallback); dead workers respawn."""
+
+    def _fake_hanging_pool(self, timeout_s):
+        import subprocess, sys
+        import src.fetcher.translator as tr
+        tr._ARGOS_TIMEOUT = timeout_s
+        pool = tr._ArgosPool.__new__(tr._ArgosPool)
+        pool._size = 1
+        # Worker that consumes stdin but NEVER replies (simulates a hang).
+        pool._procs = [subprocess.Popen(
+            [sys.executable, "-c", "import sys\nfor _ in sys.stdin: pass"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)]
+        return pool
+
+    def test_hung_worker_times_out_returns_none(self):
+        import time
+        pool = self._fake_hanging_pool(timeout_s=2)
+        t = time.time()
+        out = pool.translate_many(["some malay text"], "ms")
+        elapsed = time.time() - t
+        assert out == [None]            # failed → caller falls back
+        assert elapsed < 6              # bounded by timeout, did NOT freeze
+        pool.close()
+
+    def test_dead_worker_respawned_next_batch(self):
+        import src.fetcher.translator as tr
+        pool = tr._ArgosPool(1)
+        pool._procs[0].kill()
+        pool._procs[0].wait()           # reaped, as between real batches
+        assert pool._procs[0].poll() is not None
+        pool.translate_many(["x"], "ms")  # triggers respawn
+        assert pool._procs[0].poll() is None  # a fresh, live worker
+        pool.close()

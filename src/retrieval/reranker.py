@@ -12,6 +12,7 @@ legislative context when it reads the returned passages.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from src.retrieval.models import Chunk, RetrievedChunk
@@ -24,14 +25,30 @@ _TOP_N = 5
 _cross_encoder = None
 
 
+# English reranker (build gate) vs multilingual mMARCO reranker (non-English
+# economies), selected per economy to pair with the embedder choice.
+_ENGLISH_RERANK_MODEL = os.environ.get("RERANK_MODEL_EN", "").strip() or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_MULTILINGUAL_RERANK_MODEL = os.environ.get("RERANK_MODEL_ML", "").strip() or "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+_use_multilingual = False
+
+
+def set_multilingual(flag: bool) -> None:
+    """Select the multilingual reranker vs the English one. Call at run start."""
+    global _use_multilingual, _cross_encoder
+    if bool(flag) != _use_multilingual:
+        _use_multilingual = bool(flag)
+        _cross_encoder = None
+
+
 def _get_cross_encoder():
     global _cross_encoder
     if _cross_encoder is None:
         from src.retrieval.embedder import quiet_hf_hub
         quiet_hf_hub()
         from sentence_transformers import CrossEncoder  # type: ignore
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-        logger.info({"event": "cross_encoder_loaded", "model": "ms-marco-MiniLM-L-6-v2"})
+        name = _MULTILINGUAL_RERANK_MODEL if _use_multilingual else _ENGLISH_RERANK_MODEL
+        _cross_encoder = CrossEncoder(name)
+        logger.info({"event": "cross_encoder_loaded", "model": name})
     return _cross_encoder
 
 

@@ -31,6 +31,36 @@ Updated as stories are completed — future agents should read this before touch
 
 ## Architectural Decisions
 
+### ADR-062 — Run profiles bundle the NEW-act discovery cap
+`RUN_PROFILE` (`gate`/`submit`/`explore`) sets `discover._MAX_NEW_ACTS` (0/3/8); an explicit
+`ZONE2_MAX_NEW_ACTS` still overrides, and an unknown profile → 0 (fail-safe). Default `gate`
+preserves the KNOWN-only build gate, but that forfeits NEW acts (the top scoring differentiator),
+so `submit` (=3) is the intended submission setting and `main.py` prints the active profile at
+startup so a run can't be *accidentally* submitted under the safe gate settings.
+
+### ADR-061 — Argos is the offline-primary translator, run in a persistent subprocess pool
+Translation cascade is **Argos (offline neural MT, free) → DeepL → Google**. Argos's
+`ctranslate2`/`onnxruntime` native runtime **segfaults when co-resident with the RAG torch/faiss
+stack**, so it runs in subprocess workers (`src/fetcher/argos_worker.py --serve`), never imported
+into the main process. A **single** persistent worker keeps the model loaded (no ~3.5s per-call
+reload) — multiple workers oversubscribe the CPU and thrash (measured slower), so parallelism is
+*not* used. Each pool read is bounded by `ARGOS_TIMEOUT` (a hung worker returns None → fallback,
+never freezes); dead workers respawn between batches. Malay uses MiniSBD sentence-splitting
+(stanza has no `ms` model). Models auto-install at startup (`ensure_argos_langs`), like the
+Tesseract `msa` pack (`ensure_tesseract_langs`).
+
+### ADR-060 — Per-economy retrieval: English model for EN economies, multilingual + translate-less for non-EN
+English-only economies (SG, AU) use `all-MiniLM-L6-v2` + the English cross-encoder — swapping to a
+global multilingual embedder **regressed SG P7 (18→10 records, KNOWN 3→1)**, so the build gate keeps
+the English model. Non-English economies (MY) use `paraphrase-multilingual-MiniLM-L12-v2` +
+`mmarco-mMiniLMv2` reranker so RAG retrieves over the **original-language** text; only those
+economies skip full-document translation (`translate_document(..., translate_body=False)`) and the
+LLM reads the retrieved source-language passages directly (verbatim stays source-language per
+ADR-017). **Malaysia P7: ~50 min → ~7 min** (translation drops to ~1% of runtime — we no longer
+translate ~1.5M chars to use ~10 retrieved passages). Selected in `main.py` from
+`economy_config.languages`; both models **default to the English one** (`set_multilingual(False)`)
+so tests and other callers are build-gate-safe.
+
 ### ADR-001 — `ocr_engine` is derived, not configured
 Computed `@property` on `EconomyConfig` from `script_type`. `_SCRIPT_TO_OCR` dict is single source of truth. Overrides use `ocr_engine_override`.
 
@@ -43,8 +73,16 @@ Unknown YAML keys raise `InvalidEconomyConfigError` immediately.
 ### ADR-004 — Economy YAML filenames use full lowercase name
 `load_economy("Singapore")` → `economies/singapore.yaml`. Case-insensitive, `.strip().title()` normalised.
 
-### ADR-005 — Economies run sequentially, never in parallel
-`batch_run.py` calls `main.run_pipeline()` per economy/pillar. Cost telemetry must be clean per economy.
+### ADR-005 — Economies never run in parallel *within one process*; `batch_run.py` auto-parallelises across isolated subprocesses
+The embedder/reranker/Argos state is process-global (per-economy singletons, ADR-060/061), so two
+economies must never share a process. `batch_run.py` therefore **defaults to one concurrent lane per
+economy**, each an isolated `python main.py` **subprocess** (its pillars run sequentially within the
+lane) — separate processes have separate model state, so cross-economy parallelism is safe. A single
+economy (or `--max-parallel 1`) runs in-process, sequentially. `--max-parallel N` caps the concurrent
+lanes (for many economies / LLM rate limits). Each subprocess isolates its logs/cost via
+`RDTII_LOG_DIR=logs/<economy>_P<pillar>` (the rotating log handler is not multiprocess-safe); CSV/JSON
+output is already per-economy-pillar-timestamped. Verified: SG P6+P7 in parallel completed in
+`max(104s, 482s)`, not the sum.
 
 ### ADR-009 — taxonomy.json at project root
 All indicators with `probe_keywords`, `exclude_act_titles`, `exclude_keywords`, `in_scope`, `out_of_scope`, `negative_examples`, `rdtii_ref`, `category`, `scoring`. Validated at startup.
@@ -220,10 +258,10 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 | `src/fetcher/extractors/llm_ocr.py` | LLM vision OCR fallback. |
 | `src/fetcher/extractors/legislation_meta.py` | Parses "Act N of YYYY", revised-edition year, `?DocDate=` from URL. |
 | `src/fetcher/segmenter.py` | Consolidated volume splitter (PyMuPDF). Short-segment merge. |
-| `src/fetcher/translator.py` | 3-layer translation (keyword/title/document). DeepL primary → Google fallback. BE year conversion. |
+| `src/fetcher/translator.py` | 3-layer translation (keyword/title/document). Argos primary → DeepL → Google fallback. Non-English pipeline can skip full-document body translation and preserve raw source text for verbatim extraction; BE conversion is not applied to skipped-body RAG text. |
 | `src/fetcher/models.py` | `Zone1Result`, `FetchedDocument`, `TranslatedDocument` (8 proxy accessors), `ArticleReference`, `CostLogEntry`. |
 | `src/ocr/processor.py` | Stage 2 OCR: Azure DI → Mistral OCR. CER fix for whitespace-only pages. `stage2_failed` flag. |
-| `src/retrieval/` | `chunker.py` (3-strategy article splitter), `embedder.py` (all-MiniLM-L6-v2 + FAISS), `bm25_index.py` (keyword boosting), `fusion.py` (RRF k=60), `reranker.py` (cross-encoder top-20→top-5), `rag.py` (orchestrator), `config.py` (`get_valid_indicator_ids()`). |
+| `src/retrieval/` | `chunker.py` (3-strategy article splitter), `embedder.py` (per-economy: `all-MiniLM-L6-v2` for EN / `paraphrase-multilingual-MiniLM-L12-v2` for non-EN + FAISS; `set_multilingual()`, ADR-060), `bm25_index.py` (keyword boosting), `fusion.py` (RRF k=60), `reranker.py` (per-economy English / mMARCO cross-encoder top-20→top-5), `rag.py` (orchestrator), `config.py` (`get_valid_indicator_ids()`). |
 | `src/mapping/mapper.py` | `extract_provisions()` orchestrator. `check_pdpa_gate()` → `PDPAGateError`. Lazy `_get_economy_names()` from YAMLs. |
 | `src/mapping/llm_client.py` | `PROVIDER_CASCADE`, `pin_active_provider()`, `call_llm_with_cascade()`, `get_active_model_version(ocr_engine=)`. |
 | `src/mapping/parser.py` | `parse_llm_response()` with verbatim assertion (hard discard), provision-level `resolve_provision_tag()`, law-name abbreviation check, cross-reference auto-flagging. |
@@ -241,11 +279,11 @@ All stories Z1-1 through Z2-6 are complete. Below is the current module-level su
 | Module | Purpose |
 |--------|---------|
 | `main.py` | `run_pipeline()` — full end-to-end. `_run_zone1()` calls `discover()`. PDPA gate for SG P7. |
-| `batch_run.py` | Sequential multi-economy wrapper calling `run_pipeline()`. |
+| `batch_run.py` | Multi-economy wrapper. Default `--parallel 1` calls `run_pipeline()` sequentially in-process; `--parallel N>1` runs isolated `python main.py` subprocesses with per-job `RDTII_LOG_DIR`. |
 | `evaluate.py` | Accuracy scoring: KNOWN match rate (40pts) + provision-level NEW (4pts each, max 20pts). |
 | `tools/cost_logger.py` | Standalone CLI cost benchmarking. |
 
-### Economy Configs (11 files in `economies/`)
+### Economy Configs (3 files in `economies/`)
 
 All declare `iso_code` and `un_name`. Adding a new economy requires only creating a YAML file — no Python changes.
 
@@ -254,14 +292,6 @@ All declare `iso_code` and `un_name`. Adding a new economy requires only creatin
 | Singapore | SG | SSO: `index` + `pdf_endpoint` + `header_spoof`; PDPC: `sitemap` discovery + `html_js` fetch (JS SPA regulator guidance, discovered via sitemap.xml); Gazette: `TBD` | Reference / Phase 1 gate |
 | Australia | AU | legislation.gov.au + OAIC | Minimal config |
 | Malaysia | MY | — | Minimal config |
-| Thailand | TH | — | Minimal config (BE conversion) |
-| Vietnam | VN | — | ISO/UN name only |
-| Philippines | PH | — | ISO/UN name only |
-| Cambodia | KH | — | ISO/UN name only |
-| Myanmar | MM | — | ISO/UN name only |
-| Laos | LA | — | ISO/UN name only |
-| Brunei | BN | — | ISO/UN name only |
-| Indonesia | ID | — | ISO/UN name only |
 
 ### Key Environment Variables
 
@@ -294,7 +324,7 @@ Each indicator has `rdtii_ref`, `category`, `scoring` (0/0.5/1 bands), `probe_ke
 
 ### Test Suite
 
-~604 tests passing, 2 skipped, 4 pre-existing unrelated failures (2 `test_probe`, 2 `test_z2_4_providers` anthropic credentials).
+757 tests passing, with 7 warnings in the current local suite.
 
 ### Critical Discovery Fix (latest)
 

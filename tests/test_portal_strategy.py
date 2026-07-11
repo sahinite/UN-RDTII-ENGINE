@@ -974,3 +974,34 @@ class TestSeedUrlRemap:
         known = {"https://cyrilla.org/api/files/live.pdf"}
         res = asyncio.run(discover(cfg, 7, _MINI_TAXONOMY, known))
         assert any("cyrilla.org/api/files/live.pdf" in z.url for z in res)
+
+
+class TestRunProfiles:
+    """RUN_PROFILE bundles the NEW-act discovery cap so a submission isn't
+    accidentally run under the safe build-gate (KNOWN-only) settings."""
+
+    def _new_cap(self, **env):
+        import subprocess, sys
+        e = {**__import__("os").environ}
+        for k in ("RUN_PROFILE", "ZONE2_MAX_NEW_ACTS"):
+            e.pop(k, None)
+        e.update(env)
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "from src.crawler.discover import _MAX_NEW_ACTS; print(_MAX_NEW_ACTS)"],
+            capture_output=True, text=True, env=e, cwd=".").stdout.strip()
+        return int(out)
+
+    def test_gate_is_known_only(self):
+        assert self._new_cap() == 0                       # unset → build gate
+        assert self._new_cap(RUN_PROFILE="gate") == 0
+
+    def test_submit_and_explore_enable_new(self):
+        assert self._new_cap(RUN_PROFILE="submit") == 3
+        assert self._new_cap(RUN_PROFILE="explore") == 8
+
+    def test_unknown_profile_is_safe(self):
+        assert self._new_cap(RUN_PROFILE="whatever") == 0  # fail safe → KNOWN-only
+
+    def test_explicit_env_overrides_profile(self):
+        assert self._new_cap(RUN_PROFILE="gate", ZONE2_MAX_NEW_ACTS="7") == 7

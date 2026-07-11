@@ -17,11 +17,17 @@ import sys
 
 
 def _translate(text: str, src: str) -> dict:
+    import os
     from argostranslate import package, settings, translate
 
     # Argos's default stanza sentence-splitter has no Malay/Tagalog model; MiniSBD
     # maps those to the English splitter and works.
     settings.chunk_type = settings.ChunkType.MINISBD
+    # Cap ctranslate2 threads per worker. Default (0) = all cores, which oversubscribes
+    # badly when several workers run in parallel; the pool sets a per-worker share.
+    intra = int(os.environ.get("ARGOS_INTRA_THREADS", "0"))
+    if intra > 0:
+        settings.intra_threads = intra
 
     installed = {(p.from_code, p.to_code) for p in package.get_installed_packages()}
     if (src, "en") not in installed:
@@ -57,7 +63,27 @@ def _install(langs: list[str]) -> dict:
     return {"ok": True, "installed": done}
 
 
+def _serve() -> None:
+    """Persistent server loop: load the model once, then translate one JSON request
+    per stdin line, writing one JSON response line each. Keeping the process alive
+    avoids reloading the ctranslate2 model (~3.5s) on every call."""
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            result = _translate(req["text"], req["source_lang"])
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)[:300]}
+        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.flush()
+
+
 def main() -> None:
+    if "--serve" in sys.argv:
+        _serve()
+        return
     try:
         req = json.loads(sys.stdin.read())
         if req.get("langs"):                       # install-only request

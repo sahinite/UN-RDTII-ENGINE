@@ -23,6 +23,27 @@ from src.crawler.ranker import (
     resolve_discovery_tag,
     run_ranker,
 )
+
+
+@pytest.fixture(autouse=True)
+def _offline_ranker_model():
+    """Mock the sentence-transformer so the LEGACY ranker's tests never download a
+    Hugging Face model — they run offline in restricted CI, matching the project
+    convention that all ML models are mocked in tests. Patches the SentenceTransformer
+    *constructor* (not _get_model), so test_model_loaded_once still verifies the
+    singleton caches correctly. Deterministic vectors keep semantic scores in range.
+    """
+    _reset_model_cache()
+
+    def _encode(texts, **_kw):
+        rng = np.random.default_rng(42)
+        return rng.random((len(list(texts)), 384)).astype("float32")
+
+    fake = MagicMock()
+    fake.encode.side_effect = _encode
+    with patch("sentence_transformers.SentenceTransformer", return_value=fake):
+        yield
+    _reset_model_cache()
 from src.crawler.seed_loader import (
     SeedData,
     load_seed_data,

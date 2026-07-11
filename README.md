@@ -1,7 +1,7 @@
 # RDTII Extraction Engine
 
 **UN Global Hackathon on AI for Digital Trade Regulatory Analysis**
-Team: UN ESCAP | Round: 1 | Submission deadline: 20 July 2026 | Demo: 3 August 2026
+Team: Galaxefi | Round: 1 | Submission deadline: 20 July 2026 | Demo: 3 August 2026
 
 An end-to-end AI pipeline that crawls government legal portals, extracts regulatory text via OCR/NLP, and maps provisions to RDTII indicators (Pillars 6 & 7) using a 7-tier LLM cascade with hybrid RAG retrieval.
 
@@ -16,9 +16,11 @@ python setup.py
 ```
 
 This script will:
-- Install **Tesseract** (required — default OCR engine)
-- Optionally pre-download the **sentence-transformers** embedding model (~90MB)
+- Install **Tesseract** (required — default OCR engine; language packs like Malay `msa` auto-install per economy at run start)
+- Optionally pre-download the **sentence-transformers** embedding models (English `all-MiniLM-L6-v2` + multilingual `paraphrase-multilingual-MiniLM-L12-v2`, ~90–120MB each — see [retrieval strategy](#retrieval-strategy))
 - Optionally install **Ollama** with offline models (~9GB) — only needed if you have no cloud API key
+
+> **Translation** uses **Argos Translate** (offline neural MT) as the primary provider, with DeepL → Google as fallbacks. Argos models auto-install per economy at run start (no manual step, no API key). Non-English economies retrieve over the original text and skip full-document translation; the LLM reads the retrieved source-language passages directly.
 
 > **If you have any one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY`, you can skip Ollama.**
 
@@ -28,7 +30,8 @@ This script will:
 |---|---|---|
 | Tesseract 5.3+ | **Yes** | macOS: `brew install tesseract` / Ubuntu: `sudo apt-get install -y tesseract-ocr` / Windows: [installer](https://github.com/UB-Mannheim/tesseract/wiki) |
 | Ollama + models | No (offline only) | macOS: `brew install ollama` / Ubuntu: `curl -fsSL https://ollama.com/install.sh \| sh` |
-| sentence-transformers model | No (auto-downloads on first run) | `python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"` |
+| sentence-transformers models | No (auto-download on first run) | `python -c "from sentence_transformers import SentenceTransformer as S; S('all-MiniLM-L6-v2'); S('paraphrase-multilingual-MiniLM-L12-v2')"` |
+| Argos Translate | Yes for non-English economies (auto-installs models per run) | `pip install argostranslate` (in requirements.txt) |
 
 ---
 
@@ -52,8 +55,10 @@ python evaluate.py --sample-kit data/sample_kit/ --economy Singapore
 python tools/cost_logger.py --pdf data/benchmark/benchmark_50pages.pdf \
     --economy Singapore --pillar 7
 
-# Batch run across economies and pillars
-python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
+# Batch run — each economy runs concurrently in its own isolated subprocess (auto)
+RUN_PROFILE=submit python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
+#   --max-parallel N   cap concurrent economy lanes (avoid LLM rate limits with many economies)
+#   --max-parallel 1   fully sequential (in-process)
 ```
 
 ---
@@ -70,7 +75,7 @@ src/llm/         LLM cascade re-export (see src/mapping/)    [Z2-4]
 src/mapping/     7-tier LLM cascade + indicator mapping      [Z2-4]
 src/output/      CSV/JSON writer, URL validator, cost logger [Z2-5, Z2-6]
 tools/           cost_logger.py — standalone cost benchmark  [Z2-6]
-economies/       per-economy YAML configs (10 files)         [Z1-1]
+economies/       per-economy YAML configs (3 files)          [Z1-1]
 tests/           pytest suite (mirrors src/ modules)
 data/
   sample_kit/    Round 1 ground truth (evaluation input)
@@ -84,23 +89,14 @@ logs/            run logs + cost_report.json (gitignored)
 
 ## Supported economies
 
-Ten economy YAML files exist. Four have configured portals (Singapore is the
-HTML-index reference; Australia is the API-driven reference); the remaining six
-are scaffolds carrying only economy metadata (portals `TBD`).
+Three economy YAML files exist and are configured. Singapore is the HTML-index
+reference, while Australia is the API-driven reference.
 
 | Economy | YAML | Primary portal | Discovery | Script | Languages | Status |
 |---------|------|----------------|-----------|--------|-----------|--------|
 | Singapore | `singapore.yaml` | sso.agc.gov.sg | index | latin | en | Reference (PDPA-first gate) |
 | Australia | `australia.yaml` | legislation.gov.au | api | latin | en | Live |
 | Malaysia | `malaysia.yaml` | agc.gov.my | — | latin | ms, en | Configured |
-| Thailand | `thailand.yaml` | ratchakitcha.soc.go.th | — | asian | th, en | Configured |
-| Viet Nam | `vietnam.yaml` | — | — | latin | vi, en | Scaffold |
-| Philippines | `philippines.yaml` | — | — | latin | fil, en | Scaffold |
-| Cambodia | `cambodia.yaml` | — | — | khmer | km, en | Scaffold |
-| Myanmar | `myanmar.yaml` | — | — | myanmar | my, en | Scaffold |
-| Lao PDR | `laos.yaml` | — | — | lao | lo, en | Scaffold |
-| Brunei Darussalam | `brunei.yaml` | — | — | latin | ms, en | Scaffold |
-
 ---
 
 ## Output format
@@ -142,7 +138,7 @@ Provider order is fixed (ADR-021, pinned once per run via `LLM_PROVIDER` env var
 | 4 | Groq | `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`) | Free tier |
 | 5 | Qwen (DashScope) | `qwen-plus` | `DASHSCOPE_API_KEY` |
 | 6 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
-| 7 | Ollama | `granite3-dense:8b` | Offline, Apache 2.0 |
+| 7 | Ollama | `granite3-8b` | Offline, Apache 2.0 |
 
 **Note:** Llama 3.3 is explicitly excluded (non-Apache 2.0 license).
 Pin any provider with `LLM_PROVIDER`: `anthropic | openai | deepseek | groq | qwen | ollama`.
@@ -207,25 +203,21 @@ LLM_PROVIDER=anthropic
 
 ---
 
-## Cost measurement
+## Retrieval strategy
 
-The hackathon rubric requires **measured** (not estimated) per-document costs.
+Retrieval models and translation are selected **per economy** from `economy_config.languages`
+(see CONTEXT.md ADR-060/061):
 
-```bash
-python tools/cost_logger.py \
-    --pdf data/benchmark/benchmark_50pages.pdf \
-    --economy Singapore --pillar 7
-```
+| | English economies (SG, AU) | Non-English economies (MY) |
+|---|---|---|
+| Embedder | `all-MiniLM-L6-v2` | `paraphrase-multilingual-MiniLM-L12-v2` |
+| Reranker | `ms-marco-MiniLM-L-6-v2` | `mmarco-mMiniLMv2-L12-H384-v1` |
+| Translation | none (already English) | RAG on **original** text; only retrieved passages reach the LLM |
+| Full-doc translation | n/a | **skipped** (`translate_body=False`) |
 
-Output: `logs/cost_report.json` — includes per-component costs for OCR, embedding, LLM, and crawling. Judges verify this file against the code.
-
----
-
-## PDPA-first gate
-
-Singapore PDPA (Pillar 7) **must pass end-to-end before testing any other economy**. This is enforced architecturally: `main.py` runs `check_pdpa_gate()` after Singapore Pillar 7 extraction. Gate requires at least one P7 provision with confidence ≥ 0.80.
-
----
+- **Why per-economy, not global multilingual?** A global multilingual embedder *regressed the Singapore build gate* (P7: 18→10 records). English economies keep the English-specialised model; the multilingual one is only used where it's needed. Default is the English model, so the gate is safe.
+- **Why translate-less?** Non-English documents (e.g. Malaysia's ~1.5M-char acts) used to be translated in full just to feed retrieval. Retrieval now runs on the original text and only the small set of retrieved passages is sent to the LLM, cutting **Malaysia P7 from ~50 min to ~7 min** (translation → ~1% of runtime).
+- **Run profiles** (`RUN_PROFILE`): `gate` (KNOWN-only, build gate, default) · `submit` (KNOWN + 3 NEW — use this for submissions) · `explore` (aggressive NEW). The active profile is printed at run start.
 
 ## Running tests
 
@@ -271,22 +263,22 @@ No `latest` tags are used anywhere in this project. All versions are pinned:
 | LLM (tier 4) | `qwen/qwen3-32b` via Groq |
 | LLM (tier 5) | `qwen-plus` via DashScope |
 | LLM (tier 6, offline) | `qwen2.5:7b` (Ollama, Apache 2.0) |
-| LLM (tier 7, offline) | `granite3-dense:8b` (Ollama, Apache 2.0) |
+| LLM (tier 7, offline) | `granite3-8b` (Ollama, Apache 2.0) |
 | OCR (Latin scripts) | Tesseract 5.x |
 | OCR (Asian scripts) | PaddleOCR 2.x |
 
-Key library versions are pinned in `requirements.txt`. Run `pip install -r requirements.txt` to reproduce the exact environment.
+Python package dependencies are declared in `requirements.txt`; model names are fixed in code/config so runs do not depend on provider `latest` aliases.
 
 ---
 
-## Open-source fallback (if commercial API)
+## Open-source fallback (without commercial API keys)
 
 To run the engine fully offline without any API keys:
 
 ```bash
 # 1. Pull the offline models
 ollama pull qwen2.5:7b
-ollama pull granite3-dense:8b
+ollama pull granite3-8b
 
 # 2. Pin the engine to Ollama
 export LLM_PROVIDER=ollama
@@ -295,15 +287,8 @@ export LLM_PROVIDER=ollama
 python main.py --economy Singapore --pillar 7
 ```
 
-The Ollama cascade uses `qwen2.5:7b` (tier 4) first, then `granite3-dense:8b` (tier 5) on failure. Both models are Apache 2.0 licensed. OCR (Tesseract / PaddleOCR) and embeddings are always local and require no API key.
+The Ollama cascade uses `qwen2.5:7b` (tier 6) first, then `granite3-8b` (tier 7) on failure. Both models are Apache 2.0 licensed. OCR (Tesseract / PaddleOCR) and embeddings are always local and require no API key.
 
----
-
-## Build order (ClickUp story sequence)
-
-All stories completed: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]` → `[Z2-86ey0q56f]` (audit/integration fixes).
-
----
 
 ## License
 

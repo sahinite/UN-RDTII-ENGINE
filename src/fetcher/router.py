@@ -40,14 +40,11 @@ _USER_AGENT = (
 
 def _find_portal_for_url(url: str, economy_config: "EconomyConfig"):
     """Return the Portal config whose URL domain matches the given URL, or None."""
-    import tldextract
-    def _reg_domain(u: str) -> str:
-        ext = tldextract.extract(u)
-        return getattr(ext, "top_domain_under_public_suffix", None) or ext.registered_domain
+    from src.crawler.domains import registered_domain
 
-    url_domain = _reg_domain(url)
+    url_domain = registered_domain(url)
     for portal in economy_config.portals:
-        if _reg_domain(str(portal.url)) == url_domain:
+        if registered_domain(str(portal.url)) == url_domain:
             return portal
     return None
 

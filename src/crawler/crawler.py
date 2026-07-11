@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-import tldextract
 from bs4 import BeautifulSoup
 
 from src.cli.progress import substep
@@ -94,9 +93,9 @@ def _normalise_url(url: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=new_query))
 
 
-def _registered_domain(url: str) -> str:
-    extracted = tldextract.extract(url)
-    return getattr(extracted, "top_domain_under_public_suffix", None) or extracted.registered_domain
+# Domain extraction lives in the shared, offline-pinned utility; re-exported here
+# under the historical name for existing importers (discover, currency, this module).
+from src.crawler.domains import registered_domain as _registered_domain
 
 
 def _is_same_domain(url: str, portal_domain: str) -> bool:

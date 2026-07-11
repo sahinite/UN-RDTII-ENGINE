@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,10 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+# RDTII_LOG_DIR lets parallel batch runs isolate their logs (the rotating file
+# handler is not multiprocess-safe — concurrent writers to one file can corrupt it).
+_LOG_DIR = Path(os.environ["RDTII_LOG_DIR"]) if os.environ.get("RDTII_LOG_DIR") \
+    else Path(__file__).parent.parent.parent / "logs"
 
 
 def get_logger(name: str) -> logging.Logger:

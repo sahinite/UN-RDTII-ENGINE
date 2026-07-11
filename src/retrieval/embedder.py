@@ -12,6 +12,7 @@ are loaded once per process.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -40,13 +41,34 @@ def quiet_hf_hub() -> None:
     _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
 
 
+# Two embedders, selected per economy:
+#  - English-only economies (SG, AU) use the English-specialised model — it retrieves
+#    better on English than the multilingual one (empirically 18 vs 10 SG P7 records),
+#    so the build gate is preserved.
+#  - Non-English economies (MY) use the multilingual model so RAG runs on the ORIGINAL
+#    text (no whole-document translation; only retrieved passages reach the LLM).
+_ENGLISH_EMBED_MODEL = os.environ.get("EMBED_MODEL_EN", "").strip() or "all-MiniLM-L6-v2"
+_MULTILINGUAL_EMBED_MODEL = os.environ.get("EMBED_MODEL_ML", "").strip() or "paraphrase-multilingual-MiniLM-L12-v2"
+_use_multilingual = False
+
+
+def set_multilingual(flag: bool) -> None:
+    """Select the multilingual embedder (non-English economies) vs the English one.
+    Call once at run start; resets the cached model if the choice changed."""
+    global _use_multilingual, _model
+    if bool(flag) != _use_multilingual:
+        _use_multilingual = bool(flag)
+        _model = None  # force reload with the newly-selected model
+
+
 def _get_model():
     global _model
     if _model is None:
         quiet_hf_hub()
         from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-        logger.info({"event": "embedding_model_loaded", "model": "all-MiniLM-L6-v2"})
+        name = _MULTILINGUAL_EMBED_MODEL if _use_multilingual else _ENGLISH_EMBED_MODEL
+        _model = SentenceTransformer(name)
+        logger.info({"event": "embedding_model_loaded", "model": name})
     return _model
 
 

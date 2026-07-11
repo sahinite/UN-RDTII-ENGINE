@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from collections import defaultdict
@@ -122,6 +123,24 @@ def run_pipeline(
         sys.exit(1)
     economy_iso = economy_config.iso_code
     p.done(f"Economy config — {economy} ({economy_iso})")
+
+    # Surface the active run profile up front so a submission is never accidentally
+    # run under the safe build-gate settings (NEW-act discovery off).
+    from src.crawler.discover import RUN_PROFILE as _RUN_PROFILE, _MAX_NEW_ACTS as _NEW_CAP
+    p.info(f"Run profile — {_RUN_PROFILE} (NEW-act cap {_NEW_CAP}"
+           + ("; KNOWN-only — set RUN_PROFILE=submit for NEW discovery)" if _NEW_CAP == 0 else ")"))
+
+    # Retrieval strategy by economy language. English-only economies (SG, AU) use the
+    # English embedder/reranker (best English retrieval → build gate preserved) and
+    # translate nothing. Non-English economies use the multilingual models so RAG runs
+    # on the ORIGINAL text and only retrieved passages reach the LLM — no whole-doc
+    # translation (Malaysia P7: 50 min → ~7 min).
+    _english_only = all(str(lang).lower().strip() == "en" for lang in economy_config.languages)
+    _translate_body = _english_only
+    from src.retrieval.embedder import set_multilingual as _set_embed_ml
+    from src.retrieval.reranker import set_multilingual as _set_rerank_ml
+    _set_embed_ml(not _english_only)
+    _set_rerank_ml(not _english_only)
 
     # Ensure the Tesseract language packs this economy needs are installed (e.g.
     # Malay 'msa'); best-effort, config-driven. Missing packs otherwise crash local
@@ -238,7 +257,11 @@ def run_pipeline(
             p.step(f"{prefix} Translating")
             _t = time.monotonic()
             try:
-                translated = translate_document(doc, economy_config)
+                # Non-English economies: RAG retrieves over the ORIGINAL text via the
+                # multilingual embedder, so the body is NOT translated (was ~1.5M chars
+                # for MY; now ~0) — the LLM reads retrieved source-language passages.
+                # English economies keep the original full flow (translate_body no-op).
+                translated = translate_document(doc, economy_config, translate_body=_translate_body)
                 p.done(f"{prefix} Translation done")
             except Exception as exc:
                 p.warn(f"{prefix} Translation failed — using raw text")
@@ -323,7 +346,7 @@ def run_pipeline(
     # never assigns them to (only when a correct-indicator copy survives). NEW is left
     # untouched. Mis-maps are logged for root-cause analysis (see memory).
     all_records, _mismaps = _prune_known_cross_indicator(all_records, known_sections_by_indicator)
-    _diag_dir = Path("logs") / "diagnostics"
+    _diag_dir = Path(os.environ.get("RDTII_LOG_DIR", "logs")) / "diagnostics"
     _diag_tag = f"{economy_iso}_P{pillar}"
     if _mismaps:
         _dropped = sum(1 for m in _mismaps if m["dropped"])
@@ -386,7 +409,7 @@ def run_pipeline(
 
     # ── Write outputs ───────────────────────────────────────────────────────────
     p.step("Writing outputs")
-    cost_logger.save(log_dir=Path("logs"))
+    cost_logger.save(log_dir=Path(os.environ.get("RDTII_LOG_DIR", "logs")))
     summary = write_outputs(
         records=all_records,
         output_dir=output_dir,
