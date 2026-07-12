@@ -198,6 +198,16 @@ class TestKnownCrossIndicatorPrune:
         kept, mm = _prune_known_cross_indicator(recs, _KSBI)
         assert len(kept) == 2 and mm == []
 
+    def test_fuzzy_titled_known_is_grouped_and_pruned(self):
+        # A KNOWN row emitted with an abbreviated title ("PDPA") must resolve to its
+        # Round 1 key and be subject to the same ground-truth prune — not bypass it.
+        from main import _prune_known_cross_indicator
+        recs = [_CIRec("PDPA", "P6-I4", "Section 26(2)"),          # correct indicator
+                _CIRec("PDPA", "P6-I1", "Section 26(2)")]          # wrong indicator
+        kept, mm = _prune_known_cross_indicator(recs, _KSBI)
+        assert [r.indicator_id for r in kept] == ["P6-I4"]
+        assert len(mm) == 1 and mm[0]["wrong_indicator"] == "P6-I1" and mm[0]["dropped"] is True
+
     def test_empty_ksbi_is_noop(self):
         from main import _prune_known_cross_indicator
         recs = [_CIRec("My Health Records Act 2012", "P6-I3", "Section 77(1)")]

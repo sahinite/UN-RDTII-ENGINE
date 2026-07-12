@@ -125,9 +125,11 @@ class TestPortalStrategyFields:
         sso = cfg.portals[0]
         assert sso.anti_bot == "header_spoof"
         assert sso.discovery == "index"
-        assert sso.fetch == "pdf_endpoint"
+        # SSO now serves the full act via its JS-rendered whole-document HTML view
+        # (?ViewType=Pdf returns an empty 202 behind anti-bot); see ADR-065.
+        assert sso.fetch == "html_wholedoc"
         assert len(sso.index_urls) >= 2
-        assert sso.pdf_view_suffix == "?ViewType=Pdf"
+        assert sso.pdf_view_suffix == "?WholeDoc=1"
         assert sso.transport_fallback == "playwright_stealth"
 
     def test_singapore_gazette_has_tbd_strategy(self):

@@ -11,7 +11,7 @@ try:
 except ImportError:
     Groq = None  # type: ignore[assignment,misc]
 
-from src.mapping.base_provider import BaseLLMProvider
+from src.mapping.base_provider import BaseLLMProvider, resolve_api_key
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
@@ -38,7 +38,7 @@ class GroqProvider(BaseLLMProvider):
         return _resolve_model()
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("GROQ_API_KEY", "").strip())
+        return bool(resolve_api_key("GROQ_API_KEY"))
 
     def complete(
         self,
@@ -50,7 +50,7 @@ class GroqProvider(BaseLLMProvider):
         if Groq is None:
             raise ProviderAPIError("groq", "groq package not installed")
 
-        client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        client = Groq(api_key=resolve_api_key("GROQ_API_KEY"))
         t0 = time.time()
         model_to_use = _resolve_model()
         try:

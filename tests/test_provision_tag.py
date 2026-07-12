@@ -5,6 +5,7 @@ Tests for resolve_provision_tag() and infer_article_anchor(). [86ey13cyh Seam 2]
 from __future__ import annotations
 
 from src.crawler.crawler import _normalise_url as normalise_url
+from src.crawler.seed_loader import match_known_act, normalise_title
 from src.mapping.provision_tag import (
     infer_article_anchor,
     infer_section_token,
@@ -28,8 +29,16 @@ class TestResolveProvisionTag:
         assert tag == "NEW"
         assert unresolvable is False
 
-    def test_new_doc_always_returns_new(self):
+    def test_new_doc_with_round1_anchor_returns_known(self):
+        # KNOWN is an identity judgement: a provision whose act-URL+anchor is in
+        # Round 1 is KNOWN even when the DOCUMENT was discovered as a NEW act
+        # (same act reachable via a different URL/portal).
         tag, unresolvable = resolve_provision_tag(BASE_URL, "#pr26-", "NEW", KNOWN)
+        assert tag == "KNOWN"
+        assert unresolvable is False
+
+    def test_new_doc_unknown_anchor_returns_new(self):
+        tag, unresolvable = resolve_provision_tag(BASE_URL, "#pr99-", "NEW", KNOWN)
         assert tag == "NEW"
         assert unresolvable is False
 
@@ -88,14 +97,85 @@ class TestResolveProvisionTagBySection:
         )
         assert tag == "NEW"
 
-    def test_new_doc_ignores_section_match(self):
+    def test_new_doc_section_match_returns_known(self):
+        # Act+section identity wins regardless of the document's discovery tag:
+        # a NEW-discovered document whose (act, section) is in Round 1 is KNOWN.
         tag, _ = resolve_provision_tag(
             BASE_URL, None, "NEW", set(),
             law_name="Personal Data Protection Act 2012",
             article="Section 11(3)",
             known_sections=KNOWN_SECTIONS,
         )
+        assert tag == "KNOWN"
+
+    def test_new_doc_untestable_falls_back_to_new(self):
+        # No anchor and no section token → cannot test identity → fall back to the
+        # document's NEW tag, flagged unresolvable.
+        tag, unresolvable = resolve_provision_tag(
+            BASE_URL, None, "NEW", set(),
+            law_name="Personal Data Protection Act 2012",
+            article="",
+            known_sections=KNOWN_SECTIONS,
+        )
         assert tag == "NEW"
+        assert unresolvable is True
+
+
+class TestFuzzyActTitleMatch:
+    """KNOWN act+section match tolerates title-form differences (acronym, comma,
+    dropped words) so a genuinely-known act is not mis-tagged NEW."""
+
+    def _tag(self, law_name):
+        tag, _ = resolve_provision_tag(
+            BASE_URL, None, "KNOWN", set(),
+            law_name=law_name, article="Section 11(3)",
+            known_sections=KNOWN_SECTIONS,
+        )
+        return tag
+
+    def test_acronym_matches(self):
+        assert self._tag("PDPA") == "KNOWN"
+
+    def test_comma_before_year_matches(self):
+        assert self._tag("Personal Data Protection Act, 2012") == "KNOWN"
+
+    def test_dropped_leading_word_matches(self):
+        assert self._tag("Data Protection Act 2012") == "KNOWN"
+
+    def test_unrelated_guidance_heading_stays_new(self):
+        # A regulator guidance page heading is not the statute → must NOT match.
+        assert self._tag("DATA-PROTECTION-OBLIGATIONS") == "NEW"
+
+    def test_single_generic_token_does_not_overmatch(self):
+        # "Companies Act" is in Round 1 sections only via KNOWN_SECTIONS? no —
+        # ensure a lone generic token can't match a longer unrelated act.
+        from src.mapping.provision_tag import resolve_provision_tag as r
+        ks = {"my health records act": {"77"}}
+        tag, _ = r(BASE_URL, None, "KNOWN", set(),
+                   law_name="Health Act", article="Section 77", known_sections=ks)
+        assert tag == "NEW"
+
+
+_MATCH_KEYS = {
+    normalise_title(t) for t in [
+        "Personal Data Protection Act 2012", "Companies Act 1967",
+        "My Health Records Act 2012", "Privacy Act 1988",
+    ]
+}
+
+
+class TestMatchKnownAct:
+    def test_exact(self):
+        assert match_known_act("Companies Act 1967", _MATCH_KEYS) == "companies act"
+
+    def test_acronym_without_act(self):
+        assert match_known_act("MHR", _MATCH_KEYS) == "my health records act"
+
+    def test_no_match_returns_none(self):
+        assert match_known_act("Telecommunications Act 1997", _MATCH_KEYS) is None
+
+    def test_empty_returns_none(self):
+        assert match_known_act("", _MATCH_KEYS) is None
 
 
 class TestInferSectionToken:

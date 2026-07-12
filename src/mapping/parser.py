@@ -17,7 +17,11 @@ from typing import Optional
 
 from src.mapping.exceptions import ParseError
 from src.mapping.models import ExtractionResult, LLMResponse
-from src.mapping.provision_tag import infer_article_anchor, resolve_provision_tag
+from src.mapping.provision_tag import (
+    infer_article_anchor,
+    infer_section_token,
+    resolve_provision_tag,
+)
 from src.retrieval.models import RetrievedChunk
 
 logger = logging.getLogger("mapping.parser")
@@ -29,6 +33,58 @@ _CROSS_REF_PATTERNS = re.compile(
 _DELEGATED_LEG_KEYWORDS = re.compile(
     r"\b(Regulations|Order|Rules|Subsidiary Legislation|Direction)\b"
 )
+
+
+def _norm_text(text: str) -> str:
+    """NFKC + punctuation/space normalisation shared by verbatim matching."""
+    t = unicodedata.normalize("NFKC", text)
+    for a, b in (
+        ("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"'),
+        ("–", "-"), ("—", "-"), ("…", "..."),
+        (" ", " "), ("­", ""),
+    ):
+        t = t.replace(a, b)
+    return t.lower()
+
+
+def _collapse_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", _norm_text(text).strip())
+
+
+def _strip_ws(text: str) -> str:
+    return re.sub(r"\s+", "", _norm_text(text))
+
+
+def _snippet_in_text(snippet: str, text: str) -> bool:
+    """True if snippet appears in text under whitespace/punctuation tolerance."""
+    snip_c, hay_c = _collapse_ws(snippet), _collapse_ws(text)
+    if snip_c and snip_c in hay_c:
+        return True
+    snip_s, hay_s = _strip_ws(snippet), _strip_ws(text)
+    if snip_s and snip_s in hay_s:
+        return True
+    if len(snip_s) > 80 and snip_s[:80] in hay_s:
+        return True
+    return False
+
+
+def _find_matching_chunk(
+    snippet: str,
+    top_chunks: list[RetrievedChunk],
+) -> Optional[RetrievedChunk]:
+    """
+    Return the chunk whose text actually contains the verbatim snippet, so the
+    citation (page/article) is anchored to where the text really lives — not to
+    top_chunks[0], which varies per (indicator × doc) call and produced the
+    "same provision, different page" mismatch. Falls back to None if no single
+    chunk contains it (snippet may straddle a chunk boundary).
+    """
+    if not snippet:
+        return None
+    for rc in top_chunks:
+        if _snippet_in_text(snippet, rc.chunk.text):
+            return rc
+    return None
 
 
 def parse_llm_response(
@@ -132,25 +188,9 @@ def _assert_verbatim_in_context(
         normalised. We also match across the *joined* chunks so a snippet that
         straddles a chunk boundary still verifies.
     """
-    def _norm(text: str) -> str:
-        t = unicodedata.normalize("NFKC", text)
-        for a, b in (
-            ("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"'),
-            ("–", "-"), ("—", "-"), ("…", "..."),
-            (" ", " "), ("­", ""),
-        ):
-            t = t.replace(a, b)
-        return t.lower()
-
-    def _collapse(text: str) -> str:
-        return re.sub(r"\s+", " ", _norm(text).strip())
-
-    def _stripped(text: str) -> str:
-        return re.sub(r"\s+", "", _norm(text))
-
     joined = " ".join(rc.chunk.text for rc in top_chunks)
-    snip_collapse, hay_collapse = _collapse(snippet), _collapse(joined)
-    snip_strip, hay_strip = _stripped(snippet), _stripped(joined)
+    snip_collapse, hay_collapse = _collapse_ws(snippet), _collapse_ws(joined)
+    snip_strip, hay_strip = _strip_ws(snippet), _strip_ws(joined)
 
     if snip_collapse and snip_collapse in hay_collapse:
         return True, None
@@ -177,7 +217,6 @@ def _build_extraction_result(
     article = prov.get("article", "").strip()
     rationale = prov.get("mapping_rationale", "").strip()
     confidence = prov.get("confidence")
-    location_ref = prov.get("location_reference", "")
     non_consecutive = prov.get("non_consecutive", False)
 
     if not snippet and not article:
@@ -227,6 +266,16 @@ def _build_extraction_result(
         flag_for_review = True
         flag_reasons.append("article_missing_paragraph")
 
+    # Non-primary source check: a provision extracted from a secondary portal
+    # (regulator guidance / advisory / summary page) is not the binding statute.
+    # Such pages often paraphrase the law and number obligations as a plain list
+    # ("8. Transfer Limitation Obligation"), which the LLM cites as a spurious
+    # section — so flag for verification against the primary legislation. Driven
+    # by the portal's declared YAML `type`, so it holds for every economy.
+    if doc_metadata.get("portal_type") == "secondary":
+        flag_for_review = True
+        flag_reasons.append("non_primary_source — verify against primary legislation")
+
     # Decision 2/3: provision-level discovery tag
     anchor = infer_article_anchor(article) if article else None
     tag, tag_unresolvable = resolve_provision_tag(
@@ -256,35 +305,29 @@ def _build_extraction_result(
     if law_name and _DELEGATED_LEG_KEYWORDS.search(law_name):
         notes_parts.append("Delegated legislation — verify enabling act")
 
-    source_chunk = top_chunks[0] if top_chunks else None
-    context_window = source_chunk.context_window if source_chunk else ""
+    # Decision 9: location_reference is derived deterministically from trusted
+    # provenance — never from an LLM-emitted value. The LLM cannot know page
+    # numbers or anchor URLs (they are not in the prompt), so any it invents are
+    # fabricated (e.g. the literal "https://url#anchor" placeholder). We build the
+    # citation from (a) the LLM's `article` field — the authoritative section it
+    # read from the chunk header — and (b) the page of the chunk that actually
+    # contains the verbatim snippet. Anchoring to the snippet-bearing chunk (not
+    # top_chunks[0], which varies per indicator call) is what keeps the SAME
+    # provision's citation identical across indicators.
+    matched_chunk = _find_matching_chunk(snippet, top_chunks) or (
+        top_chunks[0] if top_chunks else None
+    )
+    context_window = matched_chunk.context_window if matched_chunk else ""
 
-    # Decision 9: always prefer chunk-derived page number; LLM value is supplementary
-    chunk_location_ref = None
-    if source_chunk:
-        loc = source_chunk.chunk.location_reference
-        parts = []
-        if loc.page is not None:
-            parts.append(f"Page {loc.page + 1}")
-        # Only cite a chunk article number when it's a plausible section — the chunker
-        # mislabels compilation PDFs, leaking a 4-digit YEAR ("Art. 2020") or the PAGE
-        # number ("Art. 371 | Page 371") into article_number. Drop those; the LLM
-        # `article` field remains the authoritative citation.
-        an = (loc.article_number or "").strip()
-        _is_year = an.isdigit() and 1800 <= int(an) <= 2099
-        _is_page = loc.page is not None and an.isdigit() and int(an) in (loc.page, loc.page + 1)
-        if an and not _is_year and not _is_page:
-            parts.append(f"Art. {an}")
-        chunk_location_ref = " | ".join(parts) if parts else None
-
-    if chunk_location_ref:
-        # Append LLM value only if it adds anchor/HTML context not in chunk ref
-        if location_ref and location_ref not in chunk_location_ref:
-            final_location_ref = f"{chunk_location_ref} | {location_ref}"
-        else:
-            final_location_ref = chunk_location_ref
-    else:
-        final_location_ref = location_ref or None
+    loc_parts = []
+    section_token = infer_section_token(article) if article else None
+    if section_token:
+        loc_parts.append(f"Art. {section_token.upper()}")
+    if matched_chunk is not None:
+        page = matched_chunk.chunk.location_reference.page
+        if page is not None:
+            loc_parts.append(f"Page {page + 1}")
+    final_location_ref = " | ".join(loc_parts) if loc_parts else None
 
     result = ExtractionResult(
         economy=doc_metadata["economy"],
@@ -303,7 +346,7 @@ def _build_extraction_result(
         notes="; ".join(notes_parts) if notes_parts else None,
         provider_used=response.provider,
         model_used=response.model,
-        source_chunk_id=source_chunk.chunk.chunk_id if source_chunk else "unknown",
+        source_chunk_id=matched_chunk.chunk.chunk_id if matched_chunk else "unknown",
         raw_context_before=context_window,
         raw_context_after="",
         verbatim_original=doc_metadata.get("verbatim_original"),
@@ -311,8 +354,8 @@ def _build_extraction_result(
         flag_for_review=flag_for_review,
         flag_reason="; ".join(flag_reasons) if flag_reasons else None,
         non_consecutive=non_consecutive,
-        source_rerank_score=getattr(source_chunk, "rerank_score", None) if source_chunk else None,
-        source_retrieval_method=getattr(source_chunk, "retrieval_method", None) if source_chunk else None,
+        source_rerank_score=getattr(matched_chunk, "rerank_score", None) if matched_chunk else None,
+        source_retrieval_method=getattr(matched_chunk, "retrieval_method", None) if matched_chunk else None,
     )
 
     result.validate()
@@ -330,11 +373,23 @@ def expand_non_consecutive(results: list[ExtractionResult]) -> list[ExtractionRe
             parts = [p.strip() for p in re.split(r"\s+and\s+|;\s*", r.article, maxsplit=1)]
             if len(parts) == 2:
                 snippet_parts = r.verbatim_snippet.split(". ", maxsplit=1)
+                # Carry over the parent's page token so each split row keeps its
+                # provenance, but re-cite the article for the row's own section.
+                page_tok = next(
+                    (p.strip() for p in (r.location_reference or "").split("|")
+                     if p.strip().lower().startswith("page ")),
+                    None,
+                )
                 for i, art in enumerate(parts):
                     row = copy.deepcopy(r)
                     row.article = art
                     row.verbatim_snippet = snippet_parts[i] if i < len(snippet_parts) else r.verbatim_snippet
                     row.non_consecutive = False
+                    art_tok = infer_section_token(art)
+                    loc_bits = ([f"Art. {art_tok.upper()}"] if art_tok else []) + (
+                        [page_tok] if page_tok else []
+                    )
+                    row.location_reference = " | ".join(loc_bits) or None
                     row.notes = (row.notes or "") + f" [Split from non-consecutive provision: {r.article}]"
                     expanded.append(row)
                 continue

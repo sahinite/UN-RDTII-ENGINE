@@ -10,7 +10,7 @@ try:
 except ImportError:
     anthropic = None  # type: ignore[assignment]
 
-from src.mapping.base_provider import BaseLLMProvider
+from src.mapping.base_provider import BaseLLMProvider, resolve_api_key
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
@@ -38,7 +38,7 @@ class AnthropicProvider(BaseLLMProvider):
         return _resolve_model()
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        return bool(resolve_api_key("ANTHROPIC_API_KEY"))
 
     def complete(
         self,
@@ -51,7 +51,7 @@ class AnthropicProvider(BaseLLMProvider):
             raise ProviderAPIError("anthropic", "anthropic package not installed")
 
         if self._client is None:
-            self._client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            self._client = anthropic.Anthropic(api_key=resolve_api_key("ANTHROPIC_API_KEY"))
 
         model = _resolve_model()
         t0 = time.time()

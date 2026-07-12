@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Optional
 
 from src.crawler.crawler import _normalise_url as normalise_url
-from src.crawler.seed_loader import normalise_title
+from src.crawler.seed_loader import match_known_act
 
 # Query params that are PDF/HTML render artefacts, not part of a provision's
 # identity. The pdf_endpoint fetch appends ?ViewType=Pdf, but known_provisions
@@ -71,27 +71,37 @@ def resolve_provision_tag(
     """
     Resolve discovery_tag at provision level.
 
-    A provision is KNOWN when Round 1 documented it and the run found it — matched
-    two ways, either satisfies KNOWN (indicator-agnostic, per the Round 2 rubric):
+    KNOWN is an IDENTITY judgement, not a URL/portal one: if the act+provision
+    exists in the Round 1 database it is KNOWN regardless of which portal or URL
+    the run happened to fetch it from (a single KNOWN act may carry several Round 1
+    reference URLs, and the engine may reach it via a different URL entirely). So
+    the identity checks below run for EVERY provision — including those found in a
+    document discovered as a NEW act, since a "new" URL can still resolve to a
+    Round 1 act under a different title/portal. Two matches, either satisfies KNOWN
+    (indicator-agnostic, per the Round 2 rubric):
       1. anchor-URL match: the reconstructed act-URL + #anchor is in
          ``known_provisions`` (Round 1 References that carried a #section anchor).
       2. act+section match: (normalised act title, section number) is in
-         ``known_sections`` — this is what catches Round 1's *prose* citations
-         ("Section 199", "Section 11(3)") which have no anchor URL at all and are
-         the common case for Pillar 7.
+         ``known_sections`` — this is the URL-independent signal, and it catches
+         Round 1's *prose* citations ("Section 199", "Section 11(3)") that have no
+         anchor URL at all. This is the primary KNOWN signal.
+
+    The document-level ``doc_discovery_tag`` is only a fallback, used when the
+    provision cannot be tested at all (no anchor and no section token).
 
     Returns (tag, flag_unresolvable) where flag_unresolvable is True only when we
     had neither an anchor nor a section token to test and fell back to doc tag.
     """
-    if doc_discovery_tag == "NEW":
-        return "NEW", False
-
     section_token = infer_section_token(article) if article else None
 
-    known_by_section = bool(
-        known_sections and section_token and law_name
-        and section_token in known_sections.get(normalise_title(law_name), set())
-    )
+    # Act identity is resolved fuzzily (acronym / punctuation / dropped-word
+    # tolerant) so an LLM/cover-page title that differs in form from Round 1's
+    # ("PDPA", "Personal Data Protection Act, 2012") still matches the same act.
+    known_by_section = False
+    if known_sections and section_token and law_name:
+        matched_key = match_known_act(law_name, known_sections.keys())
+        if matched_key is not None:
+            known_by_section = section_token in known_sections.get(matched_key, set())
 
     known_by_anchor = False
     if article_anchor:

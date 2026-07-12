@@ -19,10 +19,14 @@ portals:
       - "https://sso.agc.gov.sg/Browse/SL/Current/All?PageSize=500&SortBy=Title&SortOrder=ASC"
     # SSO act/subsidiary-legislation links live under /Act/ and /SL/ paths
     index_link_pattern: ["/Act/", "/SL/"]
-    # Fetch complete act text via the PDF print endpoint (text-layer PDF, no OCR needed)
-    fetch: pdf_endpoint
-    pdf_view_suffix: "?ViewType=Pdf"
-    # Escalate to stealth Playwright only if header_spoof is also blocked
+    # Fetch the COMPLETE act as SSO's JS-rendered "whole document" HTML view.
+    # The default act page paginates (only early sections + the arrangement-of-
+    # sections TOC load) and the ?ViewType=Pdf endpoint now returns an empty 202
+    # (async PDF gen behind anti-bot); ?WholeDoc=1 renders the full operative text
+    # with per-section #pr<n>- anchors, so no OCR and KNOWN anchor-matching works.
+    fetch: html_wholedoc
+    pdf_view_suffix: "?WholeDoc=1"
+    # Escalate to stealth Playwright if header_spoof / plain fetch is blocked (202)
     transport_fallback: playwright_stealth
   - name: Personal Data Protection Commission
     # Regulator guidance/advisory pages (PDPA overview, data-protection obligations,

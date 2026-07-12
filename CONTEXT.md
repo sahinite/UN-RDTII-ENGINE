@@ -173,6 +173,80 @@ section not extracted → LLM-reject/retrieval-miss). Evidence across SG+AU × P
 over-fire=2 (rare, auto-pruned), real under-recall≈2–3, but `act_missing`=25 dominates — so the
 biggest recall lever was fetch (ADR-058), not the LLM. Parks issue A with data.
 
+### ADR-065 — SSO fetch: browser escalation + html_wholedoc for the operative text
+Singapore SSO's `?ViewType=Pdf` endpoint now answers plain httpx with an empty HTTP 202 (async PDF
+generation behind anti-bot), so PDPA/Companies Act never fetched → 0 P6 KNOWN recall. Three generic,
+config-driven changes: (A) **browser escalation** — `download()` uses no transport ladder, so when a
+portal declares `transport_fallback: playwright_stealth` and httpx hits the gate (202/empty/UNKNOWN),
+`route()` retries the fetch through a real Playwright session (`_fetch_via_browser`: prime the gate by
+visiting the act URL, then fetch through the browser context). (B) **`html_wholedoc` fetch strategy** —
+the plain act page paginates (only early sections + the arrangement-of-sections TOC render), so the
+operative text was missing even when fetched; SSO's `?WholeDoc=1` view renders the full act with
+per-section `#pr<n>-` anchors. New strategy appends the suffix (declared in `pdf_view_suffix`) and
+force-JS-renders before HTML extraction. Singapore config switched `pdf_endpoint`/`?ViewType=Pdf` →
+`html_wholedoc`/`?WholeDoc=1`. (C) **render retry + backoff** — the JS render is flaky under anti-bot
+(a session is occasionally served an empty page); retry `_RENDER_RETRIES=3` with `_RENDER_BACKOFF_S`
+so the rate-limit window clears. Result: PDPA s.26 → P6-I4 now fetched, extracted, tagged KNOWN
+(recall 0→1). Remaining P6 misses are not fetch: PDP(A) Act s.26 is redundant (consolidated PDPA 2012
+already incorporates it) and Companies Act s.199/s.4 is a weak Round 1 mapping (accounting-records
+retention, not data localization) the LLM reasonably declines. The extracted `law_name` can carry a
+`" - Singapore Statutes Online"` `<title>` suffix, absorbed by the ADR-064 fuzzy matcher. All fetch
+code stays economy-agnostic; only the YAML strategy/suffix is SSO-specific.
+
+### ADR-064 — Fuzzy act-title identity match (KNOWN tag + seed-guided retrieval)
+ADR-063 made KNOWN an identity judgement, but identity hinged on `normalise_title` EXACT string
+equality (year-strip + lowercase only) — so an LLM/cover-page title differing in form from Round 1
+(`PDPA`, `Personal Data Protection Act, 2012`, `Data Protection Act 2012`) fell through to NEW even
+though the act is known. New `match_known_act(law_name, known_keys)` in `seed_loader.py` resolves a
+title to a Round 1 key tolerant of: (1) exact normalised equality (fast path); (2) acronym — the
+compacted law_name equals a known title's initials, with/without trailing "Act" (`PDPA`, `MHR`);
+(3) distinctive-token containment/overlap — identity tokens (generic legal stopwords, years, bare
+numbers removed) subset either way with ≥2 shared tokens, or Jaccard ≥ 0.6. Guards against
+over-match: a lone generic token (`Health Act` vs `My Health Records Act`) and a guidance-page
+heading (`DATA-PROTECTION-OBLIGATIONS` vs PDPA, Jaccard 0.5) both correctly stay NEW — the latter
+still caught by the ADR-062 secondary-source flag. Wired into `resolve_provision_tag` (the KNOWN/NEW
+tag) and `rag._retrieve_batch` seed-guided injection (recall). Also applied to the two downstream
+consumers that were still exact-matching, to keep them consistent with the tagger: `main
+._prune_known_cross_indicator` (so a fuzzy-titled KNOWN row groups with its Round 1 entry and its
+wrong-indicator duplicates are cleaned up instead of bypassing the prune) and `main
+._audit_known_recall` (so a KNOWN provision emitted as "PDPA" is counted as *found* against the
+Round 1 "personal data protection act" entry, not mis-logged `provision_missing`). The prune's
+safety guard is unchanged — a provision is dropped only when a correct-indicator copy survives, so
+no DB-known provision is ever lost. Fully economy-agnostic — driven only by the title strings.
+
+### ADR-063 — KNOWN is act+provision identity, independent of portal/URL
+Rule clarified: if an act/provision exists in the Round 1 database it is KNOWN regardless of
+which portal or URL the run fetched it from (one KNOWN act may carry several Round 1 reference
+URLs, and the engine may reach it via a different URL entirely). `resolve_provision_tag` used to
+short-circuit `if doc_discovery_tag == "NEW": return "NEW"` — force-tagging every provision NEW
+whenever the *document* was discovered from a non-seed URL, even when that exact (act, section)
+was in Round 1. Removed the short-circuit: the identity checks (anchor-URL match + the
+URL-independent act+section match against `known_sections`) now run for EVERY provision, and
+`doc_discovery_tag` is only a fallback when the provision is untestable (no anchor and no section
+token). A NEW-discovered document whose (act, section) matches Round 1 is now correctly KNOWN.
+Note: `known_sections` remains pillar-scoped (seed_loader filters by the run's pillar) — that is
+the run's comparison scope, not a URL constraint. See [[known-provision-matching-gap]].
+
+### ADR-062 — `location_reference` is derived, never LLM-emitted; source-authority flag
+Two source-mismatch fixes on P6 outputs. (A) The prompt's schema example carried a literal
+`location_reference` placeholder (`"Page 34 | https://url#anchor"`); the LLM echoed it verbatim,
+leaking `https://url#anchor` and a hallucinated `Page 34` into every row, and the parser then
+appended it to unreliable `top_chunks[0]` metadata — so the SAME provision cited a different
+page/section per indicator call (My Health s.77 → `Art.77|Page34` for I1 but `Art.109|Page4`
+for I2). Fix: dropped `location_reference` from the LLM schema; the parser now builds it
+deterministically as `Art. {infer_section_token(article)} | Page {n}`, where the section token
+comes from the LLM `article` field and the page comes from `_find_matching_chunk()` — the chunk
+that actually *contains* the verbatim snippet, not the top-ranked one — making citations
+identical across indicators. No anchor URL is emitted (anchor schemes like SSO `#pr8-` are
+portal-specific; the URL already lives in `source_url`). Non-consecutive split rows re-cite each
+row's own section. Supersedes the ADR-057 chunk-`Art. N` guard (article now sourced from the LLM
+field, so year/page-leak can't reach it). (B) Wrong-source: SG P6 extracted from the PDPC
+guidance page (`type: secondary`), citing its numbered obligation list ("8. Transfer Limitation
+Obligation") as a spurious "Article 8". `route()`'s matched `Portal.type` now flows via
+`extract_provisions(portal_type=…)` → `doc_metadata` → parser, which flags every provision from a
+`secondary` portal (`non_primary_source — verify against primary legislation`). Fully declarative
+from YAML `type:`, no per-economy code.
+
 ### ADR-057 — Citation-label guards (C-safe)
 Compilation-PDF chunking leaks non-section values into the citation. Two deterministic
 guards: (1) `parser` drops a chunk-derived `Art. N` from `location_reference` when N is a

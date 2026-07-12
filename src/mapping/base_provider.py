@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 
 from src.mapping.models import LLMResponse
+
+# Single unified API key for whichever provider is pinned per run.
+UNIFIED_API_KEY_ENV = "LLM_API_KEY"
+
+
+def resolve_api_key(provider_env: str) -> str:
+    """
+    Resolve a provider's API key.
+
+    Precedence: the provider-specific var (e.g. ANTHROPIC_API_KEY) wins if set,
+    otherwise fall back to the single unified LLM_API_KEY. Only one provider is
+    pinned per run, so LLM_API_KEY is unambiguous.
+    """
+    return (
+        os.environ.get(provider_env, "").strip()
+        or os.environ.get(UNIFIED_API_KEY_ENV, "").strip()
+    )
 
 
 class BaseLLMProvider(ABC):

@@ -54,6 +54,7 @@ def extract_provisions(
     doc,
     known_provisions: "set[str] | None" = None,
     known_sections: "dict[str, set[str]] | None" = None,
+    portal_type: str = "primary",
 ) -> tuple[list[ExtractionResult], LLMCostEntry]:
     """
     Main entry point called by the pipeline orchestrator.
@@ -96,6 +97,7 @@ def extract_provisions(
             continue
 
         doc_metadata = _build_doc_metadata(doc)
+        doc_metadata["portal_type"] = portal_type
         chunks_for_prompt = trim_chunks_to_budget(top_chunks, SYSTEM_PROMPT)
 
         user_prompt = build_user_prompt(

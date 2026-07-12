@@ -618,6 +618,45 @@ class TestRouteIntegration:
         assert isinstance(result, FetchedDocument)
         assert result.doc_type == "HTML"
 
+    def test_route_html_wholedoc_renders_with_suffix(self, sg_zone1):
+        """html_wholedoc: append pdf_view_suffix, JS-render, extract as HTML —
+        never touching the (202-gated) plain download path."""
+        from src.fetcher import router
+        cfg = EconomyConfig.model_validate({
+            "economy_name": "Singapore", "script_type": "latin", "languages": ["en"],
+            "portals": [{
+                "name": "SSO", "url": "https://sso.agc.gov.sg", "type": "primary",
+                "fetch": "html_wholedoc", "pdf_view_suffix": "?WholeDoc=1",
+                "transport_fallback": "playwright_stealth",
+            }],
+        })
+        rendered_html = (
+            "<html><body><h1>Personal Data Protection Act 2012</h1>"
+            "<p>26. Transfer of personal data outside Singapore. An organisation "
+            "must not transfer any personal data to a country or territory outside "
+            "Singapore except in accordance with requirements prescribed under this "
+            "Act to ensure that organisations provide a standard of protection to "
+            "personal data so transferred that is comparable to the protection under "
+            "this Act. The Commission may, on the application of any organisation, by "
+            "notice in writing exempt the organisation from this section.</p>"
+            "</body></html>"
+        )
+        captured = {}
+
+        def _fake_render(url, *a, **k):
+            captured["url"] = url
+            return rendered_html
+
+        with (
+            patch.object(router, "_render_spa_sync", side_effect=_fake_render),
+            patch.object(router, "download", side_effect=AssertionError("download must not run")),
+        ):
+            result = router.route(sg_zone1, cfg)
+        assert isinstance(result, FetchedDocument)
+        assert result.doc_type == "HTML"
+        assert captured["url"] == "https://sso.agc.gov.sg/Act/PDPA2012?WholeDoc=1"
+        assert "must not transfer" in result.raw_text.lower()
+
     def test_route_text_pdf_returns_fetched_document(self, text_pdf_bytes, sg_zone1, sg_config):
         from src.fetcher.router import route
         with (

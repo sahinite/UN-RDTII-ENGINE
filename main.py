@@ -93,7 +93,7 @@ def run_pipeline(
         write_outputs() summary dict
     """
     from src.fetcher.models import Zone1Result
-    from src.fetcher.router import route
+    from src.fetcher.router import route, _find_portal_for_url
     from src.fetcher.translator import translate_document
     from src.mapping.llm_client import pin_active_provider
     from src.mapping.mapper import check_pdpa_gate, extract_provisions
@@ -253,6 +253,14 @@ def run_pipeline(
         docs = fetched if isinstance(fetched, list) else [fetched]
         p.done(f"{prefix} Fetched — {title}")
 
+        # Source authority: the portal's declared type (primary legislation vs
+        # secondary regulator guidance). Drives a review flag on provisions
+        # extracted from non-primary sources — a summary/guidance page is not the
+        # binding statute, so its "provisions" need verification. Economy-agnostic:
+        # read straight from the matched portal's YAML `type` field.
+        _src_portal = _find_portal_for_url(getattr(docs[0], "source_url", ""), economy_config)
+        portal_type = getattr(_src_portal, "type", "primary") if _src_portal else "primary"
+
         for doc in docs:
             p.step(f"{prefix} Translating")
             _t = time.monotonic()
@@ -289,6 +297,7 @@ def run_pipeline(
             try:
                 results, llm_cost = extract_provisions(
                     rag_results, translated, known_provisions, known_sections,
+                    portal_type=portal_type,
                 )
                 # Count distinct indicators that yielded ≥1 provision (ExtractionResult
                 # has no "found" flag — its existence in the list is the match signal).
@@ -577,12 +586,14 @@ def _prune_known_cross_indicator(records: list, known_sections_by_indicator: dic
     """
     from collections import defaultdict
 
-    from src.crawler.seed_loader import normalise_title
+    from src.crawler.seed_loader import match_known_act
     from src.mapping.provision_tag import infer_section_token
 
     ksbi = known_sections_by_indicator or {}
     if not ksbi:
         return records, []
+
+    all_act_keys = {act for acts in ksbi.values() for act in acts}
 
     def _round1_indicators(act_norm: str, token: str) -> set:
         return {ind for ind, acts in ksbi.items() if token and token in acts.get(act_norm, set())}
@@ -591,9 +602,12 @@ def _prune_known_cross_indicator(records: list, known_sections_by_indicator: dic
     passthrough: list = []
     for r in records:
         token = infer_section_token(r.article) if r.discovery_tag == "KNOWN" else None
-        act_norm = normalise_title(r.law_name or "")
+        # Resolve law_name to its canonical Round 1 key with the SAME fuzzy matcher
+        # the tagger uses — otherwise a differently-spelled title ("PDPA") silently
+        # bypasses the prune and its wrong-indicator duplicates are never cleaned up.
+        act_norm = match_known_act(r.law_name or "", all_act_keys) if token else None
         # Only rows we have ground truth for (KNOWN + resolvable section + in the R1 map)
-        if token and _round1_indicators(act_norm, token):
+        if act_norm and _round1_indicators(act_norm, token):
             groups[(act_norm, token)].append(r)
         else:
             passthrough.append(r)
@@ -642,16 +656,24 @@ def _audit_known_recall(records: list, known_sections_by_indicator: dict) -> dic
     tell us which way the drift/recall problem (issue A) actually leans. See
     [[known-wrong-indicator-rootcause]] and [[indicator-drift]].
     """
-    from src.crawler.seed_loader import normalise_title
+    from src.crawler.seed_loader import match_known_act, normalise_title
     from src.mapping.provision_tag import infer_section_token
 
     ksbi = known_sections_by_indicator or {}
-    acts_present = {normalise_title(r.law_name or "") for r in records}
+    all_act_keys = {act for acts in ksbi.values() for act in acts}
+
+    def _canon(name: str) -> str:
+        # Map an emitted law_name to its canonical Round 1 key (fuzzy — same matcher
+        # as the tagger), so a KNOWN provision emitted as "PDPA" is still counted as
+        # found against the Round 1 "personal data protection act" entry.
+        return match_known_act(name or "", all_act_keys) or normalise_title(name or "")
+
+    acts_present = {_canon(r.law_name) for r in records}
     emitted = set()
     for r in records:
         tok = infer_section_token(r.article)
         if tok:
-            emitted.add((normalise_title(r.law_name or ""), tok, r.indicator_id))
+            emitted.add((_canon(r.law_name), tok, r.indicator_id))
 
     found, missing = [], []
     for indicator, acts in ksbi.items():

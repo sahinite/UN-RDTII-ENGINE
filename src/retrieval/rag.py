@@ -30,7 +30,7 @@ from src.retrieval.config import (
     RERANK_TOP_N,
     get_indicator,
 )
-from src.crawler.seed_loader import normalise_title
+from src.crawler.seed_loader import match_known_act, normalise_title
 from src.mapping.provision_tag import infer_section_token
 from src.retrieval.embedder import build_index
 from src.retrieval.fusion import rrf_fusion
@@ -132,7 +132,8 @@ def retrieve_batch(
 
     ksbi = known_sections_by_indicator or {}
     # Only resolve the act identity when there is a seed map to match against.
-    act_norm = normalise_title(str(getattr(doc, "act_title", "") or "")) if ksbi else ""
+    raw_act_title = str(getattr(doc, "act_title", "") or "") if ksbi else ""
+    act_norm = normalise_title(raw_act_title) if raw_act_title else ""
 
     substep(f"Building FAISS index — {len(chunks)} chunks")
     emb_index = build_index(chunks)
@@ -156,7 +157,11 @@ def retrieve_batch(
         fused = rrf_fusion(bm25_results, dense_results, top_k=FUSION_TOP_K)
         retrieved = rerank(query, fused, chunks, top_n=top_n)
 
-        want = ksbi.get(iid, {}).get(act_norm, set()) if act_norm else set()
+        # Fuzzy act-identity match (acronym / punctuation / dropped-word tolerant)
+        # so a cover-page title differing in form from Round 1 still guides retrieval.
+        per_ind = ksbi.get(iid, {})
+        matched_act = match_known_act(raw_act_title, per_ind.keys()) if (per_ind and raw_act_title) else None
+        want = per_ind.get(matched_act, set()) if matched_act else set()
         if want:
             retrieved, injected = _inject_seed_sections(retrieved, chunks, want)
             if injected:

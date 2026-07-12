@@ -50,6 +50,82 @@ def normalise_title(title: str) -> str:
     return re.sub(r"\s+", " ", title.lower().strip())
 
 
+# Generic legal-title words that carry no distinguishing identity — dropped before
+# token/acronym comparison so "Personal Data Protection Act 2012" and a comma-,
+# year- or "Act"-less rendering of the same title still match. No economy-specific
+# terms here: this is the boilerplate common to statute titles in any jurisdiction.
+_TITLE_STOPWORDS = frozenset({
+    "act", "the", "of", "and", "a", "an", "for", "to", "on", "in", "law", "laws",
+    "regulation", "regulations", "rules", "rule", "order", "orders", "no", "cap",
+    "chapter", "ordinance", "code", "bill", "amendment", "revised", "edition",
+})
+
+
+def _title_tokens(title: str) -> set[str]:
+    """Distinctive lowercased word tokens of an act title (stopwords, years, and
+    bare numbers removed) — the identity-bearing part of the name."""
+    words = re.findall(r"[a-z0-9]+", title.lower())
+    return {
+        w for w in words
+        if w not in _TITLE_STOPWORDS and not w.isdigit()
+    }
+
+
+def _title_acronyms(title: str) -> set[str]:
+    """Candidate acronyms for a title: initials of its alpha words (year removed),
+    both including and excluding a trailing 'act' (PDPA vs PDP; MHR vs MHRA)."""
+    words = re.findall(r"[a-z]+", re.sub(r"\d{4}", "", title.lower()))
+    if not words:
+        return set()
+    variants = {"".join(w[0] for w in words)}
+    if words[-1] == "act":
+        variants.add("".join(w[0] for w in words[:-1]))
+    return variants
+
+
+def match_known_act(law_name: str, known_keys) -> "str | None":
+    """
+    Resolve ``law_name`` to a Round 1 act key, tolerant of the ways an LLM/cover
+    page renders the same title differently from Round 1. Returns the matching key
+    from ``known_keys`` (already-normalised Round 1 act titles) or None.
+
+    Matches, in order of confidence:
+      1. exact normalised equality (fast path — the common case),
+      2. acronym: the whole law_name compacted equals a known title's acronym
+         ("PDPA" → Personal Data Protection Act),
+      3. distinctive-token containment/overlap: one title's identity tokens are a
+         subset of the other's (needs ≥2 shared tokens, to avoid a lone generic
+         word matching everything), or Jaccard ≥ 0.6.
+
+    Fully economy-agnostic — driven only by the title strings themselves.
+    """
+    if not law_name:
+        return None
+    known_keys = set(known_keys)
+    norm = normalise_title(law_name)
+    if norm in known_keys:
+        return norm
+
+    q_tokens = _title_tokens(law_name)
+    q_compact = re.sub(r"[^a-z0-9]", "", law_name.lower())
+
+    for key in known_keys:
+        if q_compact and len(q_compact) <= 6 and q_compact in _title_acronyms(key):
+            return key
+        k_tokens = _title_tokens(key)
+        if not q_tokens or not k_tokens:
+            continue
+        inter = q_tokens & k_tokens
+        if not inter:
+            continue
+        smaller = min(len(q_tokens), len(k_tokens))
+        if (q_tokens <= k_tokens or k_tokens <= q_tokens) and smaller >= 2:
+            return key
+        if len(inter) / len(q_tokens | k_tokens) >= 0.6:
+            return key
+    return None
+
+
 def _normalise_economy(raw: str) -> str:
     return _ECONOMY_ALIASES.get(raw.lower().strip(), raw.strip().upper()[:2])
 

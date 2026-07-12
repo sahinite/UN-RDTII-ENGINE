@@ -10,7 +10,7 @@ try:
 except ImportError:
     openai = None  # type: ignore[assignment]
 
-from src.mapping.base_provider import BaseLLMProvider
+from src.mapping.base_provider import BaseLLMProvider, resolve_api_key
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
@@ -37,7 +37,7 @@ class QwenProvider(BaseLLMProvider):
         return _resolve_model()
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("DASHSCOPE_API_KEY", "").strip())
+        return bool(resolve_api_key("DASHSCOPE_API_KEY"))
 
     def complete(
         self,
@@ -51,7 +51,7 @@ class QwenProvider(BaseLLMProvider):
 
         model = _resolve_model()
         client = openai.OpenAI(
-            api_key=os.environ["DASHSCOPE_API_KEY"],
+            api_key=resolve_api_key("DASHSCOPE_API_KEY"),
             base_url=QWEN_BASE_URL,
         )
         t0 = time.time()

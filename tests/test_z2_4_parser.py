@@ -294,18 +294,20 @@ def test_provision_tag_new_when_anchor_absent():
     assert results[0].discovery_tag == "NEW"
 
 
-def test_provision_tag_new_doc_always_new():
-    """Seam 3c: NEW doc → provision always tagged NEW regardless of known_provisions."""
+def test_provision_tag_new_doc_known_provision_is_known():
+    """KNOWN is identity-based: a provision whose act-URL+anchor is in Round 1 is
+    KNOWN even when the document was discovered as a NEW act (reachable via a
+    different URL/portal)."""
     from src.mapping.parser import parse_llm_response
     from src.crawler.crawler import _normalise_url as normalise_url
 
     known = {normalise_url("https://sso.agc.gov.sg/Act/PDPA2012#pr26-")}
     doc_meta = {**DOC_METADATA, "discovery_tag": "NEW"}
 
-    response = make_llm_response(VALID_LLM_JSON)
+    response = make_llm_response(VALID_LLM_JSON)  # article "Section 26" → #pr26-
     results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], doc_meta, known)
     assert len(results) == 1
-    assert results[0].discovery_tag == "NEW"
+    assert results[0].discovery_tag == "KNOWN"
 
 
 def test_extraction_result_validate_catches_bad_indicator():
@@ -363,3 +365,25 @@ def test_location_ref_drops_page_as_article():
 def test_location_ref_keeps_real_section():
     loc = _loc_ref_for("26", 538)            # plausible section survives
     assert "Art. 26" in loc
+
+
+# ── Non-primary source flag ─────────────────────────────────────────────────────
+
+def test_secondary_source_flags_for_review():
+    """A provision from a secondary (guidance) portal is flagged for verification."""
+    from src.mapping.parser import parse_llm_response
+    response = make_llm_response(VALID_LLM_JSON)
+    meta = {**DOC_METADATA, "portal_type": "secondary"}
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], meta)
+    assert results and results[0].flag_for_review is True
+    assert "non_primary_source" in (results[0].notes or "")
+
+
+def test_primary_source_not_flagged_for_source_type():
+    """A provision from a primary portal carries no non-primary-source flag."""
+    from src.mapping.parser import parse_llm_response
+    response = make_llm_response(VALID_LLM_JSON)
+    meta = {**DOC_METADATA, "portal_type": "primary"}
+    results = parse_llm_response(response, "P6-I1", [make_retrieved_chunk()], meta)
+    assert results
+    assert "non_primary_source" not in (results[0].notes or "")

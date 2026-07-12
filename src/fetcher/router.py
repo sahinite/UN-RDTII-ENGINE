@@ -35,6 +35,12 @@ _USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# JS render (force_render strategies) is flaky under anti-bot — a session is
+# occasionally served an empty/challenge page. Retry a few times, backing off
+# between attempts so the portal's rate-limit window can clear.
+_RENDER_RETRIES = 3
+_RENDER_BACKOFF_S = 3.0
+
 
 # ── Portal strategy helpers ────────────────────────────────────────────────────
 
@@ -165,6 +171,45 @@ def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning({"event": "auto_render_failed", "url": url, "error": str(exc)})
         return ""
+
+
+def _fetch_via_browser(
+    url: str, session_url: str = "", timeout_ms: int = 45000
+) -> tuple[bytes, str, str]:
+    """Fetch ``url`` through a real (stealth) browser session — the escalation for
+    anti-bot gates that answer plain httpx with 202/empty or a challenge shell
+    (e.g. Singapore SSO's ``?ViewType=Pdf``). We first navigate ``session_url`` so
+    the browser clears the gate and holds its cookies, then request the target
+    through the same browser context (which shares those cookies and the browser's
+    TLS/JS fingerprint). Returns (raw_bytes, content_type, resolved_url).
+
+    Generic: invoked only when a portal declares ``transport_fallback:
+    playwright_stealth``, so no economy-specific logic lives here.
+    """
+    import asyncio
+
+    async def _run() -> tuple[bytes, str, str]:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                ctx = await browser.new_context(user_agent=_USER_AGENT)
+                page = await ctx.new_page()
+                if session_url and session_url != url:
+                    try:
+                        await page.goto(session_url, wait_until="domcontentloaded",
+                                        timeout=timeout_ms)
+                    except Exception:  # gate-priming visit is best-effort
+                        pass
+                resp = await ctx.request.get(url, timeout=timeout_ms)
+                body = await resp.body()
+                ctype = resp.headers.get("content-type", "")
+                return body, ctype, (resp.url or url)
+            finally:
+                await browser.close()
+
+    return asyncio.run(_run())
 
 
 # pdf.js viewers wrap the real PDF in a ?file=<pdf> query param, e.g.
@@ -558,6 +603,25 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # a content-less SPA shell wrapped in a large menu reads as SSR and the
             # render is skipped. html_js renders unconditionally before extraction.
             force_render = True
+        elif fetch_strategy == "html_wholedoc":
+            # Portal that serves the complete act as a JS-rendered "whole document"
+            # HTML view reached via a URL suffix (Singapore SSO ?WholeDoc=1). The
+            # default act page paginates — only early sections + the arrangement-of-
+            # sections TOC load — so we append the whole-doc suffix, then force a JS
+            # render (provisions lazy-load) before HTML extraction. The suffix is
+            # declared per-portal in `pdf_view_suffix`; the code stays generic.
+            single_act_fetch = True
+            force_render = True
+            if pdf_suffix:
+                rewritten = _rewrite_to_pdf_url(fetch_url, pdf_suffix)
+                logger.info({
+                    "event": "html_wholedoc_rewrite",
+                    "original_url": fetch_url,
+                    "wholedoc_url": rewritten,
+                    "portal": portal.name,
+                    "economy": zone1_result.economy,
+                })
+                fetch_url = rewritten
         elif fetch_strategy == "pdf_link":
             # Portal whose act page embeds/links a PDF (JPDP <embed>, AGC pdf.js,
             # LHDN .pdf anchor). We download the HTML, resolve the PDF URL from it
@@ -566,7 +630,63 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             single_act_fetch = True
             resolve_pdf_link = True
 
-    raw_bytes, content_type, resolved_url = download(fetch_url)
+    # force_render strategies (html_js, html_wholedoc) KNOW the content is populated
+    # by JS, so render up front — this also sidesteps anti-bot gates that would 202
+    # a plain httpx GET (e.g. SSO). The render is flaky under anti-bot (a session is
+    # occasionally served an empty/challenge page), so retry a few times before
+    # falling through to the download path.
+    if force_render:
+        rendered = ""
+        for _attempt in range(1, _RENDER_RETRIES + 1):
+            rendered = _render_spa_sync(fetch_url)
+            if rendered:
+                break
+            logger.info({"event": "forced_js_render_retry", "url": fetch_url,
+                         "attempt": _attempt, "economy": zone1_result.economy})
+            # Backoff: the empty render is anti-bot rate-limiting, which needs a
+            # pause to clear — retrying immediately just gets throttled again.
+            if _attempt < _RENDER_RETRIES:
+                time.sleep(_RENDER_BACKOFF_S * _attempt)
+        if rendered:
+            logger.info({"event": "forced_js_render", "url": fetch_url,
+                         "economy": zone1_result.economy})
+            zone1_result_rendered = Zone1Result(
+                url=fetch_url,
+                economy=zone1_result.economy,
+                act_title=zone1_result.act_title,
+                discovery_tag=zone1_result.discovery_tag,
+                archive_url=zone1_result.archive_url,
+            )
+            return extract_html(rendered.encode("utf-8"), zone1_result_rendered,
+                                content_type="text/html")
+        logger.warning({"event": "forced_js_render_failed", "url": fetch_url,
+                        "economy": zone1_result.economy})
+
+    # A portal may gate content behind anti-bot that answers plain httpx with an
+    # empty/202 body or a non-document challenge shell (Singapore SSO's PDF view).
+    # When it declares transport_fallback: playwright_stealth, escalate the fetch
+    # to a real browser session that clears the gate. Declarative + generic.
+    browser_fallback = (
+        portal is not None
+        and getattr(portal, "transport_fallback", None) == "playwright_stealth"
+    )
+
+    try:
+        raw_bytes, content_type, resolved_url = download(fetch_url)
+        doc_type = detect_type(raw_bytes, content_type)
+        # A 200 that yields no usable document (anti-bot HTML shell / XML notice)
+        # also warrants escalation when a browser fallback is configured.
+        if doc_type == "UNKNOWN" and browser_fallback:
+            raise DownloadError(fetch_url, f"unusable doc_type after download: {doc_type}")
+    except DownloadError:
+        if not browser_fallback:
+            raise
+        logger.info({"event": "browser_fallback_fetch", "url": fetch_url,
+                     "portal": portal.name, "economy": zone1_result.economy})
+        raw_bytes, content_type, resolved_url = _fetch_via_browser(
+            fetch_url, session_url=zone1_result.url
+        )
+        doc_type = detect_type(raw_bytes, content_type)
 
     # Patch resolved_url back into zone1_result for downstream use
     zone1_result_resolved = Zone1Result(
@@ -576,8 +696,6 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         discovery_tag=zone1_result.discovery_tag,
         archive_url=zone1_result.archive_url,
     )
-
-    doc_type = detect_type(raw_bytes, content_type)
 
     if doc_type == "UNKNOWN":
         raise UnsupportedDocTypeError(zone1_result.url, doc_type)

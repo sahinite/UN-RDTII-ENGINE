@@ -96,13 +96,12 @@ def pin_active_provider() -> BaseLLMProvider:
                 return p
 
         raise ConfigError(
-            "No LLM provider is available. Configure at least one:\n"
-            "  ANTHROPIC_API_KEY=sk-ant-...    (Priority 1 — recommended)\n"
-            "  OPENAI_API_KEY=sk-...            (Priority 2)\n"
-            "  DEEPSEEK_API_KEY=...             (Priority 3 — deepseek-chat)\n"
-            "  GROQ_API_KEY=gsk_...             (Priority 4 — free)\n"
-            "  DASHSCOPE_API_KEY=...            (Priority 5 — Qwen via DashScope)\n"
-            "  Ollama: run 'ollama serve' + 'ollama pull qwen2.5:7b'  (Priority 6 — offline)"
+            "No LLM provider is available. Set LLM_PROVIDER + a single LLM_API_KEY:\n"
+            "  LLM_PROVIDER=anthropic   (Priority 1 — recommended)\n"
+            "  LLM_API_KEY=<your key>   (used by whichever provider is pinned)\n"
+            "Provider priority: anthropic > openai > deepseek > groq > qwen(DashScope) > ollama.\n"
+            "Provider-specific vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...) still work and\n"
+            "override LLM_API_KEY. Offline: run 'ollama serve' + 'ollama pull qwen2.5:7b'."
         )
 
 
