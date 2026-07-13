@@ -34,13 +34,22 @@ def _resolve_model(priority: int) -> str:
 # Backwards-compat alias for legacy importers (e.g. crawler.ranker).
 OLLAMA_MODELS = OLLAMA_MODEL_DEFAULTS
 
-# Reasoning models (deepseek-r1, qwq, …) emit a long <think> chain-of-thought
-# before the JSON answer. Ollama's num_predict caps TOTAL output tokens (thinking +
-# answer), so the caller's answer-sized budget truncates the response before any
-# JSON appears. Give reasoning models extra headroom for the hidden thinking; the
-# parser strips the <think> block afterwards.
-_REASONING_MODEL_HINTS = ("r1", "qwq", "reasoning", "thinking")
-_REASONING_THINK_HEADROOM = 4096
+# Thinking models (deepseek-r1, qwq, qwen3, …) emit a chain-of-thought before the
+# answer. Newer Ollama routes that thinking into a SEPARATE `thinking` field and
+# keeps `response` for the final answer — so when thinking fills the token budget,
+# `response` comes back EMPTY and the JSON never appears (observed: qwen3.5:9b and
+# deepseek-r1 both return ''). We don't want reasoning for structured extraction,
+# so we disable thinking (`think: false`) for these models: the JSON answer then
+# lands in `response`, and it's far faster too (~3s vs ~180s for one s.26 call).
+_REASONING_MODEL_HINTS = ("r1", "qwq", "qwen3", "reasoning", "thinking")
+
+# Ollama defaults num_ctx to 4096 tokens and SILENTLY truncates anything longer —
+# the extraction prompt (chunks + taxonomy, up to MAX_PROMPT_TOKENS≈6000) overflows
+# it, leaving no room to generate, so the model stops after ~1 token (done_reason
+# "length", empty/"{" response). Size the context to fit the prompt + answer. A
+# cloud model (128k ctx) never hits this; local models must be told. Override via
+# OLLAMA_NUM_CTX.
+_DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 
 # Read timeouts (seconds). Reasoning models run a long chain-of-thought before the
 # answer, so they need much longer than a normal local generation. Override with
@@ -88,12 +97,7 @@ class OllamaProvider(BaseLLMProvider):
         temperature: float = 0.0,
     ) -> LLMResponse:
         base_url = os.environ.get("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
-        num_predict = max_tokens
-        # Reasoning models both emit more tokens AND take far longer per token (long
-        # chain-of-thought), so they need extra output budget and a longer timeout.
         reasoning = _is_reasoning_model(self._model)
-        if reasoning:
-            num_predict = max_tokens + _REASONING_THINK_HEADROOM
         timeout_s = int(os.environ.get("OLLAMA_TIMEOUT", "0")) or (
             _REASONING_READ_TIMEOUT if reasoning else _DEFAULT_READ_TIMEOUT
         )
@@ -101,8 +105,18 @@ class OllamaProvider(BaseLLMProvider):
             "model": self._model,
             "prompt": f"{system_prompt}\n\n{user_prompt}",
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": num_predict},
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "num_ctx": _DEFAULT_NUM_CTX,
+            },
         }
+        # Disable chain-of-thought for thinking models so the JSON answer lands in
+        # `response` (newer Ollama otherwise diverts it to a separate `thinking`
+        # field and returns an empty `response`). Ollama ignores the flag for
+        # non-thinking models. This is also far faster (~3s vs ~180s per call).
+        if reasoning:
+            payload["think"] = False
         t0 = time.time()
         try:
             r = requests.post(f"{base_url}/api/generate", json=payload, timeout=timeout_s)
@@ -116,7 +130,7 @@ class OllamaProvider(BaseLLMProvider):
         latency_ms = (time.time() - t0) * 1000
 
         return LLMResponse(
-            text=data["response"],
+            text=data.get("response") or "",
             input_tokens=data.get("prompt_eval_count", 0),
             output_tokens=data.get("eval_count", 0),
             model=self._model,

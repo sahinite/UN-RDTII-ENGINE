@@ -151,6 +151,7 @@ The LLM cascade implementation lives in `src/mapping/llm_client.py`.
 Set `LLM_PROVIDER` in `.env`:
 ```bash
 LLM_PROVIDER=anthropic   # use Anthropic as primary (recommended)
+LLM_PROVIDER=openai      # use OpenAI gpt-4o as primary
 LLM_PROVIDER=deepseek    # use DeepSeek V3 as primary
 LLM_PROVIDER=groq        # use Groq free tier as primary
 LLM_PROVIDER=qwen        # use Qwen via DashScope as primary
@@ -289,6 +290,31 @@ python main.py --economy Singapore --pillar 7
 
 The Ollama cascade uses `qwen2.5:7b` (tier 6) first, then `granite3-8b` (tier 7) on failure. Both models are Apache 2.0 licensed. OCR (Tesseract / PaddleOCR) and embeddings are always local and require no API key.
 
+
+## Limitations
+
+**Fetch & discovery**
+- Anti-bot portals (e.g. Singapore SSO) require JS rendering that intermittently fails under rate-limiting; retry + backoff mitigates but fetch is not fully deterministic run-to-run.
+- KNOWN seeds are capped at `ZONE2_MAX_KNOWN_ACTS` (default 12) per run — economies with more known acts lose the excess.
+- Round 1 seeds given as an act *name* only (no URL) rely on the browse index surfacing them by title and may be missed.
+- The set of incidental NEW/index acts surfaced varies between runs.
+
+**Mapping & tagging**
+- KNOWN vs NEW is decided by act-title + section identity; a garbled or empty LLM `law_name` falls back to NEW (fuzzy title matching helps, but is not perfect).
+- Round 1 rows without a parseable section number aren't tracked by the recall audit.
+- Secondary/guidance sources are flagged for review, not auto-verified against primary legislation.
+- Weak Round 1 mappings the LLM reasonably declines can appear as recall "misses".
+
+**LLM & runtime**
+- One provider is pinned per run — a sustained outage/429 aborts extraction (no mid-run provider switch).
+- LLM calls dominate runtime and cost; large consolidated acts increase both.
+
+**Coverage**
+- Only Pillars 6 & 7 and economies SG / AU / MY are validated/configured.
+- OCR Stage-2 (Azure DI / Mistral) needs API keys; without them, poor-quality scans may degrade extraction.
+- SSO whole-doc HTML yields a flat section hierarchy (raw-text chunking); `location_reference` carries no deep-link anchor (the URL is in the `source_url` column).
+
+---
 
 ## License
 

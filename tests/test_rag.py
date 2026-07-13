@@ -666,3 +666,13 @@ class TestFindSectionChunkByText:
         labelled = self._c("25", "some retention text long enough to be a body of a provision here.")
         other = self._c("", "25. a different chunk mentioning the section heading in its text body.")
         assert _find_section_chunk([labelled, other], "25") is labelled
+
+    def test_prefers_operative_over_labelled_toc_stub(self):
+        # SSO whole-doc: the arrangement/Contents entry and the operative provision
+        # are BOTH labelled the section number. The operative (long body) must win.
+        from src.retrieval.rag import _find_section_chunk
+        toc_stub = self._c("26", "26 Transfer of personal data outside Singapore\nPart 6A")
+        operative = self._c("26", "26.—(1) An organisation must not transfer any personal data to "
+                                   "a country or territory outside Singapore except in accordance with "
+                                   "requirements prescribed under this Act to ensure comparable protection.")
+        assert _find_section_chunk([toc_stub, operative], "26") is operative

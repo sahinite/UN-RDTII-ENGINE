@@ -50,6 +50,25 @@ def normalise_title(title: str) -> str:
     return re.sub(r"\s+", " ", title.lower().strip())
 
 
+# Round 1 "act and/or practice" cells pack several acts into one string. Acts are
+# separated by ';' or a BLANK line; a single newline is a line-wrap WITHIN one
+# title ("Personal Data Protection\n(Amendment) Bill (Act A1727)"). Splitting on
+# every newline shreds a wrapped title into garbage fragments ("personal data
+# protection", "(amendment) bill (act a1727)") that can never match — so we split
+# only on ';' or blank lines and collapse single newlines to spaces.
+_ACT_TITLE_SEPARATOR = re.compile(r";|\n\s*\n")
+
+
+def split_act_titles(cell: str) -> list[str]:
+    """Split a Round 1 act cell into individual, whitespace-normalised act titles."""
+    titles: list[str] = []
+    for chunk in _ACT_TITLE_SEPARATOR.split(cell or ""):
+        title = re.sub(r"\s+", " ", chunk).strip()
+        if title:
+            titles.append(title)
+    return titles
+
+
 # Generic legal-title words that carry no distinguishing identity — dropped before
 # token/acronym comparison so "Personal Data Protection Act 2012" and a comma-,
 # year- or "Act"-less rendering of the same title still match. No economy-specific
@@ -83,6 +102,16 @@ def _title_acronyms(title: str) -> set[str]:
     return variants
 
 
+# Statutory act-number identifiers: "Act 709", "(Act A1727)", "Act 53". The number
+# is a unique, language-independent key for a statute — an LLM that outputs just
+# "Act 709" (no descriptive title) still resolves to Round 1's full title.
+_ACT_NUMBER_RE = re.compile(r"\bact\s+([a-z]?\d+[a-z]?)\b", re.IGNORECASE)
+
+
+def _act_numbers(title: str) -> set[str]:
+    return {m.group(1).lower() for m in _ACT_NUMBER_RE.finditer(title or "")}
+
+
 def match_known_act(law_name: str, known_keys) -> "str | None":
     """
     Resolve ``law_name`` to a Round 1 act key, tolerant of the ways an LLM/cover
@@ -91,9 +120,11 @@ def match_known_act(law_name: str, known_keys) -> "str | None":
 
     Matches, in order of confidence:
       1. exact normalised equality (fast path — the common case),
-      2. acronym: the whole law_name compacted equals a known title's acronym
+      2. act-number identity: a shared "(Act NNN)" designation ("Act 709" ↔
+         "Personal Data Protection Act (Act 709)") — a unique statutory key,
+      3. acronym: the whole law_name compacted equals a known title's acronym
          ("PDPA" → Personal Data Protection Act),
-      3. distinctive-token containment/overlap: one title's identity tokens are a
+      4. distinctive-token containment/overlap: one title's identity tokens are a
          subset of the other's (needs ≥2 shared tokens, to avoid a lone generic
          word matching everything), or Jaccard ≥ 0.6.
 
@@ -106,10 +137,13 @@ def match_known_act(law_name: str, known_keys) -> "str | None":
     if norm in known_keys:
         return norm
 
+    q_nums = _act_numbers(law_name)
     q_tokens = _title_tokens(law_name)
     q_compact = re.sub(r"[^a-z0-9]", "", law_name.lower())
 
     for key in known_keys:
+        if q_nums and (q_nums & _act_numbers(key)):
+            return key
         if q_compact and len(q_compact) <= 6 and q_compact in _title_acronyms(key):
             return key
         k_tokens = _title_tokens(key)
@@ -325,21 +359,20 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
             if has_url:
                 seed.known_urls.add(normalise_url(row_url))
                 count += 1
+            # Engine indicator id ("6.2" → "P6-I2"), used as the consistent key for
+            # BOTH known_titles_by_indicator and known_sections_by_indicator (was
+            # raw refs vs engine ids — a mismatch downstream consumers had to bridge).
+            eng_indic = _db_indicator_to_engine(row_indic)
             row_act_norms: list[str] = []
             if row_title:
-                # Round 1 cells often pack several acts into one "act and/or
-                # practice" string joined by ';' (e.g. "Personal Data Protection
-                # Act 2012; Guide to ...; Advisory Guidelines ..."). Split so each
-                # act becomes its own matchable known title — otherwise the PDPA
-                # never matches a browse-index title.
-                for part in re.split(r"[;\n]", row_title):
-                    part = part.strip()
-                    if part:
-                        norm = normalise_title(part)
-                        row_act_norms.append(norm)
-                        seed.known_titles.add(norm)
-                        if row_indic:
-                            seed.known_titles_by_indicator.setdefault(row_indic, set()).add(norm)
+                # Split multi-act cells into individual matchable titles (';' / blank
+                # line separated; single-newline wraps preserved — see split_act_titles).
+                for part in split_act_titles(row_title):
+                    norm = normalise_title(part)
+                    row_act_norms.append(norm)
+                    seed.known_titles.add(norm)
+                    if eng_indic:
+                        seed.known_titles_by_indicator.setdefault(eng_indic, set()).add(norm)
                 if not has_url:
                     count += 1  # count title-only rows so we know seeds loaded
 
@@ -350,7 +383,6 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
             row_cover   = str(row[col_cover]  or "").strip() if col_cover  is not None else ""
             row_sections = _extract_section_tokens(" ".join((row_title, row_comment, row_cover)))
             if row_sections and row_act_norms:
-                eng_indic = _db_indicator_to_engine(row_indic)
                 for act_norm in row_act_norms:
                     seed.known_sections.setdefault(act_norm, set()).update(row_sections)
                     # Partition by indicator too (skips pillar-level/blank rows), so
@@ -414,10 +446,8 @@ def _load_sample_csv(path: str, economy_iso: str, pillar: str, seed: SeedData) -
                 if title_col:
                     raw_title = str(row.get(title_col, "") or "").strip()
                     if raw_title:
-                        for part in re.split(r"[;\n]", raw_title):
-                            part = part.strip()
-                            if part:
-                                seed.known_titles.add(normalise_title(part))
+                        for part in split_act_titles(raw_title):
+                            seed.known_titles.add(normalise_title(part))
 
     except Exception as exc:
         logger.error("Failed to load Sample CSV from %s: %s", path, exc)

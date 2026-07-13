@@ -42,7 +42,7 @@ _ARTICLE_BOUNDARY = re.compile(
     (?:^|\n)                            # start of string or newline
     (?:
         (?:Section|Article|Regulation|Rule|Clause)\s+(\d+[A-Z]{0,3}(?:\(\d+\))?)[.\s—–-] |
-        ^(\d+[A-Z]{0,3})\.\s+[A-Z]     |  # "12.  Heading…"  (SG SSO / period style)
+        ^(\d+[A-Z]{0,3})\.\s+[A-Z(—–-]  |  # "12.  Heading…" or SSO whole-doc "26.⏎—(1)…" (period style)
         ^(\d+[A-Z]{0,3})\ +[A-Z]          # "6A  Heading…"   (AU compilation / space style)
     )
     """,

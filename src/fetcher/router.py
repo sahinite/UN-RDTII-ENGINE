@@ -212,6 +212,40 @@ def _fetch_via_browser(
     return asyncio.run(_run())
 
 
+def _render_wholedoc(url: str, timeout_ms: int = 45000) -> str:
+    """Fully render a JS "whole document" page and return its HTML.
+
+    Unlike the crawl4ai path (``_render_spa_sync``), this drives Playwright
+    directly and waits for ``networkidle`` — the portal's provisions lazy-load
+    after the initial DOM, so a load/domcontentloaded wait (crawl4ai's default)
+    returns a partial page (arrangement-of-sections TOC, no operative bodies).
+    Waiting for the network to settle is what reliably yields the complete act
+    text. Returns '' on failure (caller retries). Generic — no portal specifics.
+    """
+    import asyncio
+
+    async def _run() -> str:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                ctx = await browser.new_context(user_agent=_USER_AGENT)
+                page = await ctx.new_page()
+                await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                # A short settle lets any final lazy-loaded provisions paint.
+                await page.wait_for_timeout(1500)
+                return await page.content()
+            finally:
+                await browser.close()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:  # pragma: no cover - defensive (network/anti-bot)
+        logger.warning({"event": "wholedoc_render_failed", "url": url, "error": str(exc)})
+        return ""
+
+
 # pdf.js viewers wrap the real PDF in a ?file=<pdf> query param, e.g.
 # "pdfjs/web/viewer.html?file=../../../ilims/.../Act 854.pdf&embedded=true".
 _PDF_VIEWER_FILE_RE = re.compile(r"[?&]file=([^&]+)", re.IGNORECASE)
@@ -553,6 +587,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     single_act_fetch = False
     auto_render = False
     force_render = False
+    wholedoc_render = False
     resolve_pdf_link = False
     portal = _find_portal_for_url(fetch_url, economy_config)
     if portal is not None:
@@ -612,6 +647,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # declared per-portal in `pdf_view_suffix`; the code stays generic.
             single_act_fetch = True
             force_render = True
+            wholedoc_render = True
             if pdf_suffix:
                 rewritten = _rewrite_to_pdf_url(fetch_url, pdf_suffix)
                 logger.info({
@@ -638,7 +674,13 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
     if force_render:
         rendered = ""
         for _attempt in range(1, _RENDER_RETRIES + 1):
-            rendered = _render_spa_sync(fetch_url)
+            # Whole-doc pages lazy-load their provisions, so use the direct-Playwright
+            # networkidle renderer (complete text); fall back to crawl4ai if it comes
+            # back empty. Simple SPAs (html_js) use the crawl4ai path directly.
+            if wholedoc_render:
+                rendered = _render_wholedoc(fetch_url) or _render_spa_sync(fetch_url)
+            else:
+                rendered = _render_spa_sync(fetch_url)
             if rendered:
                 break
             logger.info({"event": "forced_js_render_retry", "url": fetch_url,

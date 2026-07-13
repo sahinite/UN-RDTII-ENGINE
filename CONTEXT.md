@@ -173,6 +173,58 @@ section not extracted → LLM-reject/retrieval-miss). Evidence across SG+AU × P
 over-fire=2 (rare, auto-pruned), real under-recall≈2–3, but `act_missing`=25 dominates — so the
 biggest recall lever was fetch (ADR-058), not the LLM. Parks issue A with data.
 
+### ADR-068 — Seed fixes: act-number identity, multi-act split, consistent indicator keys
+Three seed/matching defects surfaced by the SG+AU+MY P6 validation run. (A) **Act-number identity**:
+an LLM often labels a statute by its number alone ("Act 709"), which `match_known_act` couldn't match
+(`act`=stopword, `709`=digit → no tokens) so Malaysia's real cross-border section (PDPA s.129) was
+tagged NEW instead of KNOWN. Added a tier that matches on the shared `(Act NNN)` designation — a
+unique, language-independent statutory key. (B) **Multi-act cell splitting**: Round 1 "act and/or
+practice" cells pack several acts separated by `;`/blank lines, but `split_act_titles` used to split on
+EVERY newline — shredding a wrapped title ("Personal Data Protection⏎(Amendment) Bill (Act A1727)")
+into phantom fragments ("personal data protection", "(amendment) bill (act a1727)") that could never
+match and inflated the recall-audit "missing" count. Now splits only on `;` or blank lines and
+collapses single-newline wraps to spaces (applied to both the DB and Sample-CSV loaders). (C)
+**Indicator-key consistency**: `known_titles_by_indicator` was keyed by raw refs ("6.2") while
+`known_sections_by_indicator` used engine ids ("P6-I2"); both now use engine ids, and
+`_emit_null_assessments` reads them directly (dropped the rdtii_ref→id bridge). Economy-agnostic.
+
+### ADR-067 — Ollama local models: disable thinking + size the context window
+Validating ADR-066 with a local model surfaced two Ollama-specific defects that silently returned
+zero extractions (every provision → `N/A` null-assessment). (A) **Thinking mode**: Qwen3-family and
+r1/qwq models emit chain-of-thought that newer Ollama routes to a SEPARATE `thinking` field, leaving
+`response` empty when thinking fills the budget → parser sees "" → parse_error. Fix: send
+`think: false` for detected thinking models (`_REASONING_MODEL_HINTS` now includes `qwen3`); the JSON
+answer lands in `response`, and it's ~15× faster (3s vs 47s+). Replaces the obsolete num_predict
+headroom (thinking no longer counts against the answer budget). (B) **Context window**: Ollama defaults
+`num_ctx` to 4096 and silently truncates longer prompts; the extraction prompt (~4.5k tokens, up to
+MAX_PROMPT_TOKENS≈6000) overflowed it, so the model stopped after ~1 token (`done_reason: length`,
+response `{`). Fix: set `num_ctx` (default 8192, `OLLAMA_NUM_CTX`) to fit prompt + answer — a cloud
+model's 128k ctx hides this, local models must be told. With both, `qwen3.5:9b` extracts PDPA s.26 →
+P6-I4 and Companies Act s.199 → P6-I2 as KNOWN. **End-to-end validation (SG P6, submit profile):
+recall 0→2 found — the two Round 1 sectioned KNOWN provisions now match; remaining misses are s.4
+(definitions, LLM-declined) and the PDP(A) act (redundant with the consolidated PDPA 2012 that was
+found), both expected.**
+
+### ADR-066 — SSO whole-doc: complete render + chunk the operative section, not the TOC
+Follow-on to ADR-065. SSO fetched but P6 KNOWN recall stayed 0 because the operative provisions never
+reached the LLM — three compounding defects between render and retrieval, all now fixed. (A) **Render
+completeness**: `fetch_isolated` (crawl4ai) renders with `wait_for=None`, returning before SSO's
+lazy-loaded provisions paint → a partial page (arrangement-of-provisions TOC only, ~27K chars, no
+operative bodies). New `_render_wholedoc()` drives Playwright directly with `wait_until="networkidle"`
++ a short settle, reliably yielding the full act (~190K chars incl. s.26 body); the `html_wholedoc`
+path uses it first, falling back to crawl4ai. (B) **Chunker boundary**: SSO's whole-doc prints the
+operative section number alone on a line — `26.⏎—(1)…` — which `_ARTICLE_BOUNDARY` missed (its period
+style required a following capital letter), so s.26's body folded into s.25 while the TOC line `26
+Transfer…` (space style) became the labelled "26" chunk. Extended the period alternative's char class
+to `[A-Z(—–-]` so a subsection-led section starts a boundary. (C) **Section selection**:
+`_find_section_chunk` returned the FIRST `article_number` match — the short TOC stub — before the
+body-scoring fallback could find the operative provision. Now: among chunks labelled the section number
+it returns the LONGEST-body one (operative beats stub); only when none is labelled does it fall to the
+`N.`-heading body-scoring. Verified: the operative s.26 chunk (`must not transfer…`) is now the #1
+retrieved chunk for P6-I4. All generic — driven by text structure, no economy specifics. (NOTE: live
+end-to-end LLM validation was blocked by an exhausted OpenAI quota (429) with no valid fallback key —
+an environment issue that itself surfaces the single-provider limitation, not a code defect.)
+
 ### ADR-065 — SSO fetch: browser escalation + html_wholedoc for the operative text
 Singapore SSO's `?ViewType=Pdf` endpoint now answers plain httpx with an empty HTTP 202 (async PDF
 generation behind anti-bot), so PDPA/Companies Act never fetched → 0 P6 KNOWN recall. Three generic,

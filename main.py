@@ -168,6 +168,24 @@ def run_pipeline(
         p.fail(f"No LLM provider available: {exc}")
         sys.exit(1)
 
+    # Fail fast: prove the LLM can actually return parseable output BEFORE the run.
+    # An available key that is dead (quota/auth), a thinking-only model, or a prompt
+    # that overruns the context window all produce nothing — and the pipeline would
+    # then silently write every provision as a false "no barrier" (N/A) null. One
+    # tiny call here surfaces that in seconds instead of after a full run.
+    from src.mapping.llm_client import smoke_check_llm
+    p.step("Verifying LLM can produce output")
+    _llm_ok, _llm_detail = smoke_check_llm()
+    if not _llm_ok:
+        p.fail(f"LLM smoke-check failed — {_llm_detail}")
+        p.info(
+            "The provider is configured but cannot produce usable output. Fix it before "
+            "running — otherwise every provision would be written as a false 'no barrier' (N/A). "
+            "Common causes: dead/quota'd API key, wrong LLM_MODEL, or (local Ollama) OLLAMA_NUM_CTX too small."
+        )
+        sys.exit(1)
+    p.done(f"LLM ready — {_llm_detail}")
+
     # ── Load seed data ──────────────────────────────────────────────────────────
     from src.crawler.seed_loader import load_seed_data as _load_seed
     _ROUND1_DB = _resolve_round1_db()
@@ -698,20 +716,18 @@ def _emit_null_assessments(all_records, seed, economy_name, economy_config) -> l
     absence can also indicate a retrieval gap rather than a true score of 0.
     """
     from src.output.models import OutputRecord
-    from src.mapping.prompts import load_taxonomy_dict
 
+    # known_titles_by_indicator is keyed by engine indicator id ("P6-I2"), the same
+    # convention as everything else in the seed (no rdtii_ref → id bridging needed).
     assessed = getattr(seed, "known_titles_by_indicator", None) or {}
     if not assessed:
         return []
 
     found = {r.indicator_id for r in all_records}
-    taxonomy = load_taxonomy_dict()
-    ref_to_id = {e.get("rdtii_ref"): iid for iid, e in taxonomy.items()}
     portal_url = str(economy_config.portals[0].url) if economy_config.portals else ""
 
     nulls: list = []
-    for rdtii_ref, titles in sorted(assessed.items()):
-        indicator_id = ref_to_id.get(rdtii_ref)
+    for indicator_id, titles in sorted(assessed.items()):
         if not indicator_id or indicator_id in found:
             continue
         act = sorted(titles)[0].title() if titles else f"{economy_name} legislation reviewed"

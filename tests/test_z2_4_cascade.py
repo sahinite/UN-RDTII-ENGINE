@@ -170,3 +170,39 @@ def test_pinned_provider_tried_first_even_if_not_first_in_cascade():
         resp = client.call_llm_with_cascade("sys", "user")
     # openai.complete should be called (it's pinned)
     openai_mock.complete.assert_called_once()
+
+
+# ── LLM smoke-check (fail-fast on a provider that can't produce output) ──────────
+
+def test_smoke_check_passes_on_valid_json():
+    import src.mapping.llm_client as client
+    with patch.object(client, "call_llm_with_cascade",
+                      return_value=make_llm_response('{"ok": true, "n": 26}')):
+        ok, detail = client.smoke_check_llm()
+    assert ok is True
+
+
+def test_smoke_check_fails_on_empty_response():
+    """Thinking-only model / context overrun → empty response → caught pre-run."""
+    import src.mapping.llm_client as client
+    with patch.object(client, "call_llm_with_cascade", return_value=make_llm_response("")):
+        ok, detail = client.smoke_check_llm()
+    assert ok is False and "EMPTY" in detail
+
+
+def test_smoke_check_fails_on_unparseable_output():
+    import src.mapping.llm_client as client
+    with patch.object(client, "call_llm_with_cascade",
+                      return_value=make_llm_response("I think it is 26")):
+        ok, detail = client.smoke_check_llm()
+    assert ok is False and "unparseable" in detail
+
+
+def test_smoke_check_fails_when_providers_exhausted():
+    """Dead/quota'd key → all providers exhausted → caught pre-run."""
+    import src.mapping.llm_client as client
+    from src.mapping.exceptions import AllProvidersExhaustedError
+    with patch.object(client, "call_llm_with_cascade",
+                      side_effect=AllProvidersExhaustedError("429 quota")):
+        ok, detail = client.smoke_check_llm()
+    assert ok is False and "failed" in detail

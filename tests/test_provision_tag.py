@@ -177,6 +177,40 @@ class TestMatchKnownAct:
     def test_empty_returns_none(self):
         assert match_known_act("", _MATCH_KEYS) is None
 
+    def test_act_number_matches_full_title(self):
+        # An LLM that outputs only the act number ("Act 709") still resolves to
+        # Round 1's full title via the shared "(Act 709)" designation.
+        keys = {normalise_title("Personal Data Protection Act (Act 709) 2010"),
+                normalise_title("Income Tax Act (Act 53) 1967")}
+        assert match_known_act("Act 709", keys) == "personal data protection act (act 709)"
+        assert match_known_act("Act 53", keys) == "income tax act (act 53)"
+
+    def test_act_number_no_false_match(self):
+        keys = {normalise_title("Personal Data Protection Act (Act 709) 2010")}
+        assert match_known_act("Act 999", keys) is None
+
+
+class TestSplitActTitles:
+    def test_splits_on_semicolon_and_blank_line(self):
+        from src.crawler.seed_loader import split_act_titles
+        got = split_act_titles("Companies Act 2016;\n\nPrivacy Act 1988")
+        assert got == ["Companies Act 2016", "Privacy Act 1988"]
+
+    def test_single_newline_wrap_is_joined_not_fragmented(self):
+        # Regression: a wrapped title must NOT shred into "personal data protection"
+        # + "(amendment) bill ...".
+        from src.crawler.seed_loader import split_act_titles
+        cell = "Personal Data Protection Act (Act 709) 2010;\n\nPersonal Data Protection\n(Amendment) Bill (Act A1727) 2024"
+        got = split_act_titles(cell)
+        assert got == [
+            "Personal Data Protection Act (Act 709) 2010",
+            "Personal Data Protection (Amendment) Bill (Act A1727) 2024",
+        ]
+
+    def test_empty_cell(self):
+        from src.crawler.seed_loader import split_act_titles
+        assert split_act_titles("") == []
+
 
 class TestInferSectionToken:
     def test_drops_subparagraph(self):

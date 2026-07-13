@@ -200,12 +200,22 @@ def _find_section_chunk(all_chunks: list[Chunk], token: str) -> "Chunk | None":
          rejected. Handles both subsectioned (95.—(1)) and single-sentence (25.)
          provisions without matching the TOC.
     """
-    for c in all_chunks:
-        if infer_section_token(c.location_reference.article_number) == token:
-            return c
+    # 1. Explicitly labelled chunk(s) take priority. A section number can appear
+    #    twice — a short arrangement-of-provisions/Contents stub AND the operative
+    #    provision — both labelled the same number, so return the LONGEST-body one
+    #    (the operative provision) rather than whichever came first (the TOC stub).
+    labelled = [
+        c for c in all_chunks
+        if infer_section_token(c.location_reference.article_number) == token
+    ]
+    if labelled:
+        return max(labelled, key=lambda c: len(c.text))
 
-    # Heading at a line start; allow whatever follows the dot — subsectioned
-    # "95.—(1)" (em-dash) and single-sentence "25. An organisation…" alike.
+    # 2. No labelled chunk — the chunker folded the section into a neighbour. Find
+    #    the "N." heading at a line start; score by how much body follows before
+    #    the next section heading, so the operative provision (long body) beats a
+    #    Contents listing (short title). Subsectioned "95.—(1)" and single-sentence
+    #    "25. An organisation…" both match; pure-TOC stubs (body < 80) are rejected.
     head = re.compile(rf"(?:^|\n)\s*{re.escape(token)}\.", re.IGNORECASE)
     best: "Chunk | None" = None
     best_body = -1

@@ -293,6 +293,42 @@ class TestHtmlExtractor:
         for section_title, anchor_url in doc.location_reference_map.items():
             assert "#" in anchor_url, f"Expected # anchor in {anchor_url}"
 
+    def test_no_anchor_warning_when_doc_has_no_heading_anchors(self, sg_zone1, caplog):
+        # SSO whole-doc: only chrome <h*> tags (no anchors), provisions keyed off
+        # <a name="pr..-">. The heading-anchor model doesn't apply → no noise.
+        import logging
+        from src.fetcher.extractors.html_extractor import extract_html
+        html = (
+            b"<html><body>"
+            b"<h1>Search within Legislation</h1><h2>Help</h2>"
+            b'<a name="pr26-"></a>'
+            b"<p>26. An organisation must not transfer any personal data to a country "
+            b"outside Singapore except in accordance with the requirements prescribed "
+            b"under this Act to ensure a comparable standard of protection, and this "
+            b"filler sentence exists to clear the two-hundred-character body guard.</p>"
+            b"</body></html>"
+        )
+        with caplog.at_level(logging.WARNING, logger="fetcher.html_extractor"):
+            extract_html(html, sg_zone1, "text/html; charset=utf-8")
+        assert "html_anchor_not_found" not in caplog.text
+
+    def test_anchor_warning_fires_when_some_headings_are_anchored(self, sg_zone1, caplog):
+        # When the doc DOES use anchored headings, a heading missing one is a real
+        # anomaly and must still be flagged.
+        import logging
+        from src.fetcher.extractors.html_extractor import extract_html
+        html = (
+            b"<html><body>"
+            b'<h2 id="pr1-">1. Short title and definitions apply throughout this Act, '
+            b"and this sentence pads the body past the two hundred character guard so "
+            b"the extractor parses the document instead of treating it as a JS shell.</h2>"
+            b"<h2>Unanchored heading with no id and no preceding named anchor at all</h2>"
+            b"</body></html>"
+        )
+        with caplog.at_level(logging.WARNING, logger="fetcher.html_extractor"):
+            extract_html(html, sg_zone1, "text/html; charset=utf-8")
+        assert "html_anchor_not_found" in caplog.text
+
     def test_js_rendered_page_raises_extraction_error(self, sg_zone1):
         from src.fetcher.extractors.html_extractor import ExtractionError, extract_html
         empty_html = b"<html><body><script>console.log('app')</script></body></html>"
@@ -648,7 +684,7 @@ class TestRouteIntegration:
             return rendered_html
 
         with (
-            patch.object(router, "_render_spa_sync", side_effect=_fake_render),
+            patch.object(router, "_render_wholedoc", side_effect=_fake_render),
             patch.object(router, "download", side_effect=AssertionError("download must not run")),
         ):
             result = router.route(sg_zone1, cfg)

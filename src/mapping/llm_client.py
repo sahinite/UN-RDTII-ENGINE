@@ -162,6 +162,44 @@ def call_llm_with_cascade(
     )
 
 
+def smoke_check_llm() -> "tuple[bool, str]":
+    """One tiny real call to prove the LLM can actually PRODUCE PARSEABLE OUTPUT —
+    not merely that a key is present (which is all `is_available()` checks).
+
+    This catches, in ~seconds, the three ways the LLM silently yields nothing and
+    turns every provision into a false "no barrier" N/A over a full run:
+      1. provider dead — bad/quota'd key, network → all tiers raise;
+      2. empty response — a thinking-only model (answer went to Ollama's `thinking`
+         field), or the prompt overran the context window;
+      3. unparseable — truncated/garbled JSON.
+
+    Uses the real cascade path, so it validates exactly what extraction will use.
+    Returns (ok, human-readable detail).
+    """
+    from src.mapping.parser import _extract_json
+
+    system = "You output only a JSON object. No prose, no markdown, no thinking."
+    user = 'Return exactly this and nothing else: {"ok": true, "n": 26}'
+    try:
+        resp = call_llm_with_cascade(system, user, max_tokens=200, temperature=0.0)
+    except Exception as e:  # noqa: BLE001 — any failure means the LLM can't run
+        return False, f"provider call failed ({type(e).__name__}): {e}"
+
+    text = (resp.text or "").strip()
+    if not text:
+        return False, (
+            f"{resp.provider}/{resp.model} returned an EMPTY response — likely a "
+            "thinking-only model or a context/token limit (for Ollama, raise OLLAMA_NUM_CTX)"
+        )
+    try:
+        _extract_json(text)
+    except Exception:  # noqa: BLE001 — unparseable output
+        return False, (
+            f"{resp.provider}/{resp.model} returned unparseable (non-JSON) output: {text[:80]!r}"
+        )
+    return True, f"{resp.provider}/{resp.model}"
+
+
 def _call_with_retry(
     provider: BaseLLMProvider,
     system: str,

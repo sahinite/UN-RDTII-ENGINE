@@ -166,10 +166,11 @@ def test_ollama_is_reasoning_model_detection():
     assert not _is_reasoning_model("qwen2.5:7b")
 
 
-def test_ollama_reasoning_model_gets_num_predict_headroom():
-    """Reasoning models need extra num_predict so <think> doesn't starve the JSON
-    answer; non-reasoning models keep the caller's budget unchanged."""
-    from src.mapping.providers.ollama_provider import OllamaProvider, _REASONING_THINK_HEADROOM
+def test_ollama_thinking_model_disables_thinking():
+    """Thinking models (r1, qwen3, …) must send think=false so the JSON answer lands
+    in `response` instead of a separate `thinking` field; non-thinking models omit
+    the flag. num_predict is always the caller's budget (thinking is off)."""
+    from src.mapping.providers.ollama_provider import OllamaProvider
     captured = {}
 
     def _fake_post(url, json, timeout):
@@ -182,12 +183,17 @@ def test_ollama_reasoning_model_gets_num_predict_headroom():
 
     with patch("src.mapping.providers.ollama_provider.requests.post", side_effect=_fake_post):
         p = OllamaProvider(6)
-        p._model = "deepseek-r1:8b"          # reasoning
+        for model in ("deepseek-r1:8b", "qwen3.5:9b"):   # thinking models
+            p._model = model
+            p.complete("s", "u", max_tokens=1000)
+            assert captured["payload"].get("think") is False
+            assert captured["payload"]["options"]["num_predict"] == 1000
+            assert captured["payload"]["options"]["num_ctx"] >= 8192  # fit the prompt
+        p._model = "granite3-8b"                          # non-thinking
         p.complete("s", "u", max_tokens=1000)
-        assert captured["payload"]["options"]["num_predict"] == 1000 + _REASONING_THINK_HEADROOM
-        p._model = "granite3-8b"             # non-reasoning
-        p.complete("s", "u", max_tokens=1000)
+        assert "think" not in captured["payload"]
         assert captured["payload"]["options"]["num_predict"] == 1000
+        assert captured["payload"]["options"]["num_ctx"] >= 8192
 
 
 def test_anthropic_provider_name_and_model():
