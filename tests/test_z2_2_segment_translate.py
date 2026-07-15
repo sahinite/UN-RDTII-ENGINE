@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-2: Segment + Translate. [Z2-2 ST7]
+Unit tests for Z2-2: Segment + Translate.
 
 Coverage target: ≥70% of src/fetcher/translator.py and the new
 article-reference code in src/fetcher/segmenter.py.
@@ -73,7 +73,7 @@ def _make_doc(raw_text: str = "Sample legal text.", economy: str = "MY") -> Fetc
     )
 
 
-# ── ST5: Law title normalisation ───────────────────────────────────────────────
+# ── Law title normalisation ───────────────────────────────────────────────
 
 class TestNormaliseLawReference:
     def test_strips_be_suffix(self):
@@ -99,7 +99,7 @@ class TestNormaliseLawReference:
         assert result == "Personal Data Protection Act 2012"
 
 
-# ── ST3: translate_text ────────────────────────────────────────────────────────
+# ── translate_text ────────────────────────────────────────────────────────
 
 class TestTranslateText:
     def test_english_passthrough(self):
@@ -159,7 +159,7 @@ class TestTranslateText:
         assert provider == "google"
 
 
-# ── ST3: Layer 1 — Keywords ────────────────────────────────────────────────────
+# ── Layer 1 — Keywords ────────────────────────────────────────────────────
 
 class TestTranslateKeywords:
     def test_english_passthrough(self):
@@ -179,7 +179,7 @@ class TestTranslateKeywords:
         assert cost == 0.0
 
 
-# ── ST3: Layer 2 — Act title ───────────────────────────────────────────────────
+# ── Layer 2 — Act title ───────────────────────────────────────────────────
 
 class TestTranslateActTitle:
     def test_english_passthrough(self):
@@ -196,7 +196,7 @@ class TestTranslateActTitle:
         assert cost == pytest.approx(0.0005)
 
 
-# ── ST4: translate_document ────────────────────────────────────────────────────
+# ── translate_document ────────────────────────────────────────────────────
 
 class TestTranslateDocument:
     def test_english_economy_no_translation(self, sg_config):
@@ -307,7 +307,7 @@ class TestTranslateDocument:
         mock_deepl.assert_not_called()
 
 
-# ── ST2: Article reference mapping ────────────────────────────────────────────
+# ── Article reference mapping ────────────────────────────────────────────
 
 class TestExtractArticleReferences:
     def _hier(self, entries: list[dict]) -> list[dict]:

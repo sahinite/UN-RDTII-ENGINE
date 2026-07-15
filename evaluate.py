@@ -1,5 +1,5 @@
 """
-Compares engine output against the Round 1 sample kit. [Z2-6 ST6]
+Compares engine output against the Round 1 sample kit.
 
 Usage:
     python evaluate.py --sample-kit data/sample_kit/ --economy Singapore

@@ -1,5 +1,5 @@
 """
-RAG pipeline configuration + taxonomy loader. [Z2-3 ST6]
+RAG pipeline configuration + taxonomy loader.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Custom exceptions for the mapping module. [Z2-4 ST6]
+Custom exceptions for the mapping module.
 """
 
 

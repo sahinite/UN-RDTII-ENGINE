@@ -1,5 +1,5 @@
 """
-Integration-level mapper tests — Phase 1 gate assertions. [Z2-4]
+Integration-level mapper tests — Phase 1 gate assertions.
 
 These tests operate at the extract_provisions / PROVIDER_CASCADE boundary,
 one level above the unit tests in test_z2_4_mapper.py and test_z2_4_cascade.py.

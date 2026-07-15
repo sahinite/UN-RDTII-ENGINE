@@ -1,5 +1,5 @@
 """
-Crawl4AI integration (Playwright-based, MIT license). [Z1-3]
+Crawl4AI integration (Playwright-based, MIT license).
 
 Dedicated wrapper around Crawl4AI/Playwright for JS-rendered government portals.
 Extracted from crawler.py so it can be imported, swapped, or mocked independently.

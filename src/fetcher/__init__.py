@@ -1,5 +1,5 @@
 """
-Zone 2 fetch, route, segment, and translate package. [Z2-1, Z2-2]
+Zone 2 fetch, route, segment, and translate package.
 
 Public API:
     route(zone1_result, economy_config) -> FetchedDocument | list[FetchedDocument]

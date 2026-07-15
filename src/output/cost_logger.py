@@ -1,5 +1,5 @@
 """
-CostLogger — records measured (not estimated) per-component costs. [Z2-6 ST5]
+CostLogger — records measured (not estimated) per-component costs.
 
 Tracks token counts and $ costs for: OCR / embedding / LLM / crawling.
 Writes logs/cost_report.json at the end of each run.

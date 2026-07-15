@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-6: Output Writer, Schema Validator, Cost Logger. [Z2-6 ST7]
+Unit tests for Z2-6: Output Writer, Schema Validator, Cost Logger.
 Covers all 3 acceptance criteria:
   AC1 — CSV column order matches OUTPUT_TEMPLATE_31MAY.xlsx exactly
   AC2 — JSON extended fields are present and populated
@@ -93,7 +93,7 @@ def _make_validated_result(record=None, archive_url=""):
     )
 
 
-# ── ST3: Schema Validator ──────────────────────────────────────────────────────
+# ── Schema Validator ──────────────────────────────────────────────────────
 
 class TestValidateRecord:
     def test_valid_record_no_violations(self):
@@ -476,7 +476,7 @@ class TestCostLogger:
         assert t2 > t1
 
 
-# ── ST4: Write Orchestrator ────────────────────────────────────────────────────
+# ── Write Orchestrator ────────────────────────────────────────────────────
 
 class TestWriteOutputs:
     def test_write_outputs_creates_both_files(self, tmp_path):

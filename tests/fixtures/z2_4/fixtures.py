@@ -1,5 +1,5 @@
 """
-Shared test fixtures for Z2-4 LLM Extractor tests. [Z2-4 ST7]
+Shared test fixtures for Z2-4 LLM Extractor tests.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-7-tier auto-cascade LLM engine with session pinning. [Z2-4 ST1/ST2]
+7-tier auto-cascade LLM engine with session pinning.
 
 PROVIDER_CASCADE order (DO NOT reorder):
   1. AnthropicProvider  — claude-sonnet-4-20250514 (pinned primary)

@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-4 ST5: Mapper Orchestrator. [Z2-4 ST7]
+Unit tests for Mapper Orchestrator.
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """
-Output writer — 13-column CSV + JSON envelope with extended metadata. [Z2-6]
+Output writer — 13-column CSV + JSON envelope with extended metadata.
 
-ST1 — write_csv: pandas, UTF-8-BOM, post-write column-order verification
-ST2 — write_json: 6 extended fields, per-document grouping, post-write verification
-ST3 — validate_record: pre-write field checks + column order guard
-ST4 — write_outputs: orchestrator entry point + console summary
+write_csv: pandas, UTF-8-BOM, post-write column-order verification
+write_json: 6 extended fields, per-document grouping, post-write verification
+validate_record: pre-write field checks + column order guard
+write_outputs: orchestrator entry point + console summary
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def _check_portal_domain(record: OutputRecord) -> None:
         pass
 
 
-# ── ST3: Output Schema Validator ───────────────────────────────────────────────
+# ── Output Schema Validator ───────────────────────────────────────────────
 
 def validate_record(record: OutputRecord) -> list[str]:
     """
@@ -138,7 +138,7 @@ def validate_record(record: OutputRecord) -> list[str]:
     return violations
 
 
-# ── ST1: CSV Writer ────────────────────────────────────────────────────────────
+# ── CSV Writer ────────────────────────────────────────────────────────────
 
 def write_csv(records: list[OutputRecord], path: Path) -> Path:
     """
@@ -181,7 +181,7 @@ def write_csv(records: list[OutputRecord], path: Path) -> Path:
     return path
 
 
-# ── ST2: JSON Envelope Writer ──────────────────────────────────────────────────
+# ── JSON Envelope Writer ──────────────────────────────────────────────────
 
 _DOC_LEVEL_FIELDS = {
     "economy", "law_name", "source_url", "source_pdf_path",
@@ -268,7 +268,7 @@ def write_json(records: list[OutputRecord], path: Path) -> Path:
     return path
 
 
-# ── ST4: Write Orchestrator ────────────────────────────────────────────────────
+# ── Write Orchestrator ────────────────────────────────────────────────────
 
 def write_outputs(
     records: list[OutputRecord],

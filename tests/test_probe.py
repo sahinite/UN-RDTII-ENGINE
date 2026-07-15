@@ -1,5 +1,5 @@
 """
-Unit tests for src/crawler/probe.py. [Z1-2-ST7]
+Unit tests for src/crawler/probe.py.
 
 All HTTP calls are mocked — zero real network requests.
 Coverage target: ≥ 90% of crawler/probe.py.
@@ -400,7 +400,7 @@ def test_translation_cache_hit_skips_api(mocker):
     mock_deepl_mod.Translator.assert_not_called()
 
 
-# ── 9. Output contract (ST6) ──────────────────────────────────────────────────
+# ── 9. Output contract ──────────────────────────────────────────────────
 
 
 def test_probe_result_fields_complete():

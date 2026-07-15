@@ -1,5 +1,5 @@
 """
-Text-native PDF extraction via pdfplumber. [Z2-1 ST2]
+Text-native PDF extraction via pdfplumber.
 
 Called by router.py when doc_type == TEXT_PDF.
 Reclassifies to SCANNED_PDF and raises ReclassifyToScannedError

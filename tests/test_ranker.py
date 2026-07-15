@@ -1,4 +1,4 @@
-"""Two-pass KNOWN/NEW tagging + ranking tests. [Z1-5-ST8]"""
+"""Two-pass KNOWN/NEW tagging + ranking tests."""
 
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def _my_economy_config():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. Seed Data Loader (ST1)
+# 1. Seed Data Loader
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestSeedDataLoader:
@@ -189,7 +189,7 @@ class TestSeedDataLoader:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 2. Discovery Tag Finalisation (ST2)
+# 2. Discovery Tag Finalisation
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestDiscoveryTagFinalisation:
@@ -259,7 +259,7 @@ class TestDiscoveryTagFinalisation:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. Layer 2 Translation (ST3)
+# 3. Layer 2 Translation
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestLayer2Translation:
@@ -305,7 +305,7 @@ class TestLayer2Translation:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Semantic + BM25 Scorer (ST4)
+# 4. Semantic + BM25 Scorer
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestSemanticBM25Scorer:
@@ -381,7 +381,7 @@ class TestSemanticBM25Scorer:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. Exclusion Filter (ST5)
+# 5. Exclusion Filter
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestExclusionFilter:
@@ -441,7 +441,7 @@ class TestExclusionFilter:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. Score Fusion + LLM Gate (ST6)
+# 6. Score Fusion + LLM Gate
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestScoreFusionAndGate:
@@ -582,7 +582,7 @@ class TestScoreFusionAndGate:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 7. Output Contract (ST7)
+# 7. Output Contract
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestOutputContract:

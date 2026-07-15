@@ -1,5 +1,5 @@
 """
-Standalone cost measurement tool. [Z2-6 ST5]
+Standalone cost measurement tool.
 
 Usage:
     python tools/cost_logger.py --pdf data/benchmark/benchmark_50pages.pdf \

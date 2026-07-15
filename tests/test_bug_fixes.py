@@ -135,58 +135,6 @@ class TestEstimateCER:
         assert cer > 0.5
 
 
-# ── Bug 4: Stage 2 failure swallowed ──────────────────────────────────────────
-
-class TestMaybeStage2Fallback:
-    def test_stage2_failed_flag_set_on_failure(self):
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch("src.ocr.processor._route_stage2", side_effect=RuntimeError("all failed")):
-            result = maybe_stage2_fallback(
-                cer=0.10,
-                image_bytes=b"\xff\xfe",
-                stage1_text="fallback text",
-                stage1_engine="tesseract",
-            )
-
-        assert result.stage2_triggered is True
-        assert result.stage2_failed is True
-        assert result.text == "fallback text"
-
-    def test_stage2_success_does_not_set_failed(self):
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch(
-            "src.ocr.processor._route_stage2",
-            return_value=("extracted text", 0.01, "azure_di"),
-        ):
-            result = maybe_stage2_fallback(
-                cer=0.10,
-                image_bytes=b"\xff\xfe",
-                stage1_text="stage1 fallback",
-                stage1_engine="tesseract",
-            )
-
-        assert result.stage2_triggered is True
-        assert result.stage2_failed is False
-        assert result.text == "extracted text"
-
-    def test_low_cer_skips_stage2(self):
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch("src.ocr.processor._route_stage2") as mock_s2:
-            result = maybe_stage2_fallback(
-                cer=0.01,
-                image_bytes=b"\xff\xfe",
-                stage1_text="clean text",
-                stage1_engine="tesseract",
-            )
-            mock_s2.assert_not_called()
-
-        assert result.stage2_triggered is False
-        assert result.stage2_failed is False
-
-
 # ── Bug 2: PDPA gate check_pdpa_gate ──────────────────────────────────────────
 
 class TestPDPAGate:

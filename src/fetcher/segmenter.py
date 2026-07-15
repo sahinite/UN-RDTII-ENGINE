@@ -1,10 +1,10 @@
 """
-Consolidated volume segmentation via PyMuPDF. [Z2-1 ST5, Z2-2 ST1, ST2]
+Consolidated volume segmentation via PyMuPDF.
 
 Splits multi-act consolidated volumes by act boundary before extraction.
 Also provides extract_article_references() to map section_hierarchy entries
-to citable (act_title, part, article_number) tuples. [Z2-2 ST2]
-Translation is handled by src/fetcher/translator.py. [Z2-2 ST3-ST5]
+to citable (act_title, part, article_number) tuples.
+Translation is handled by src/fetcher/translator.py.
 
 # LICENCE-NOTE: PyMuPDF (AGPL) — single controlled point of use, pending
 # replacement with a permissively-licensed alternative per tech plan.
@@ -34,7 +34,7 @@ ACT_HEADER_PATTERNS: list[re.Pattern[str]] = [
 _MIN_SEGMENT_PAGES = 3
 _FIXED_FALLBACK_SIZE = 50
 
-# ── Article reference patterns (ST2) ──────────────────────────────────────────
+# ── Article reference patterns ──────────────────────────────────────────
 
 # Matches "PART I", "CHAPTER 2", "DIVISION IV", "SCHEDULE 3"
 _PART_RE = re.compile(
@@ -59,7 +59,7 @@ def _matches_act_header(text: str) -> bool:
     return False
 
 
-# ── ST2: Article reference mapping ────────────────────────────────────────────
+# ── Article reference mapping ────────────────────────────────────────────
 
 def extract_article_references(
     section_hierarchy: list[dict],

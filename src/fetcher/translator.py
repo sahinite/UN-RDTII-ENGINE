@@ -1,5 +1,5 @@
 """
-3-layer translation pipeline. [Z2-2 ST3, ST4, ST5]
+3-layer translation pipeline.
 
 Layer 1: Portal search keywords  → English  (translate_keywords)
 Layer 2: Act titles              → English  (translate_act_title)
@@ -41,7 +41,7 @@ _BE_YEAR_RE = re.compile(r"\b(2[45]\d{2})\b")
 _CHUNK_SIZE = 25_000
 
 
-# ── ST5: Buddhist Era conversion ───────────────────────────────────────────────
+# ── Buddhist Era conversion ───────────────────────────────────────────────
 
 def convert_be_years(text: str) -> tuple[str, list[tuple[str, int]]]:
     """
@@ -61,7 +61,7 @@ def convert_be_years(text: str) -> tuple[str, list[tuple[str, int]]]:
     return _BE_YEAR_RE.sub(_replace, text), conversions
 
 
-# ── ST5: Law title normalisation ───────────────────────────────────────────────
+# ── Law title normalisation ───────────────────────────────────────────────
 
 def normalise_law_reference(title: str) -> str:
     """
@@ -282,7 +282,7 @@ def _google_translate(text: str, source_lang: str) -> Optional[str]:
         return None
 
 
-# ── ST3: Core translation function ────────────────────────────────────────────
+# ── Core translation function ────────────────────────────────────────────
 
 def translate_text(
     text: str,
@@ -350,7 +350,7 @@ def translate_text(
     return text, "failed", 0.0
 
 
-# ── ST3: Layer 1 — Keywords ────────────────────────────────────────────────────
+# ── Layer 1 — Keywords ────────────────────────────────────────────────────
 
 def translate_keywords(
     keywords: list[str],
@@ -375,7 +375,7 @@ def translate_keywords(
     return translated, total_cost
 
 
-# ── ST3: Layer 2 — Act title ───────────────────────────────────────────────────
+# ── Layer 2 — Act title ───────────────────────────────────────────────────
 
 def translate_act_title(
     title: str,
@@ -395,7 +395,7 @@ def translate_act_title(
     return translate_text(title, source_lang, provider)
 
 
-# ── ST4: Layer 3 — Full document ──────────────────────────────────────────────
+# ── Layer 3 — Full document ──────────────────────────────────────────────
 
 def translate_document(
     doc: FetchedDocument,
@@ -455,7 +455,7 @@ def translate_document(
         title_en = doc.act_title
     title_en = normalise_law_reference(title_en)
 
-    # ── ST5: Buddhist Era conversion ──────────────────────────────────────────
+    # ── Buddhist Era conversion ──────────────────────────────────────────
     text_for_l3 = doc.raw_text
     if economy_config.be_year_conversion and doc.raw_text:
         text_for_l3, be_conversions = convert_be_years(doc.raw_text)

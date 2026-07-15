@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-1: Fetch + Route + OCR Stage 1. [Z2-1 ST7]
+Unit tests for Z2-1: Fetch + Route + OCR Stage 1.
 
 Coverage target: ≥90% of src/fetcher/* lines.
 Zero real HTTP calls — all network access is mocked.
@@ -74,7 +74,7 @@ def _mock_response(content: bytes, status: int = 200, content_type: str = "") ->
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST1 — Router: download + detect + route
+# Router: download + detect + route
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestDownload:
@@ -225,7 +225,7 @@ class TestConsolidatedVolume:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST2 — PDF Text Extractor
+# PDF Text Extractor
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestPdfTextExtractor:
@@ -280,7 +280,7 @@ class TestPdfTextExtractor:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST3 — HTML Extractor
+# HTML Extractor
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestHtmlExtractor:
@@ -391,7 +391,7 @@ class TestHtmlExtractor:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST4 — OCR Stage 1
+# OCR Stage 1
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestOcrStage1:
@@ -473,7 +473,7 @@ class TestOcrStage1:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST5 — Segmenter
+# Segmenter
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSegmenter:
@@ -561,7 +561,7 @@ class TestSegmenter:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST6 — FetchedDocument validation
+# FetchedDocument validation
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestFetchedDocumentValidation:
@@ -622,7 +622,7 @@ class TestFetchedDocumentValidation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST7 — Structured logger
+# Structured logger
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestLogger:

@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-4 ST4: LLM Response Parser + Verbatim Assertion. [Z2-4 ST7]
+Unit tests for LLM Response Parser + Verbatim Assertion.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Anthropic Claude provider. [Z2-4 ST1]"""
+"""Anthropic Claude provider."""
 
 from __future__ import annotations
 

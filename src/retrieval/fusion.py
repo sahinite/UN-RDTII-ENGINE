@@ -1,5 +1,5 @@
 """
-Reciprocal Rank Fusion: BM25 + dense → top-20. [Z2-3 ST4]
+Reciprocal Rank Fusion: BM25 + dense → top-20.
 
 rrf_fusion() merges two ranked lists (each a list of (chunk_index, score))
 using the standard RRF formula: score = Σ 1/(k + rank).

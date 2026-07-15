@@ -1,5 +1,5 @@
 """
-Subsection-aware chunking with legal boundary detection. [Z2-3 ST1]
+Subsection-aware chunking with legal boundary detection.
 
 chunk_document() accepts a TranslatedDocument (from Z2-2) or a plain FetchedDocument
 and returns a list[Chunk].  Every Chunk carries a LocationReference so downstream

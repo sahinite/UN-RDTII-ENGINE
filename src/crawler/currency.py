@@ -1,11 +1,11 @@
-"""Currency check + Wayback Machine archiving. [Z1-4]
+"""Currency check + Wayback Machine archiving.
 
 Pipeline per CandidateAct:
-  ST1 — Live URL validation (HTTP GET gate)
-  ST2 — In-force detection (keyword scan + portal status tags)
-  ST3 — Auto-replacement fetch for cancelled acts (4 scenarios)
-  ST4 — last_amended year extraction
-  ST5 — Wayback Machine archiving
+  Live URL validation (HTTP GET gate)
+  In-force detection (keyword scan + portal status tags)
+  Auto-replacement fetch for cancelled acts (4 scenarios)
+  last_amended year extraction
+  Wayback Machine archiving
 """
 
 import asyncio
@@ -58,7 +58,7 @@ class CurrencyResult:
     pillar: str
     pass_number: int
     # Added by currency.py
-    http_status: int          # HTTP status from ST1 (200, 404, -1=timeout, 0=error)
+    http_status: int          # HTTP status from the reachability check (200, 404, -1=timeout, 0=error)
     currency_status: str      # "in_force" | "cancelled" | "uncertain" | "broken"
     flag_for_review: bool
     currency_note: str
@@ -116,7 +116,7 @@ _HORIZONTAL_DPL_KEYWORDS = frozenset([
 ])
 
 
-# ── ST1: Live URL Validation ───────────────────────────────────────────────────
+# ── Live URL Validation ───────────────────────────────────────────────────
 
 async def _validate_url(url: str, client: httpx.AsyncClient) -> tuple[str, int]:
     """Returns (canonical_url, status_code). -1 = timeout, 0 = error/suspicious redirect."""
@@ -165,7 +165,7 @@ async def _validate_url(url: str, client: httpx.AsyncClient) -> tuple[str, int]:
         return url, 0
 
 
-# ── ST2: Fetch page content ────────────────────────────────────────────────────
+# ── Fetch page content ────────────────────────────────────────────────────
 
 async def _fetch_page_text(url: str, document_type: str, client: httpx.AsyncClient) -> str:
     """Returns the page text for currency analysis (HTML full text; PDF first 2 pages)."""
@@ -187,7 +187,7 @@ async def _fetch_page_text(url: str, document_type: str, client: httpx.AsyncClie
         return ""
 
 
-# ── ST2: In-force detection ────────────────────────────────────────────────────
+# ── In-force detection ────────────────────────────────────────────────────
 
 def _detect_currency_status(text: str, url: str) -> tuple[str, str]:
     """Pure function. Returns (currency_status, cancellation_note)."""
@@ -231,7 +231,7 @@ def _extract_sentence_around(text: str, pos: int, chars: int = 150) -> str:
     return text[start:end].replace("\n", " ")
 
 
-# ── ST3: Auto-replacement ──────────────────────────────────────────────────────
+# ── Auto-replacement ──────────────────────────────────────────────────────
 
 def _find_replacement_in_text(text: str) -> tuple[str | None, str | None]:
     """Parse text for replacement URL or act name. Returns (url_or_none, name_or_none)."""
@@ -332,7 +332,7 @@ async def _handle_cancelled_act(
     return None, "Cancelled. No replacement found. Manual review required.", True
 
 
-# ── ST4: last_amended extraction ───────────────────────────────────────────────
+# ── last_amended extraction ───────────────────────────────────────────────
 
 def _extract_last_amended(text: str) -> str:
     """Pure function. Returns the most recent valid 4-digit year found, or ''."""
@@ -349,7 +349,7 @@ def _extract_last_amended(text: str) -> str:
     return str(max(years)) if years else ""
 
 
-# ── ST5: Wayback Machine archiving ────────────────────────────────────────────
+# ── Wayback Machine archiving ────────────────────────────────────────────
 
 async def _archive_act_url(url: str) -> str:
     """Submit url to Wayback Machine Save API. Returns snapshot URL or ''."""
@@ -390,7 +390,7 @@ async def run_currency_check(
     output_dir: str = "logs",
 ) -> list[CurrencyResult]:
     """
-    Runs ST1 → ST2 → ST3 → ST4 → ST5 for each CandidateAct.
+    Runs the pipeline stages for each CandidateAct.
     Returns ALL acts (including broken/cancelled) for full traceability.
     ranker.py is responsible for filtering by currency_status.
     """
@@ -404,7 +404,7 @@ async def run_currency_check(
             result = await _process_one(candidate, client)
             results.append(result)
 
-            # ST5: rate-limit between archive requests
+            # rate-limit between archive requests
             if result.archive_url:
                 await _sleep(_WAYBACK_RATE_LIMIT_SEC)
 
@@ -413,8 +413,8 @@ async def run_currency_check(
 
 
 async def _process_one(candidate: CandidateAct, client: httpx.AsyncClient) -> CurrencyResult:
-    """Process a single CandidateAct through ST1→ST5."""
-    # ST1 — URL validation
+    """Process a single CandidateAct through the pipeline stages."""
+    # URL validation
     canonical_url, http_status = await _validate_url(candidate.act_url, client)
 
     # Broken / unreachable
@@ -437,7 +437,7 @@ async def _process_one(candidate: CandidateAct, client: httpx.AsyncClient) -> Cu
                             flag=True, note=f"URL_SERVER_ERROR {http_status}.",
                             last_amended="", archive_url="")
 
-    # ST2 — In-force detection + ST4 — last_amended (single fetch)
+    # In-force detection + last_amended (single fetch)
     page_text = await _fetch_page_text(canonical_url, candidate.document_type, client)
     currency_status, currency_note = _detect_currency_status(page_text, canonical_url)
     last_amended = _extract_last_amended(page_text)
@@ -445,7 +445,7 @@ async def _process_one(candidate: CandidateAct, client: httpx.AsyncClient) -> Cu
     flag = False
     final_url = canonical_url
 
-    # ST3 — Auto-replacement for cancelled acts
+    # Auto-replacement for cancelled acts
     if currency_status == "cancelled":
         replacement_url, repl_note, flag = await _handle_cancelled_act(
             candidate.act_title, page_text, candidate.portal_source, client
@@ -467,7 +467,7 @@ async def _process_one(candidate: CandidateAct, client: httpx.AsyncClient) -> Cu
         existing_note = currency_note or ""
         currency_note = f"Sectoral law. {existing_note}".strip()
 
-    # ST5 — Wayback archiving (only for reachable URLs)
+    # Wayback archiving (only for reachable URLs)
     archive = await _archive_act_url(final_url)
 
     return _make_result(candidate, final_url, http_status, currency_status,

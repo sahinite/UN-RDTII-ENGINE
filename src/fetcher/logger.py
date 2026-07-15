@@ -1,5 +1,5 @@
 """
-Structured JSON logger for all Zone 2 fetcher modules. [Z2-1 ST7]
+Structured JSON logger for all Zone 2 fetcher modules.
 
 Every record emits: timestamp, level, module, event, economy, url.
 """

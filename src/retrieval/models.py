@@ -1,5 +1,5 @@
 """
-Shared dataclasses for the RAG pipeline. [Z2-3]
+Shared dataclasses for the RAG pipeline.
 
 LocationReference  — (act_title, part, article_number, page) tuple carried by every chunk.
 Chunk              — The unit passed through chunk → embed → retrieve → rerank.

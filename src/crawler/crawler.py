@@ -1,4 +1,4 @@
-"""Crawl4AI-based domain-locked depth-2 crawler. [Z1-3]
+"""Crawl4AI-based domain-locked depth-2 crawler.
 
 Two-pass discovery strategy:
   Pass 1 — KNOWN: seed BFS from Round 1 database URLs → confirm existence.

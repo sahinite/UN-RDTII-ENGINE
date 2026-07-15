@@ -1,5 +1,5 @@
 """
-OCR Stage 1: language-based engine selection (Tesseract / PaddleOCR). [Z2-1 ST4]
+OCR Stage 1: language-based engine selection (Tesseract / PaddleOCR).
 
 Engine is read exclusively from economy YAML (ocr_engine property).
 Zero runtime override. Raises OCRQualityError when CER >= 5% — caller (router)

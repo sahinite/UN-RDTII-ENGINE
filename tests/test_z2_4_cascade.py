@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-4 ST2: 5-Tier Auto-Cascade Engine. [Z2-4 ST7]
+Unit tests for 5-Tier Auto-Cascade Engine.
 """
 
 from __future__ import annotations

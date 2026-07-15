@@ -66,7 +66,7 @@ def _make_zone1(url: str = "https://sso.agc.gov.sg/Act/PDPA") -> "Zone1Result":
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST1 — URL Validator
+# URL Validator
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestUrlValidator:
@@ -170,7 +170,7 @@ class TestUrlValidator:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST2 — Wayback Machine Archiver
+# Wayback Machine Archiver
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestWaybackArchiver:
@@ -221,7 +221,7 @@ class TestWaybackArchiver:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST3 — Azure Document Intelligence
+# Azure Document Intelligence
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAzureDI:
@@ -294,7 +294,7 @@ class TestAzureDI:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST4 — Mistral OCR
+# Mistral OCR
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestMistralOCR:
@@ -344,113 +344,7 @@ class TestMistralOCR:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ST5 — OCR Stage 2 Controller  (AC1)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestOCRStage2Controller:
-
-    def test_below_threshold_no_stage2(self):
-        """CER < 5% → Stage 2 not triggered."""
-        from src.ocr.processor import maybe_stage2_fallback
-        result = maybe_stage2_fallback(
-            cer=0.03, image_bytes=b"img", stage1_text="Good text", stage1_engine="tesseract"
-        )
-        assert result.stage2_triggered is False
-        assert result.engine_used == "tesseract"
-        assert result.text == "Good text"
-
-    def test_above_threshold_triggers_stage2_azure(self):
-        """CER >= 5% + AZURE_DI_KEY set → Azure DI used. AC1."""
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch.dict(os.environ, {"AZURE_DI_KEY": "test", "AZURE_DI_ENDPOINT": "https://ep"}):
-            with patch("src.ocr.processor.run_azure_di", return_value=("Azure extracted text", 0.02)) as mock_azure:
-                result = maybe_stage2_fallback(
-                    cer=0.10,
-                    image_bytes=b"img",
-                    stage1_text="bad ocr",
-                    stage1_engine="tesseract",
-                )
-
-        assert result.stage2_triggered is True
-        assert result.engine_used == "azure_di"
-        assert result.text == "Azure extracted text"
-        assert result.cer == 0.02
-        mock_azure.assert_called_once()
-
-    def test_above_threshold_azure_fails_fallback_mistral(self):
-        """Azure DI fails → Mistral OCR used as fallback."""
-        from src.ocr.processor import maybe_stage2_fallback
-
-        env = {"AZURE_DI_KEY": "test", "AZURE_DI_ENDPOINT": "https://ep", "MISTRAL_API_KEY": "mkey"}
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.run_azure_di", side_effect=RuntimeError("Azure failed")):
-                with patch("src.ocr.processor.run_mistral_ocr", return_value=("Mistral text", 0.01)):
-                    result = maybe_stage2_fallback(
-                        cer=0.08,
-                        image_bytes=b"img",
-                        stage1_text="bad",
-                        stage1_engine="paddleocr",
-                    )
-
-        assert result.stage2_triggered is True
-        assert result.engine_used == "mistral_ocr"
-        assert result.text == "Mistral text"
-
-    def test_all_providers_fail_returns_stage1_text(self):
-        """All Stage 2 providers fail → Stage 1 text returned with flag."""
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch.dict(os.environ, {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": ""}):
-            result = maybe_stage2_fallback(
-                cer=0.12,
-                image_bytes=b"img",
-                stage1_text="fallback text",
-                stage1_engine="tesseract",
-            )
-
-        assert result.stage2_triggered is True
-        assert result.text == "fallback text"
-        assert result.engine_used == "tesseract"
-
-    def test_stage2_logged_on_trigger(self, caplog):
-        """Stage 2 trigger is logged with engine + resulting CER. AC1."""
-        import logging
-        from src.ocr.processor import maybe_stage2_fallback
-
-        with patch.dict(os.environ, {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": "mkey"}):
-            with patch("src.ocr.processor.run_mistral_ocr", return_value=("text", 0.02)):
-                with caplog.at_level(logging.INFO, logger="ocr_stage2"):
-                    result = maybe_stage2_fallback(
-                        cer=0.08,
-                        image_bytes=b"img",
-                        stage1_text="bad",
-                        stage1_engine="tesseract",
-                    )
-
-        assert result.stage2_triggered is True
-        # Structured log entries are dicts — check raw log messages
-        log_events = [r.getMessage() for r in caplog.records]
-        assert any("ocr_stage2_triggered" in m for m in log_events)
-
-    def test_cer_estimate_empty_text(self):
-        from src.ocr.processor import _estimate_cer_from_text
-        assert _estimate_cer_from_text("") == 1.0
-
-    def test_cer_estimate_clean_text(self):
-        from src.ocr.processor import _estimate_cer_from_text
-        cer = _estimate_cer_from_text("Personal Data Protection Act 2012")
-        assert cer == 0.0  # no garbage chars
-
-    def test_cer_estimate_garbage_text(self):
-        from src.ocr.processor import _estimate_cer_from_text
-        # Mix of printable + 5 null bytes
-        cer = _estimate_cer_from_text("abc\x00\x00\x00\x00\x00")
-        assert cer > 0.0
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ST6 — Confidence Flagging (AC2)
+# Confidence Flagging (AC2)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestConfidenceFlagging:
@@ -654,125 +548,6 @@ class TestRouterStage2Integration:
 
         assert result is fake_doc
         assert mock_floor.call_args.kwargs["gate_cer"] is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# run_ocr_stage2 full document pipeline (AC1 - Stage 2 fallback logged)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestRunOCRStage2:
-
-    def test_run_ocr_stage2_with_mistral_success(self, sg_economy):
-        """Full Stage 2 document pipeline uses Mistral when Azure not configured."""
-        from src.ocr.processor import run_ocr_stage2
-
-        zone1 = _make_zone1()
-
-        env = {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": "mkey"}
-        fake_images = [b"img1", b"img2"]
-
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.pdf_to_images", return_value=fake_images):
-                with patch("src.ocr.processor.run_mistral_ocr", return_value=("page text", 0.02)):
-                    doc = run_ocr_stage2(
-                        raw_bytes=b"%PDFfake",
-                        zone1_result=zone1,
-                        economy_config=sg_economy,
-                        stage1_cer=0.12,
-                        stage1_engine="tesseract",
-                    )
-
-        assert doc.raw_text.strip() != ""
-        assert doc.cer_score < 0.05
-        assert doc.extraction_method == "mistral_ocr"
-        assert doc.economy == "SG"
-
-    def test_run_ocr_stage2_all_providers_fail_uses_stage1_text(self, sg_economy):
-        """All Stage 2 providers fail → stage1_text used, flagged for review."""
-        from src.ocr.processor import run_ocr_stage2
-
-        zone1 = _make_zone1()
-        env = {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": ""}
-
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.pdf_to_images", return_value=[b"img1"]):
-                doc = run_ocr_stage2(
-                    raw_bytes=b"%PDFfake",
-                    zone1_result=zone1,
-                    economy_config=sg_economy,
-                    stage1_cer=0.15,
-                    stage1_engine="tesseract",
-                    stage1_text="stage1 fallback text",
-                )
-
-        assert "stage1 fallback text" in doc.raw_text
-        assert doc.flag_for_review is True
-
-    def test_run_ocr_stage2_with_azure_success(self, sg_economy):
-        """Azure DI used when AZURE_DI_KEY is set."""
-        from src.ocr.processor import run_ocr_stage2
-
-        zone1 = _make_zone1()
-        env = {"AZURE_DI_KEY": "akey", "AZURE_DI_ENDPOINT": "https://ep"}
-
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.pdf_to_images", return_value=[b"img1"]):
-                with patch("src.ocr.processor.run_azure_di", return_value=("azure text", 0.01)):
-                    doc = run_ocr_stage2(
-                        raw_bytes=b"%PDFfake",
-                        zone1_result=zone1,
-                        economy_config=sg_economy,
-                        stage1_cer=0.10,
-                        stage1_engine="tesseract",
-                    )
-
-        assert "azure text" in doc.raw_text
-        assert doc.extraction_method == "azure_di"
-        assert doc.flag_for_review is False
-
-    def test_run_ocr_stage2_image_input(self, sg_economy):
-        """Non-PDF raw bytes (image) → single image, no pdf_to_images call."""
-        from src.ocr.processor import run_ocr_stage2
-
-        zone1 = _make_zone1()
-        env = {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": "mkey"}
-
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.run_mistral_ocr", return_value=("image ocr text", 0.01)):
-                # Non-PDF bytes (no %PDF header)
-                doc = run_ocr_stage2(
-                    raw_bytes=b"\x89PNG\r\n\x1a\n",  # PNG header
-                    zone1_result=zone1,
-                    economy_config=sg_economy,
-                    stage1_cer=0.08,
-                    stage1_engine="tesseract",
-                )
-
-        assert "image ocr text" in doc.raw_text
-        assert doc.doc_type == "IMAGE"
-        assert doc.page_count == 1
-
-    def test_run_ocr_stage2_empty_result_uses_placeholder(self, sg_economy):
-        """If all pages return empty text, stage1_text placeholder used."""
-        from src.ocr.processor import run_ocr_stage2
-
-        zone1 = _make_zone1()
-        env = {"AZURE_DI_KEY": "", "MISTRAL_API_KEY": "mkey"}
-
-        with patch.dict(os.environ, env):
-            with patch("src.ocr.processor.pdf_to_images", return_value=[b"img1"]):
-                with patch("src.ocr.processor.run_mistral_ocr", return_value=("", 1.0)):
-                    doc = run_ocr_stage2(
-                        raw_bytes=b"%PDFfake",
-                        zone1_result=zone1,
-                        economy_config=sg_economy,
-                        stage1_cer=0.20,
-                        stage1_engine="tesseract",
-                        stage1_text="original stage1",
-                    )
-
-        # Either stage1_text or placeholder used — text not empty
-        assert doc.raw_text.strip() != ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

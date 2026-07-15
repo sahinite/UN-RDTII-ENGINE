@@ -1,5 +1,5 @@
 """
-Zone 2 Intelligent Mapping package. [Z2-4]
+Zone 2 Intelligent Mapping package.
 
 Ties the 7-tier LLM cascade, prompt builder, and response parser into a
 single extraction pipeline that maps retrieved passages to RDTII indicators.

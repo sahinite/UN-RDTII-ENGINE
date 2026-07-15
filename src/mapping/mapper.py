@@ -1,5 +1,5 @@
 """
-Mapper orchestrator — ties LLM cascade + prompt builder + parser together. [Z2-4 ST5]
+Mapper orchestrator — ties LLM cascade + prompt builder + parser together.
 
 Public API:
   extract_provisions(rag_results, doc) -> (list[ExtractionResult], LLMCostEntry)

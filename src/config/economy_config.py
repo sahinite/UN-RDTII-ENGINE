@@ -1,9 +1,5 @@
 """
-Economy YAML adapter — schema + loader.
-
-Implements ClickUp stories:
-  [Z1-1.1] EconomyConfig data model (pydantic)
-  [Z1-1.2] load_economy(name) loader + validator
+Economy YAML adapter — the pydantic EconomyConfig model + load_economy() loader/validator.
 
 Usage:
     from src.config.economy_config import load_economy

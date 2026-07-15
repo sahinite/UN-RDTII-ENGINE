@@ -1,5 +1,5 @@
 """
-Economy configuration package. [Z1-1]
+Economy configuration package.
 
 Public API:
     load_economy(name)        -> EconomyConfig

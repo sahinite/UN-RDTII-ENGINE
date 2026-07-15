@@ -1,5 +1,5 @@
 """
-Fetch + Route + OCR Stage 1 (language-based). [Z2-1 ST1]
+Fetch + Route + OCR Stage 1 (language-based).
 
 Entry point for Zone 2. Downloads a document from a Zone1Result URL,
 detects its type, and dispatches to the correct extractor. All routing
@@ -639,12 +639,10 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # render is skipped. html_js renders unconditionally before extraction.
             force_render = True
         elif fetch_strategy == "html_wholedoc":
-            # Portal that serves the complete act as a JS-rendered "whole document"
-            # HTML view reached via a URL suffix (Singapore SSO ?WholeDoc=1). The
-            # default act page paginates — only early sections + the arrangement-of-
-            # sections TOC load — so we append the whole-doc suffix, then force a JS
-            # render (provisions lazy-load) before HTML extraction. The suffix is
-            # declared per-portal in `pdf_view_suffix`; the code stays generic.
+            # Portal serves the full act as a JS-rendered whole-document HTML view via
+            # a URL suffix (e.g. Singapore SSO ?WholeDoc=1), since the default page
+            # paginates. Append the per-portal `pdf_view_suffix`, then force a JS render
+            # (provisions lazy-load) before HTML extraction.
             single_act_fetch = True
             force_render = True
             wholedoc_render = True

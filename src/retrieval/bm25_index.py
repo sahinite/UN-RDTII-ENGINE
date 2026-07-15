@@ -1,5 +1,5 @@
 """
-BM25 retrieval with legal keyword boosting and negative filtering. [Z2-3 ST3]
+BM25 retrieval with legal keyword boosting and negative filtering.
 
 BM25Index wraps rank_bm25.BM25Okapi.  When searching for an indicator:
   - probe_keywords from TaxonomyEntry boost the BM25 score by a configurable factor

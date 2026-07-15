@@ -1,4 +1,4 @@
-"""Ollama offline provider — qwen2.5:7b (P6) and granite3-8b (P7). [Z2-4 ST1]"""
+"""Ollama offline provider — qwen2.5:7b (P6) and granite3-8b (P7)."""
 
 from __future__ import annotations
 
@@ -34,21 +34,13 @@ def _resolve_model(priority: int) -> str:
 # Backwards-compat alias for legacy importers (e.g. crawler.ranker).
 OLLAMA_MODELS = OLLAMA_MODEL_DEFAULTS
 
-# Thinking models (deepseek-r1, qwq, qwen3, …) emit a chain-of-thought before the
-# answer. Newer Ollama routes that thinking into a SEPARATE `thinking` field and
-# keeps `response` for the final answer — so when thinking fills the token budget,
-# `response` comes back EMPTY and the JSON never appears (observed: qwen3.5:9b and
-# deepseek-r1 both return ''). We don't want reasoning for structured extraction,
-# so we disable thinking (`think: false`) for these models: the JSON answer then
-# lands in `response`, and it's far faster too (~3s vs ~180s for one s.26 call).
+# Thinking models divert their chain-of-thought to a separate `thinking` field and
+# can return an empty `response`, losing the JSON. We disable thinking for these
+# (also ~60x faster for structured extraction).
 _REASONING_MODEL_HINTS = ("r1", "qwq", "qwen3", "reasoning", "thinking")
 
-# Ollama defaults num_ctx to 4096 tokens and SILENTLY truncates anything longer —
-# the extraction prompt (chunks + taxonomy, up to MAX_PROMPT_TOKENS≈6000) overflows
-# it, leaving no room to generate, so the model stops after ~1 token (done_reason
-# "length", empty/"{" response). Size the context to fit the prompt + answer. A
-# cloud model (128k ctx) never hits this; local models must be told. Override via
-# OLLAMA_NUM_CTX.
+# Ollama's default num_ctx (4096) silently truncates our ~6000-token prompt, leaving
+# no room to generate. Size it to fit prompt + answer; override via OLLAMA_NUM_CTX.
 _DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 
 # Read timeouts (seconds). Reasoning models run a long chain-of-thought before the

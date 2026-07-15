@@ -1,5 +1,5 @@
 """
-Zone 1 Evidence Discovery package. [Z1-2..Z1-5]
+Zone 1 Evidence Discovery package.
 
 Public API:
     load_taxonomy(path)      -> list[dict]           — load + return taxonomy.json

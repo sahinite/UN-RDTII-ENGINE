@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-4 ST3: Per-Indicator Prompt Builder. [Z2-4 ST7]
+Unit tests for Per-Indicator Prompt Builder.
 """
 
 from __future__ import annotations

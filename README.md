@@ -1,322 +1,233 @@
 # RDTII Extraction Engine
 
 **UN Global Hackathon on AI for Digital Trade Regulatory Analysis**
-Team: Galaxefi | Round: 1 | Submission deadline: 20 July 2026 | Demo: 3 August 2026
+Team: Galaxefi · Round 1 · Submission: 20 July 2026 · Demo: 3 August 2026
 
-An end-to-end AI pipeline that crawls government legal portals, extracts regulatory text via OCR/NLP, and maps provisions to RDTII indicators (Pillars 6 & 7) using a 7-tier LLM cascade with hybrid RAG retrieval.
+## What it does?
 
----
+Reading trade laws by hand is slow. This tool does it for you:
 
-## Prerequisites
-
-Before running Quick Start, install system dependencies:
-
-```bash
-python setup.py
-```
-
-This script will:
-- Install **Tesseract** (required — default OCR engine; language packs like Malay `msa` auto-install per economy at run start)
-- Optionally pre-download the **sentence-transformers** embedding models (English `all-MiniLM-L6-v2` + multilingual `paraphrase-multilingual-MiniLM-L12-v2`, ~90–120MB each — see [retrieval strategy](#retrieval-strategy))
-- Optionally install **Ollama** with offline models (~9GB) — only needed if you have no cloud API key
-
-> **Translation** uses **Argos Translate** (offline neural MT) as the primary provider, with DeepL → Google as fallbacks. Argos models auto-install per economy at run start (no manual step, no API key). Non-English economies retrieve over the original text and skip full-document translation; the LLM reads the retrieved source-language passages directly.
-
-> **If you have any one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY`, you can skip Ollama.**
-
-### Manual install (if you prefer not to use setup.py)
-
-| Dependency | Required | Install |
-|---|---|---|
-| Tesseract 5.3+ | **Yes** | macOS: `brew install tesseract` / Ubuntu: `sudo apt-get install -y tesseract-ocr` / Windows: [installer](https://github.com/UB-Mannheim/tesseract/wiki) |
-| Ollama + models | No (offline only) | macOS: `brew install ollama` / Ubuntu: `curl -fsSL https://ollama.com/install.sh \| sh` |
-| sentence-transformers models | No (auto-download on first run) | `python -c "from sentence_transformers import SentenceTransformer as S; S('all-MiniLM-L6-v2'); S('paraphrase-multilingual-MiniLM-L12-v2')"` |
-| Argos Translate | Yes for non-English economies (auto-installs models per run) | `pip install argostranslate` (in requirements.txt) |
+1. **Finds** the right laws on a government's legal website (or you hand it a PDF).
+2. **Reads** them — even scanned image PDFs — and turns them into clean text.
+3. **Understands** them with AI and pins each relevant rule to a specific trade-policy
+   checkpoint (an "RDTII indicator", Pillars 6 & 7 — cross-border data and data protection).
+4. **Writes** the results to a spreadsheet (CSV) and a JSON file you can hand to reviewers.
 
 ---
 
-## Quick start
+## Before you start
+
+You need **two** things:
+
+1. **Python 3.10+** on your computer.
+2. **One AI key** — either a cloud key (recommended) *or* nothing at all if you run fully
+   offline (see [Run without any keys](#run-without-any-keys)).
+
+You give the engine your AI key with **two simple settings**: `LLM_PROVIDER` (which AI)
+and `LLM_API_KEY` (its key). That's all — one key for whichever provider you pick.
+
+| Setting | What it's for | Example |
+|---------|---------------|---------|
+| `LLM_PROVIDER` | Which AI reads the law | `openai` **(recommended — gpt-4o)** |
+| `LLM_API_KEY` | Your key for that AI | get it from platform.openai.com |
+| `LLM_MODEL` | *(Optional)* Pick a specific model — leave blank to use the provider's default | `gpt-4o` |
+| `MISTRAL_API_KEY` | Reading **scanned** PDFs cheaply (~$0.10 per 100 pages) | console.mistral.ai |
+
+> Prefer a different AI? Set `LLM_PROVIDER` to `anthropic`, `deepseek`, `groq`, `qwen`,
+> or `ollama` and put its key in `LLM_API_KEY`. (See [Switch the AI](#common-questions).)
+
+> No cloud keys at all? The engine still works fully offline using free local tools
+> (Ollama for the AI, Tesseract for scans). It's slower but needs no accounts.
+
+---
+
+## Setup (one time)
 
 ```bash
+# 1. Get the code ready
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in API keys (see Configuration below)
 
-# Run for Singapore PDPA (Pillar 7) — PDPA-first gate
-python main.py --economy Singapore --pillar 7
+# 2. Install the helper tools (Tesseract, models). Answer the prompts.
+python setup.py
 
-# Run on a local PDF (skip crawler)
-python main.py --economy Singapore --pillar 7 --pdf data/benchmark/benchmark_50pages.pdf
-
-# Evaluate against Round 1 ground truth
-python evaluate.py --sample-kit data/sample_kit/ --economy Singapore
-
-# Measure per-document costs (required by rubric)
-python tools/cost_logger.py --pdf data/benchmark/benchmark_50pages.pdf \
-    --economy Singapore --pillar 7
-
-# Batch run — each economy runs concurrently in its own isolated subprocess (auto)
-RUN_PROFILE=submit python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
-#   --max-parallel N   cap concurrent economy lanes (avoid LLM rate limits with many economies)
-#   --max-parallel 1   fully sequential (in-process)
+# 3. Add your keys
+cp .env.example .env
 ```
 
----
-
-## Project layout
-
-```
-src/config/      economy YAML schema + loader                [Z1-1]
-src/crawler/     discover() strategy engine (index/api/auto) [Z1-2..Z1-5]
-src/fetcher/     fetch + route + segment + translate         [Z2-1, Z2-2]
-src/ocr/         OCR two-stage cascade (Tesseract/PaddleOCR + Azure DI/Mistral)
-src/retrieval/   chunking, embedding, BM25+dense hybrid RAG  [Z2-3]
-src/llm/         LLM cascade re-export (see src/mapping/)    [Z2-4]
-src/mapping/     7-tier LLM cascade + indicator mapping      [Z2-4]
-src/output/      CSV/JSON writer, URL validator, cost logger [Z2-5, Z2-6]
-tools/           cost_logger.py — standalone cost benchmark  [Z2-6]
-economies/       per-economy YAML configs (3 files)          [Z1-1]
-tests/           pytest suite (mirrors src/ modules)
-data/
-  sample_kit/    Round 1 ground truth (evaluation input)
-  benchmark/     benchmark_50pages.pdf (cost logger input)
-  output_schema_sample.json — example output JSON envelope
-outputs/         CSV/JSON run outputs (gitignored)
-logs/            run logs + cost_report.json (gitignored)
-```
-
----
-
-## Supported economies
-
-Three economy YAML files exist and are configured. Singapore is the HTML-index
-reference, while Australia is the API-driven reference.
-
-| Economy | YAML | Primary portal | Discovery | Script | Languages | Status |
-|---------|------|----------------|-----------|--------|-----------|--------|
-| Singapore | `singapore.yaml` | sso.agc.gov.sg | index | latin | en | Reference (PDPA-first gate) |
-| Australia | `australia.yaml` | legislation.gov.au | api | latin | en | Live |
-| Malaysia | `malaysia.yaml` | agc.gov.my | — | latin | ms, en | Configured |
----
-
-## Output format
-
-Outputs are written to `outputs/{Economy}_P{pillar}_{timestamp}.csv` and `.json`.
-
-**13-column CSV schema** (exact order from `OUTPUT_TEMPLATE_31MAY.xlsx`):
-
-| Column | Required | Notes |
-|--------|----------|-------|
-| economy | Yes | UN official economy name |
-| law_name | Yes | Full act title |
-| law_number_ref | No | Act number (blank if none) |
-| last_amended | No | Year of most recent amendment; blank if never amended |
-| indicator_id | Yes | P6-I1 to P7-I5 |
-| article | Yes | Section/Article reference |
-| discovery_tag | Yes | KNOWN or NEW |
-| location_reference | No | `(act, part, article)` citation |
-| verbatim_snippet | Yes | Exact text from the act |
-| mapping_rationale | No | Max 300 chars |
-| source_url | Yes | Government portal URL |
-| confidence | No | 0.00–1.00 |
-| notes | No | Human review flags |
-
-The JSON envelope groups records by `source_url` and adds 7 extended fields.
-See `data/output_schema_sample.json` for a complete example.
-
----
-
-## LLM cascade
-
-Provider order is fixed (ADR-021, pinned once per run via `LLM_PROVIDER` env var):
-
-| Tier | Provider | Model | Notes |
-|------|----------|-------|-------|
-| 1 | Anthropic | `claude-sonnet-4-20250514` | Recommended primary |
-| 2 | OpenAI | `gpt-4o` | Fallback on API error |
-| 3 | DeepSeek | `deepseek-chat` (V3) | OpenAI-compatible; `DEEPSEEK_API_KEY` |
-| 4 | Groq | `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`) | Free tier |
-| 5 | Qwen (DashScope) | `qwen-plus` | `DASHSCOPE_API_KEY` |
-| 6 | Ollama | `qwen2.5:7b` | Offline, Apache 2.0 |
-| 7 | Ollama | `granite3-8b` | Offline, Apache 2.0 |
-
-**Note:** Llama 3.3 is explicitly excluded (non-Apache 2.0 license).
-Pin any provider with `LLM_PROVIDER`: `anthropic | openai | deepseek | groq | qwen | ollama`.
-
-The LLM cascade implementation lives in `src/mapping/llm_client.py`.
-`src/llm/client.py` re-exports the same public API for backwards compatibility.
-
-### Swapping the LLM
-
-Set `LLM_PROVIDER` in `.env`:
-```bash
-LLM_PROVIDER=anthropic   # use Anthropic as primary (recommended)
-LLM_PROVIDER=openai      # use OpenAI gpt-4o as primary
-LLM_PROVIDER=deepseek    # use DeepSeek V3 as primary
-LLM_PROVIDER=groq        # use Groq free tier as primary
-LLM_PROVIDER=qwen        # use Qwen via DashScope as primary
-LLM_PROVIDER=ollama      # use local Ollama as primary (offline mode)
-```
-
-### Adding a new LLM provider
-
-1. Subclass `src/mapping/base_provider.py:BaseLLMProvider`
-2. Implement `provider_name`, `model`, `is_available()`, `complete()`
-3. Insert the new provider at the desired position in `PROVIDER_CASCADE` in `src/mapping/llm_client.py`
-4. Add pricing constants to `src/output/cost_logger.py:_PROVIDER_PRICING`
-
----
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in your keys:
+Now open `.env` in any text editor and fill in these lines, for example:
 
 ```bash
-# Tier 1 — Anthropic (recommended)
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Tier 2 — OpenAI
-OPENAI_API_KEY=sk-...
-
-# Tier 3 — DeepSeek (OpenAI-compatible)
-DEEPSEEK_API_KEY=sk-...
-
-# Tier 4 — Groq (free)
-GROQ_API_KEY=gsk_...
-
-# Tier 5 — Qwen via DashScope International
-DASHSCOPE_API_KEY=sk-...
-
-# Tier 6/7 — Ollama (offline)
-# Run: ollama serve && ollama pull qwen2.5:7b
-
-# OCR Stage 2 (optional, triggers when CER >= 5%)
-AZURE_DI_KEY=...
-AZURE_DI_ENDPOINT=https://...cognitiveservices.azure.com/
-MISTRAL_API_KEY=...
-
-# Translation (for non-English economies)
-DEEPL_API_KEY=...
-
-# Provider pin (optional — auto-detects if not set)
-LLM_PROVIDER=anthropic
+LLM_PROVIDER=openai               # which AI to use (recommended: OpenAI gpt-4o)
+LLM_API_KEY=sk-...                # your key for that AI
+# LLM_MODEL=gpt-4o                # optional: leave off to use the provider's default
+MISTRAL_API_KEY=...               # optional: cheap OCR for scanned PDFs
 ```
 
+That's it — you're ready to run.
+
 ---
 
-## Retrieval strategy
+## Run it
 
-Retrieval models and translation are selected **per economy** from `economy_config.languages`
-(see CONTEXT.md ADR-060/061):
-
-| | English economies (SG, AU) | Non-English economies (MY) |
-|---|---|---|
-| Embedder | `all-MiniLM-L6-v2` | `paraphrase-multilingual-MiniLM-L12-v2` |
-| Reranker | `ms-marco-MiniLM-L-6-v2` | `mmarco-mMiniLMv2-L12-H384-v1` |
-| Translation | none (already English) | RAG on **original** text; only retrieved passages reach the LLM |
-| Full-doc translation | n/a | **skipped** (`translate_body=False`) |
-
-- **Why per-economy, not global multilingual?** A global multilingual embedder *regressed the Singapore build gate* (P7: 18→10 records). English economies keep the English-specialised model; the multilingual one is only used where it's needed. Default is the English model, so the gate is safe.
-- **Why translate-less?** Non-English documents (e.g. Malaysia's ~1.5M-char acts) used to be translated in full just to feed retrieval. Retrieval now runs on the original text and only the small set of retrieved passages is sent to the LLM, cutting **Malaysia P7 from ~50 min to ~7 min** (translation → ~1% of runtime).
-- **Run profiles** (`RUN_PROFILE`): `gate` (KNOWN-only, build gate, default) · `submit` (KNOWN + 3 NEW — use this for submissions) · `explore` (aggressive NEW). The active profile is printed at run start.
-
-## Running tests
+**Run on a law you already have (a PDF on your computer):**
 
 ```bash
-pytest                              # all tests
-pytest tests/test_economy_config.py # specific module
-pytest -v --tb=short                # verbose output
+python main.py --economy Malaysia --pillar 6 --pdf path/to/law.pdf
 ```
 
----
-
-## Adding a new economy
-
-Only a YAML file is required — zero Python code changes:
-
-1. Create `economies/{code}.yaml` with these fields:
-   ```yaml
-   economy_name: Vietnam
-   iso_code: VN
-   un_name: Viet Nam
-   script_type: latin       # or "asian" for PaddleOCR
-   languages: [vi, en]
-   portals:
-     - name: Ministry of Justice
-       url: https://vbpl.vn
-       type: primary
-   ```
-2. Run: `python main.py --economy Vietnam --pillar 7`
-
-The pipeline will auto-derive the OCR engine from `script_type`, pick up the UN name for CSV output, and include the economy in `_get_economy_names()` lookups. The `--pillar` argument accepts any integer — no code change needed for new pillars either.
-
----
-
-## Pinned versions
-
-No `latest` tags are used anywhere in this project. All versions are pinned:
-
-| Component | Pinned version |
-|-----------|---------------|
-| LLM (tier 1) | `claude-sonnet-4-20250514` |
-| LLM (tier 2) | `gpt-4o` |
-| LLM (tier 3) | `deepseek-chat` (V3) |
-| LLM (tier 4) | `qwen/qwen3-32b` via Groq |
-| LLM (tier 5) | `qwen-plus` via DashScope |
-| LLM (tier 6, offline) | `qwen2.5:7b` (Ollama, Apache 2.0) |
-| LLM (tier 7, offline) | `granite3-8b` (Ollama, Apache 2.0) |
-| OCR (Latin scripts) | Tesseract 5.x |
-| OCR (Asian scripts) | PaddleOCR 2.x |
-
-Python package dependencies are declared in `requirements.txt`; model names are fixed in code/config so runs do not depend on provider `latest` aliases.
-
----
-
-## Open-source fallback (without commercial API keys)
-
-To run the engine fully offline without any API keys:
+**Or let it find the law online for an economy:**
 
 ```bash
-# 1. Pull the offline models
-ollama pull qwen2.5:7b
-ollama pull granite3-8b
-
-# 2. Pin the engine to Ollama
-export LLM_PROVIDER=ollama
-
-# 3. Run as normal — no ANTHROPIC_API_KEY or OPENAI_API_KEY required
 python main.py --economy Singapore --pillar 7
 ```
 
-The Ollama cascade uses `qwen2.5:7b` (tier 6) first, then `granite3-8b` (tier 7) on failure. Both models are Apache 2.0 licensed. OCR (Tesseract / PaddleOCR) and embeddings are always local and require no API key.
+- `--economy` — the country/economy (Singapore, Australia, Malaysia).
+- `--pillar` — which topic to check (6 = cross-border data, 7 = data protection).
+- `--pdf` — optional; point it at a PDF to skip the online search.
 
+While it runs you'll see a live checklist (finding → reading → understanding → writing).
+Scanned PDFs are read automatically — no extra steps.
 
-## Limitations
+**When it finishes**, look in the `outputs/` folder for two files:
 
-**Fetch & discovery**
-- Anti-bot portals (e.g. Singapore SSO) require JS rendering that intermittently fails under rate-limiting; retry + backoff mitigates but fetch is not fully deterministic run-to-run.
-- KNOWN seeds are capped at `ZONE2_MAX_KNOWN_ACTS` (default 12) per run — economies with more known acts lose the excess.
-- Round 1 seeds given as an act *name* only (no URL) rely on the browse index surfacing them by title and may be missed.
-- The set of incidental NEW/index acts surfaced varies between runs.
+```
+outputs/Malaysia_P6_<timestamp>.csv    ← open in Excel / Google Sheets
+outputs/Malaysia_P6_<timestamp>.json   ← same data, for developers
+```
 
-**Mapping & tagging**
-- KNOWN vs NEW is decided by act-title + section identity; a garbled or empty LLM `law_name` falls back to NEW (fuzzy title matching helps, but is not perfect).
-- Round 1 rows without a parseable section number aren't tracked by the recall audit.
-- Secondary/guidance sources are flagged for review, not auto-verified against primary legislation.
-- Weak Round 1 mappings the LLM reasonably declines can appear as recall "misses".
+Each row is one legal rule, showing the exact wording, which indicator it maps to,
+a confidence score, and the source. Rows marked in the **notes** column are worth a
+quick human check.
 
-**LLM & runtime**
-- One provider is pinned per run — a sustained outage/429 aborts extraction (no mid-run provider switch).
-- LLM calls dominate runtime and cost; large consolidated acts increase both.
+---
 
-**Coverage**
-- Only Pillars 6 & 7 and economies SG / AU / MY are validated/configured.
-- OCR Stage-2 (Azure DI / Mistral) needs API keys; without them, poor-quality scans may degrade extraction.
-- SSO whole-doc HTML yields a flat section hierarchy (raw-text chunking); `location_reference` carries no deep-link anchor (the URL is in the `source_url` column).
+## Run without any keys
+
+Fully offline, no accounts, no cost:
+
+```bash
+ollama pull qwen2.5:7b        # download a free local AI (~5 GB, one time)
+export LLM_PROVIDER=ollama    # tell the engine to use it
+python main.py --economy Singapore --pillar 7
+```
+
+Everything runs on your machine, so there are trade-offs to expect:
+
+- **Slower.** The local AI is the bottleneck — a run can take **several minutes to tens of
+  minutes** vs seconds-to-minutes on a cloud key, and it's much slower on a laptop without a GPU.
+- **A little less accurate.** Small local models miss more than gpt-4o/Claude, so expect a few
+  more rows flagged for review.
+- **First run downloads models** (~5 GB for the AI, plus OCR/embedding models) — one-time, but
+  it needs disk space and a decent connection.
+- **Scanned PDFs read with local Tesseract** (no Mistral key), which is weaker on poor scans.
+- **Keep Ollama running** (`ollama serve`) in the background while the engine runs.
+
+---
+
+## Common questions
+
+**Which economies work?** Singapore, Australia, and Malaysia are configured and tested.
+Adding another is just a small YAML file — see [Add a new economy](#add-a-new-economy).
+
+**How does it read scanned documents?** OCR (turning images into text) is cloud-first
+and cheap: it uses **Mistral** in a single call for a whole PDF, falls back to Azure or a
+vision AI if needed, and finally to free local **Tesseract** if you have no keys. You don't
+choose — it picks the best available automatically.
+
+**How much does a run cost?** The AI does most of the work; OCR is tiny (~$0.10 for a
+100-page scan). Every run writes a real cost breakdown to `logs/cost_report.json`.
+
+**Switch the AI?** Change `LLM_PROVIDER` in `.env` (and put its key in `LLM_API_KEY`):
+`openai` (recommended, gpt-4o) · `anthropic` · `deepseek` · `groq` · `qwen` · `ollama` (offline).
+Each provider uses its own default model; set `LLM_MODEL` only if you want a specific one.
+
+**Run the tests?**
+
+```bash
+pytest
+```
+
+---
+
+## Output columns (the CSV)
+
+| Column | Meaning |
+|--------|---------|
+| economy | Country/economy name |
+| law_name | Title of the act |
+| indicator_id | Which checkpoint it maps to (P6-I1 … P7-I5) |
+| article | Section number in the law |
+| discovery_tag | KNOWN (in the reference set) or NEW (newly found) |
+| verbatim_snippet | The exact text from the law |
+| mapping_rationale | Why the AI mapped it there |
+| source_url | Where the law came from |
+| confidence | AI confidence, 0–1 |
+| notes | Flags for human review |
+
+(Full 13-column schema and the JSON structure: see `data/output_schema_sample.json`.)
+
+---
+
+## Add a new economy
+
+No coding — just one YAML file, then run:
+
+```yaml
+# economies/vietnam.yaml
+economy_name: Vietnam
+iso_code: VN
+un_name: Viet Nam
+script_type: latin        # "asian" for Thai/Chinese scripts
+languages: [vi, en]
+portals:
+  - name: Ministry of Justice
+    url: https://vbpl.vn
+    type: primary
+```
+
+```bash
+python main.py --economy Vietnam --pillar 7
+```
+
+---
+
+## Under the hood (for developers)
+
+- **Zone 1 — discovery** (`src/crawler/`): finds acts via a per-portal strategy
+  (`index` / `api` / `seed_only` / `auto`) declared in `economies/*.yaml`.
+- **Zone 2 — mapping** (`src/fetcher/`, `src/ocr/`, `src/retrieval/`, `src/mapping/`):
+  fetch → OCR/translate → hybrid RAG retrieval → LLM maps passages to indicators →
+  `src/output/` writes CSV/JSON and validates URLs.
+- **OCR cascade** (`src/ocr/processor.py`): Mistral (whole-doc → per-page) → Azure DI
+  (if configured) → LLM-vision (the configured provider) → Tesseract/PaddleOCR floor.
+- **LLM cascade** (`src/mapping/llm_client.py`): one provider pinned per run via
+  `LLM_PROVIDER`; order is Anthropic → OpenAI → DeepSeek → Groq → Qwen → Ollama.
+  Model names are pinned (no `latest` tags). Llama 3.3 is excluded (license).
+- **Retrieval** picks English vs multilingual models per economy; non-English economies
+  search the original text and skip full-document translation (Malaysia P7: ~50 min → ~7 min).
+- **Run profiles** (`RUN_PROFILE`): `gate` (KNOWN-only, default) · `submit` (KNOWN + 3 NEW,
+  use for submissions) · `explore` (aggressive NEW). Printed at run start.
+
+More detail lives in `CLAUDE.md` and `CONTEXT.md`.
+
+---
+
+## Known limitations
+
+- Configured/validated for Pillars 6 & 7 and economies SG / AU / MY only.
+- Anti-bot government sites can fail intermittently; the online search isn't 100%
+  deterministic run-to-run (handing it a `--pdf` avoids this).
+- KNOWN vs NEW tagging matches on act title + section; a garbled title falls back to NEW.
+- One AI provider is pinned per run — a sustained outage aborts extraction (no mid-run switch).
+- Without any OCR key, very poor scans fall to local Tesseract and may read less accurately.
+- **Offline mode (Ollama)** is noticeably slower (minutes → tens of minutes, worse without a
+  GPU), a bit less accurate, and needs a one-time ~5 GB model download — use a cloud key when
+  speed or accuracy matters.
 
 ---
 
 ## License
 
-Apache License 2.0 — see `LICENSE`.
-All offline models in the cascade (`qwen2.5:7b`, `granite3-8b`) are Apache 2.0 licensed.
+Apache License 2.0 — see `LICENSE`. The offline models in the cascade (`qwen2.5:7b`,
+`granite3-8b`) are Apache 2.0 licensed.

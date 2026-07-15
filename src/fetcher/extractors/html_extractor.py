@@ -1,5 +1,5 @@
 """
-HTML extraction via BeautifulSoup with URL anchor support. [Z2-1 ST3]
+HTML extraction via BeautifulSoup with URL anchor support.
 
 Extracts article/section hierarchy and builds location_reference_map
 (section title → clickable URL anchor) — a key differentiator for judges.

@@ -1,4 +1,4 @@
-"""Groq provider — Qwen3 via Groq free tier. [Z2-4 ST1]"""
+"""Groq provider — Qwen3 via Groq free tier."""
 
 from __future__ import annotations
 

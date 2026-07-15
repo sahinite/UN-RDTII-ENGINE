@@ -1,5 +1,5 @@
 """
-Zone 2 retrieval package — [Z2-3] RAG pipeline.
+Zone 2 retrieval package — RAG pipeline.
 
 Public surface:
     retrieve(indicator_id, doc)          -> list[RetrievedChunk]

@@ -1,5 +1,5 @@
 """
-Cross-encoder reranking: top-20 → top-5 with context windows. [Z2-3 ST5]
+Cross-encoder reranking: top-20 → top-5 with context windows.
 
 Model: cross-encoder/ms-marco-MiniLM-L-6-v2 (Apache 2.0, ~22 M params).
 Lazy-loaded once per process.

@@ -1,5 +1,5 @@
 """
-Unit tests for Z2-4 ST1: LLM Provider Abstraction Layer. [Z2-4 ST7]
+Unit tests for LLM Provider Abstraction Layer.
 """
 
 from __future__ import annotations

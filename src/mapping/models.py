@@ -1,5 +1,5 @@
 """
-Shared dataclasses for the mapping module. [Z2-4 ST4/ST5/ST6]
+Shared dataclasses for the mapping module.
 
 ExtractionResult  — one extracted provision row, maps 1:1 to a CSV output row.
 LLMCostEntry      — per-document LLM cost summary across all indicator calls.

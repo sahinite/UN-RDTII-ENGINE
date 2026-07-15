@@ -1,5 +1,5 @@
 """
-Unit tests for [Z2-3] RAG pipeline.
+Unit tests for RAG pipeline.
 
 All ML models are mocked — tests run without GPU and in < 5 seconds.
 Covers: chunker, BM25, fusion, reranker, and the orchestrator.
@@ -94,7 +94,7 @@ def _make_chunks(n: int = 6) -> list[Chunk]:
     ]
 
 
-# ── ST1: Chunker ──────────────────────────────────────────────────────────────
+# ── Chunker ──────────────────────────────────────────────────────────────
 
 class TestChunker:
     def test_regex_split_returns_multiple_chunks(self):
@@ -252,7 +252,7 @@ class TestChunker:
         assert "No table of contents" not in body
 
 
-# ── ST2: Embedding Index (mocked) ─────────────────────────────────────────────
+# ── Embedding Index (mocked) ─────────────────────────────────────────────
 
 class TestEmbeddingIndex:
     @patch("src.retrieval.embedder._get_model")
@@ -289,7 +289,7 @@ class TestEmbeddingIndex:
             idx.dense_search("test query")
 
 
-# ── ST3: BM25 ─────────────────────────────────────────────────────────────────
+# ── BM25 ─────────────────────────────────────────────────────────────────
 
 class TestBM25Index:
     def _indicator(self) -> TaxonomyEntry:
@@ -373,7 +373,7 @@ class TestBM25Index:
         assert top_id == "relevant"
 
 
-# ── ST4: RRF Fusion ───────────────────────────────────────────────────────────
+# ── RRF Fusion ───────────────────────────────────────────────────────────
 
 class TestRRFFusion:
     def test_merges_two_lists(self):
@@ -409,7 +409,7 @@ class TestRRFFusion:
         assert result == []
 
 
-# ── ST5: Reranker (mocked cross-encoder) ─────────────────────────────────────
+# ── Reranker (mocked cross-encoder) ─────────────────────────────────────
 
 class TestReranker:
     @patch("src.retrieval.reranker._get_cross_encoder")
@@ -455,7 +455,7 @@ class TestReranker:
         assert results == []
 
 
-# ── ST6: RAG Orchestrator (end-to-end mocked) ─────────────────────────────────
+# ── RAG Orchestrator (end-to-end mocked) ─────────────────────────────────
 
 class TestRAGOrchestrator:
     def _mock_pipeline(self, mocker, n_chunks: int = 6):

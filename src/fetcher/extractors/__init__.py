@@ -1,5 +1,5 @@
 """
-OCR Stage 1 extractors package. [Z2-1]
+OCR Stage 1 extractors package.
 
 Public API:
     pdf_to_images(raw_bytes, dpi)       -> list[bytes]         — render PDF pages to PNG bytes

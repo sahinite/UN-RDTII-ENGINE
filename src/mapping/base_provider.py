@@ -1,4 +1,4 @@
-"""BaseLLMProvider abstract interface. [Z2-4 ST1]"""
+"""BaseLLMProvider abstract interface."""
 
 from __future__ import annotations
 

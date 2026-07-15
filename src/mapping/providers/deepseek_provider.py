@@ -1,4 +1,4 @@
-"""DeepSeek provider — OpenAI-compatible API. [Z2-4]"""
+"""DeepSeek provider — OpenAI-compatible API."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """
-Sentence-transformer embeddings + FAISS dense search. [Z2-3 ST2]
+Sentence-transformer embeddings + FAISS dense search.
 
 EmbeddingIndex wraps a FAISS flat-IP index and a chunk list so callers
 can call dense_search() without managing numpy arrays.

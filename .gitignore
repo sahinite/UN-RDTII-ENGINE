@@ -12,3 +12,8 @@ data/benchmark/*.pdf
 .DS_Store
 cache/*
 !cache/.gitkeep
+
+# Coverage artifacts
+.coverage
+*,cover
+htmlcov/

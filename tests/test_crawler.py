@@ -1,4 +1,4 @@
-"""Unit tests for crawler.py. [Z1-3-ST7]"""
+"""Unit tests for crawler.py."""
 
 from pathlib import Path
 from unittest.mock import AsyncMock

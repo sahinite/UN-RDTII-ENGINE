@@ -1,5 +1,5 @@
 """
-Seed Data Loader — Round 1 DB + Sample CSV Parser. [Z1-5-ST1]
+Seed Data Loader — Round 1 DB + Sample CSV Parser.
 
 Builds normalised KNOWN/NEW lookup sets from two authoritative reference files:
   - ESCAPRDTII2_1__Round_1_Database.xlsx   (Round 1 known acts per economy/pillar)

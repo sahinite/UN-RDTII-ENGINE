@@ -1,11 +1,11 @@
 """
-Validate + Archive + Confidence Flagging. [Z2-5]
+Validate + Archive + Confidence Flagging.
 
-ST1 — Live URL Validator: HTTP GET each source_url (retry on 429/5xx,
+Live URL Validator: HTTP GET each source_url (retry on 429/5xx,
       soft-404 detection, broken-URL flagging).
-ST2 — Wayback Machine Archiver: POST to save/{url} at output time,
+Wayback Machine Archiver: POST to save/{url} at output time,
       store archive URL in notes + JSON envelope.
-ST6 — Confidence Flagging + ValidatedResult dataclass + Orchestrator:
+Confidence Flagging + ValidatedResult dataclass + Orchestrator:
       confidence < 0.80 → append "Recommend human review — OCR/translation source".
 """
 
@@ -107,7 +107,7 @@ class ValidatedResult:
     validated_at: str          # ISO 8601 UTC timestamp
 
 
-# ── ST1: Live URL Validator ────────────────────────────────────────────────────
+# ── Live URL Validator ────────────────────────────────────────────────────
 
 def _is_error_page(body: str) -> bool:
     lower = body.lower()
@@ -232,7 +232,7 @@ def validate_url(url: str) -> tuple[URLStatusType, Optional[int]]:
     return "error", last_status
 
 
-# ── ST2: Wayback Machine Archiver ──────────────────────────────────────────────
+# ── Wayback Machine Archiver ──────────────────────────────────────────────
 
 def archive_wayback(url: str) -> str:
     """
@@ -369,7 +369,7 @@ def archive_source(url: str) -> str:
     return archive_url
 
 
-# ── ST6: Confidence Flagging ───────────────────────────────────────────────────
+# ── Confidence Flagging ───────────────────────────────────────────────────
 
 _CONFIDENCE_THRESHOLD = 0.80
 
@@ -393,7 +393,7 @@ def validate_and_flag(
     wayback_rate_limit_s: float = 1.0,
 ) -> list[ValidatedResult]:
     """
-    ST6 orchestrator: validates URLs, archives them, flags low confidence.
+    Orchestrator: validates URLs, archives them, flags low confidence.
 
     Args:
         records: ExtractionResult list from the mapper.
@@ -418,7 +418,7 @@ def validate_and_flag(
 
     for record in records:
         src = record.source_url
-        # ST1: validate source URL (cached per unique URL)
+        # validate source URL (cached per unique URL)
         if src not in url_status_cache:
             url_status_cache[src] = validate_url(src)
         url_status, http_code = url_status_cache[src]
@@ -440,10 +440,10 @@ def validate_and_flag(
                 else broken_note
             )
 
-        # ST6: confidence flagging (before archiving so note is in ValidatedResult)
+        # confidence flagging (before archiving so note is in ValidatedResult)
         _flag_confidence(record)
 
-        # ST2: archiving (only live URLs) — Wayback best-effort → local fallback,
+        # archiving (only live URLs) — Wayback best-effort → local fallback,
         # cached per unique URL so we don't re-archive the same act per provision.
         arch_url = ""
         if archive and url_status in ("ok", "redirected"):

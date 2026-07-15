@@ -1,4 +1,4 @@
-"""OpenAI GPT-4o provider. [Z2-4 ST1]"""
+"""OpenAI GPT-4o provider."""
 
 from __future__ import annotations
 

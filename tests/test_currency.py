@@ -1,4 +1,4 @@
-"""Unit tests for currency.py. [Z1-4-ST7]"""
+"""Unit tests for currency.py."""
 
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -66,7 +66,7 @@ def _mock_archive(monkeypatch, result: str = "https://web.archive.org/web/202601
     monkeypatch.setattr(currency_mod, "_archive_act_url", _mock)
 
 
-# ── 1. URL Validation (ST1) ────────────────────────────────────────────────────
+# ── 1. URL Validation ────────────────────────────────────────────────────
 
 @respx.mock
 async def test_200_url_passes(monkeypatch):
@@ -177,7 +177,7 @@ async def test_timeout_flags_review(monkeypatch, tmp_path):
     assert r.flag_for_review is True
 
 
-# ── 2. In-Force Detection (ST2) ────────────────────────────────────────────────
+# ── 2. In-Force Detection ────────────────────────────────────────────────
 
 def test_repealed_keyword_detected():
     """'repealed' keyword in text → currency_status = 'cancelled'."""
@@ -216,7 +216,7 @@ def test_no_keyword_sets_uncertain():
     assert note == ""
 
 
-# ── 3. Auto-Replacement (ST3) ─────────────────────────────────────────────────
+# ── 3. Auto-Replacement ─────────────────────────────────────────────────
 
 @respx.mock
 async def test_replacement_url_in_notice(monkeypatch):
@@ -293,7 +293,7 @@ def test_sectoral_law_triggers_horizontal_search():
     assert _is_sectoral_law("Personal Data Protection Act 2012") is False
 
 
-# ── 4. last_amended Extraction (ST4) ──────────────────────────────────────────
+# ── 4. last_amended Extraction ──────────────────────────────────────────
 
 def test_amended_year_from_html():
     """Portal page with 'as amended in 2021' → last_amended = '2021'."""
@@ -320,7 +320,7 @@ def test_invalid_year_rejected():
     assert _extract_last_amended(text) == ""
 
 
-# ── 5. Wayback Archiving (ST5) ────────────────────────────────────────────────
+# ── 5. Wayback Archiving ────────────────────────────────────────────────
 
 @respx.mock
 async def test_archive_url_populated(monkeypatch, tmp_path):

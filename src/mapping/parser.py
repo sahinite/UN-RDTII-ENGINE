@@ -1,5 +1,5 @@
 """
-LLM response parser + verbatim assertion + two-row handler. [Z2-4 ST4]
+LLM response parser + verbatim assertion + two-row handler.
 
 parse_llm_response   — parses JSON, runs verbatim assertion, returns ExtractionResult list.
 expand_non_consecutive — splits non-adjacent provisions into two rows.
@@ -269,12 +269,9 @@ def _build_extraction_result(
         flag_for_review = True
         flag_reasons.append("article_missing_paragraph")
 
-    # Non-primary source check: a provision extracted from a secondary portal
-    # (regulator guidance / advisory / summary page) is not the binding statute.
-    # Such pages often paraphrase the law and number obligations as a plain list
-    # ("8. Transfer Limitation Obligation"), which the LLM cites as a spurious
-    # section — so flag for verification against the primary legislation. Driven
-    # by the portal's declared YAML `type`, so it holds for every economy.
+    # A provision from a secondary portal (regulator guidance/summary, per the YAML
+    # `type`) isn't the binding statute and often paraphrases it — flag for
+    # verification against the primary legislation.
     if doc_metadata.get("portal_type") == "secondary":
         flag_for_review = True
         flag_reasons.append("non_primary_source — verify against primary legislation")
@@ -308,15 +305,11 @@ def _build_extraction_result(
     if law_name and _DELEGATED_LEG_KEYWORDS.search(law_name):
         notes_parts.append("Delegated legislation — verify enabling act")
 
-    # Decision 9: location_reference is derived deterministically from trusted
-    # provenance — never from an LLM-emitted value. The LLM cannot know page
-    # numbers or anchor URLs (they are not in the prompt), so any it invents are
-    # fabricated (e.g. the literal "https://url#anchor" placeholder). We build the
-    # citation from (a) the LLM's `article` field — the authoritative section it
-    # read from the chunk header — and (b) the page of the chunk that actually
-    # contains the verbatim snippet. Anchoring to the snippet-bearing chunk (not
-    # top_chunks[0], which varies per indicator call) is what keeps the SAME
-    # provision's citation identical across indicators.
+    # Decision 9: build location_reference deterministically, never from an LLM value
+    # (the LLM can't see page numbers/anchors, so any it emits are fabricated). Use the
+    # LLM's `article` plus the page of the chunk that actually contains the snippet —
+    # anchoring to that chunk (not top_chunks[0]) keeps a provision's citation stable
+    # across indicators.
     matched_chunk = _find_matching_chunk(snippet, top_chunks) or (
         top_chunks[0] if top_chunks else None
     )

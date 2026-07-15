@@ -1,5 +1,5 @@
 """
-Integration-level output tests — schema, confidence flagging, URL validation. [Z2-5, Z2-6]
+Integration-level output tests — schema, confidence flagging, URL validation.
 
 These tests operate at the write_outputs / validate_and_flag boundary,
 one level above the unit tests in test_z2_6_output.py and test_z2_5_validator.py.

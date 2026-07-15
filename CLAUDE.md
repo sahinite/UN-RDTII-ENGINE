@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **RDTII Extraction Engine** — AI pipeline for digital trade regulatory analysis, built for the UN Global Hackathon. It crawls government legal portals, extracts and OCRs documents, then uses LLM-based RAG to map regulatory provisions to RDTII indicators.
 
-The codebase is largely scaffolded. Story IDs in comments (e.g. `[Z1-3]`, `[Z2-4]`) map 1:1 to ClickUp stories in the "UN ESCAP" board under epics ZONE 1 and ZONE 2.
+The codebase is organized into two zones (see Architecture below): Zone 1 evidence
+discovery and Zone 2 intelligent mapping.
 
-**Build gate:** Phase 1 must achieve a fully-verified Singapore PDPA (Pillar 7) end-to-end run before expanding to other economies or acts. Follow story order: `[Z1-1]` → `[Z1-5]` → `[Z2-1]` → `[Z2-6]`.
+**Build gate:** Phase 1 must achieve a fully-verified Singapore PDPA (Pillar 7) end-to-end run before expanding to other economies or acts.
 
 ## Setup
 

@@ -1,5 +1,5 @@
 """
-Auto-probe portal discovery. [Z1-2]
+Auto-probe portal discovery.
 
 For each portal in the economy YAML, sends all indicator keyword sets to the
 portal's search endpoint and returns a ranked list of portals that have
@@ -289,7 +289,7 @@ def _build_search_url(
     return f"{base}/search?q={quote_plus(keyword)}"
 
 
-# ── HTTP probing (ST2) ─────────────────────────────────────────────────────────
+# ── HTTP probing ─────────────────────────────────────────────────────────
 
 
 async def _jitter() -> None:
@@ -442,7 +442,7 @@ async def _probe_portal_all_keywords(
     return results
 
 
-# ── Aggregation & ranking (ST3) ────────────────────────────────────────────────
+# ── Aggregation & ranking ────────────────────────────────────────────────
 
 
 def _aggregate_portal_results(
@@ -506,7 +506,7 @@ def _rank_portals(results: list[ProbeResult]) -> list[ProbeResult]:
     return sorted(results, key=_sort_key)
 
 
-# ── Structured logging (ST4) ───────────────────────────────────────────────────
+# ── Structured logging ───────────────────────────────────────────────────
 
 
 def _write_probe_logs(
@@ -585,7 +585,7 @@ def load_taxonomy(taxonomy_path: str = "taxonomy.json") -> list[dict]:
     return data
 
 
-# ── Public API (ST6) ──────────────────────────────────────────────────────────
+# ── Public API ──────────────────────────────────────────────────────────
 
 
 async def run_probe(

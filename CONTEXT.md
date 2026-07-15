@@ -93,8 +93,9 @@ All extractors return `FetchedDocument`. Validation enforced at end of every ext
 ### ADR-017 — `verbatim_original` always source-language `raw_text`
 Unmodified even after BE year conversion. BE conversion applied only to text sent to translation provider.
 
-### ADR-021 — Mapping module lives in `src/mapping/`, not `src/llm/`
-`src/llm/client.py` is a thin re-export of `src/mapping/llm_client.py`.
+### ADR-021 — Mapping/LLM code lives in `src/mapping/`
+The LLM cascade is `src/mapping/llm_client.py`. (The old `src/llm/` re-export shim was
+removed once nothing imported it.)
 
 ### ADR-024 — Stage 2 OCR providers are credentials-gated
 `AZURE_DI_KEY` / `MISTRAL_API_KEY` env vars. Missing → silently skipped.

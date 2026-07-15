@@ -1,6 +1,6 @@
 """
 RAG pipeline orchestrator: chunk → embed → BM25 + dense hybrid retrieval →
-Reciprocal Rank Fusion → cross-encoder rerank → top-5 chunks. [Z2-3 ST6]
+Reciprocal Rank Fusion → cross-encoder rerank → top-5 chunks.
 
 Public API
 ----------

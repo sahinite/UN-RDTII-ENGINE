@@ -1,5 +1,5 @@
 """
-Per-indicator prompt builder for LLM extraction. [Z2-4 ST3]
+Per-indicator prompt builder for LLM extraction.
 
 SYSTEM_PROMPT is shared across all indicators and providers.
 build_user_prompt constructs the full user-facing prompt for one

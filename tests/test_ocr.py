@@ -1,4 +1,4 @@
-"""OCR accuracy on sample scanned PDFs — both cascade stages. [Z2-1, Z2-5]
+"""OCR accuracy on sample scanned PDFs — both cascade stages.
 
 Stage 1 engine is selected purely from the economy's derived `ocr_engine`
 (latin→tesseract, asian→paddleocr). Stage 2 (Azure DI / Mistral) is escalated by

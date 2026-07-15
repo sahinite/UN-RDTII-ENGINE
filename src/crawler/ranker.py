@@ -1,13 +1,13 @@
 """
-Two-pass discovery tagging (KNOWN/NEW) + ranking. [Z1-5]
+Two-pass discovery tagging (KNOWN/NEW) + ranking.
 
 Pipeline:
-  ST2 — Discovery tag finalisation (KNOWN/NEW) after currency check
-  ST3 — Layer 2 title/snippet translation for non-English economies
-  ST4 — Semantic similarity + BM25 scoring (local, zero API cost)
-  ST5 — Per-indicator exclusion filter (pre-LLM gate)
-  ST6 — Score fusion + DeepSeek LLM gate + top 3-5 shortlisting
-  ST7 — RankedAct output contract + ranking summary logs
+  Discovery tag finalisation (KNOWN/NEW) after currency check
+  Layer 2 title/snippet translation for non-English economies
+  Semantic similarity + BM25 scoring (local, zero API cost)
+  Per-indicator exclusion filter (pre-LLM gate)
+  Score fusion + DeepSeek LLM gate + top 3-5 shortlisting
+  RankedAct output contract + ranking summary logs
 
 Top 3-5 RankedAct objects per indicator hand off to Zone 2 (fetcher/router).
 """
@@ -106,7 +106,7 @@ class RankedAct:
     ranker_notes: str
 
 
-# ── ST2: Discovery Tag Finalisation ───────────────────────────────────────────
+# ── Discovery Tag Finalisation ───────────────────────────────────────────
 
 def resolve_discovery_tag(
     result: CurrencyResult,
@@ -188,7 +188,7 @@ def _apply_translation(
     return translations
 
 
-# ── ST4: Semantic Similarity + BM25 Scorer ────────────────────────────────────
+# ── Semantic Similarity + BM25 Scorer ────────────────────────────────────
 
 @dataclass
 class ActIndicatorScore:
@@ -266,7 +266,7 @@ def _score_acts(
     return all_scores
 
 
-# ── ST5: Per-Indicator Exclusion Filter ───────────────────────────────────────
+# ── Per-Indicator Exclusion Filter ───────────────────────────────────────
 
 def is_excluded(act: CurrencyResult, indicator: dict) -> tuple[bool, str]:
     """
@@ -299,7 +299,7 @@ def _write_exclusion_log(
             f.write(json.dumps(entry) + "\n")
 
 
-# ── ST6: Score Fusion + LLM Gate ──────────────────────────────────────────────
+# ── Score Fusion + LLM Gate ──────────────────────────────────────────────
 
 def _fuse_scores(semantic: float, bm25: float) -> float:
     sem_w = float(os.getenv("RANKER_SEMANTIC_WEIGHT", str(_SEMANTIC_WEIGHT)))
@@ -420,7 +420,7 @@ def _run_gate_for_indicator(
     return top_candidates
 
 
-# ── ST7: Ranking logs + run_ranker() ──────────────────────────────────────────
+# ── Ranking logs + run_ranker() ──────────────────────────────────────────
 
 def _write_summary_log(
     economy: str,
@@ -474,7 +474,7 @@ def run_ranker(
     output_dir: str = "logs",
 ) -> list[RankedAct]:
     """
-    Runs ST2 → ST3 → ST4 → ST5 → ST6 → ST7.
+    Runs the pipeline stages.
 
     Returns top 3–5 RankedAct per indicator_id.
     Total output = up to 5 acts × N indicators RankedAct objects.
@@ -493,16 +493,16 @@ def run_ranker(
     if not active_results:
         raise RankerError(f"No active (in_force/uncertain) acts for {economy} {pillar}")
 
-    # ── ST2: Resolve discovery tags ────────────────────────────────────────────
+    # ── Resolve discovery tags ────────────────────────────────────────────
     tag_map: dict[str, tuple[str, bool, str]] = {}  # url → (tag, flag, note)
     for result in active_results:
         tag, flag, note = resolve_discovery_tag(result, seed_data)
         tag_map[result.act_url] = (tag, flag, note)
 
-    # ── ST3: Layer 2 translation ───────────────────────────────────────────────
+    # ── Layer 2 translation ───────────────────────────────────────────────
     translations = _apply_translation(active_results, economy_config)
 
-    # ── ST4: Score all (act, indicator) pairs ─────────────────────────────────
+    # ── Score all (act, indicator) pairs ─────────────────────────────────
     all_scores = _score_acts(active_results, translations, taxonomy)
 
     # Group scores by indicator
@@ -512,7 +512,7 @@ def run_ranker(
 
     score_rows: list[dict] = []  # for detail log
 
-    # ── ST5+ST6+ST7: Per-indicator pipeline ───────────────────────────────────
+    # ── Per-indicator pipeline ───────────────────────────────────
     all_ranked: list[RankedAct] = []
     exclusion_log: list[dict] = []
     per_indicator_summary: dict = {}
@@ -525,7 +525,7 @@ def run_ranker(
         iid = indicator["indicator_id"]
         scores_for_ind = score_index.get(iid, {})
 
-        # ST5: exclusion filter
+        # exclusion filter
         candidates_for_gate: list[dict] = []
         for result in active_results:
             excluded, excl_reason = is_excluded(result, indicator)
@@ -573,7 +573,7 @@ def run_ranker(
         # Sort by fused score descending before gate
         candidates_for_gate.sort(key=lambda x: x["fused_score"], reverse=True)
 
-        # ST6: LLM gate
+        # LLM gate
         gated = _run_gate_for_indicator(
             candidates_for_gate, indicator, output_dir, economy, ts, cost_entries
         )

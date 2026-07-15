@@ -1,5 +1,5 @@
 """
-OCR two-stage cascade. [Z2-1 Stage 1, Z2-5 Stage 2]
+OCR two-stage cascade.
 
 Stage 1 (language-based, automatic from economy YAML):
     Tesseract  -> Latin-script economies
@@ -17,7 +17,6 @@ import os
 import time
 import unicodedata
 import urllib.parse
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
@@ -41,17 +40,6 @@ _MISTRAL_OCR_PRICE_PER_PAGE = float(os.getenv("MISTRAL_OCR_COST_PER_PAGE", "0.00
 _AZURE_OCR_PRICE_PER_PAGE = 0.0015
 
 
-# ── OCR result container ────────────────────────────────────────────────────────
-
-@dataclass
-class OCRResult:
-    text: str
-    cer: float
-    engine_used: str
-    stage2_triggered: bool = False
-    stage2_failed: bool = False
-
-
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 
 def _estimate_cer_from_text(text: str) -> float:
@@ -66,7 +54,7 @@ def _estimate_cer_from_text(text: str) -> float:
     return min(garbage / len(text), 1.0)
 
 
-# ── ST3: Azure Document Intelligence ──────────────────────────────────────────
+# ── Azure Document Intelligence ──────────────────────────────────────────
 
 def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     """
@@ -151,7 +139,7 @@ def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     return text, cer
 
 
-# ── ST4: Mistral OCR ───────────────────────────────────────────────────────────
+# ── Mistral OCR ───────────────────────────────────────────────────────────
 
 def run_mistral_ocr(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     """
@@ -205,7 +193,7 @@ def run_mistral_ocr(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     return text, cer
 
 
-# ── ST5: Stage 2 Controller ────────────────────────────────────────────────────
+# ── Stage 2 Controller ────────────────────────────────────────────────────
 
 def _azure_configured() -> bool:
     """True only when Azure DI has a key AND a real (non-placeholder) endpoint.
@@ -256,154 +244,6 @@ def _route_stage2(image_bytes: bytes) -> tuple[str, float, str]:
             })
 
     raise RuntimeError(f"All Stage 2 OCR providers failed: {'; '.join(errors)}")
-
-
-def maybe_stage2_fallback(
-    cer: float,
-    image_bytes: bytes,
-    stage1_text: str,
-    stage1_engine: str,
-) -> OCRResult:
-    """
-    ST5 controller: triggers Stage 2 when CER >= 5%.
-    Returns OCRResult with final text, CER, and engine used.
-    """
-    if cer < _CER_THRESHOLD:
-        return OCRResult(text=stage1_text, cer=cer, engine_used=stage1_engine)
-
-    logger.info({
-        "event": "ocr_stage2_triggered",
-        "stage1_cer": round(cer, 4),
-        "stage1_engine": stage1_engine,
-        "url": "",
-        "economy": "",
-    })
-
-    try:
-        text, post_cer, engine = _route_stage2(image_bytes)
-        logger.info({
-            "event": "ocr_stage2_completed",
-            "engine": engine,
-            "post_cer": round(post_cer, 4),
-            "url": "",
-            "economy": "",
-        })
-        return OCRResult(text=text, cer=post_cer, engine_used=engine, stage2_triggered=True)
-    except RuntimeError as exc:
-        logger.warning({
-            "event": "ocr_stage2_all_providers_failed",
-            "error": str(exc),
-            "stage1_cer": round(cer, 4),
-            "url": "",
-            "economy": "",
-        })
-        return OCRResult(
-            text=stage1_text,
-            cer=cer,
-            engine_used=stage1_engine,
-            stage2_triggered=True,
-            stage2_failed=True,
-        )
-
-
-# ── Main Stage 2 document entry point ─────────────────────────────────────────
-
-def run_ocr_stage2(
-    raw_bytes: bytes,
-    zone1_result: "Zone1Result",
-    economy_config: "EconomyConfig",
-    stage1_cer: float,
-    stage1_engine: str,
-    stage1_text: str = "",
-    is_segment: bool = False,
-) -> FetchedDocument:
-    """
-    Full Stage 2 pipeline for a document that failed the CER gate.
-
-    Converts raw_bytes to per-page images, runs the Azure DI → Mistral
-    provider cascade on each page, assembles a FetchedDocument.
-    """
-    start = time.monotonic()
-
-    is_pdf = b"%PDF" in raw_bytes[:512]
-    images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
-    page_count = len(images)
-
-    page_texts: list[str] = []
-    page_cers: list[float] = []
-    engine_final = stage1_engine
-    all_providers_failed = True
-
-    for i, img_bytes in enumerate(images):
-        try:
-            text, cer, engine = _route_stage2(img_bytes)
-            page_texts.append(text)
-            page_cers.append(cer)
-            engine_final = engine
-            all_providers_failed = False
-        except RuntimeError as exc:
-            logger.warning({
-                "event": "ocr_stage2_page_failed",
-                "page": i + 1,
-                "error": str(exc),
-                "url": zone1_result.url,
-                "economy": zone1_result.economy,
-            })
-            page_texts.append("")
-            page_cers.append(1.0)
-
-    mean_cer = sum(page_cers) / len(page_cers) if page_cers else stage1_cer
-
-    has_content = any(t.strip() for t in page_texts)
-    if has_content:
-        full_text = assemble_pages(page_texts)
-    else:
-        full_text = stage1_text if stage1_text.strip() else " "
-
-    flag_for_review = mean_cer >= _CER_THRESHOLD or all_providers_failed
-    flag_reason: str | None = None
-    if all_providers_failed:
-        flag_reason = "Stage 2 OCR: all providers failed — using Stage 1 fallback text"
-    elif mean_cer >= _CER_THRESHOLD:
-        flag_reason = f"Stage 2 CER still above threshold: {mean_cer:.3f}"
-
-    elapsed_ms = (time.monotonic() - start) * 1000
-    cost_log = CostLogEntry(
-        engine=engine_final,
-        pages=page_count,
-        cost_usd=0.0,
-        processing_time_ms=elapsed_ms,
-        cer_score=mean_cer,
-    )
-
-    doc = FetchedDocument(
-        source_url=zone1_result.url,
-        resolved_url=zone1_result.url,
-        economy=zone1_result.economy,
-        act_title=zone1_result.act_title,
-        discovery_tag=zone1_result.discovery_tag,
-        archive_url=zone1_result.archive_url,
-        doc_type="SCANNED_PDF" if is_pdf else "IMAGE",
-        extraction_method=engine_final,  # type: ignore[arg-type]
-        page_count=page_count,
-        raw_text=full_text,
-        section_hierarchy=[],
-        cer_score=mean_cer,
-        is_segment=is_segment,
-        flag_for_review=flag_for_review,
-        flag_reason=flag_reason,
-        cost_log_entry=cost_log,
-    )
-
-    logger.info({
-        "event": "ocr_stage2_document_completed",
-        "url": zone1_result.url,
-        "engine": engine_final,
-        "mean_cer": round(mean_cer, 4),
-        "flag_for_review": flag_for_review,
-        "economy": zone1_result.economy,
-    })
-    return doc
 
 
 # ── Cloud-first OCR cascade ─────────────────────────────────────────────────────

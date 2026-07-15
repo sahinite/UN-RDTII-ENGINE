@@ -1,4 +1,4 @@
-"""Schema validation tests — happy path + failure modes. [Z1-1.4]"""
+"""Schema validation tests — happy path + failure modes."""
 
 import pytest
 from pydantic import ValidationError

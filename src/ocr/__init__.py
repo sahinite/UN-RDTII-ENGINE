@@ -1,5 +1,5 @@
 """
-OCR cascade package. [Z2-5]
+OCR cascade package.
 
 Cloud-first cascade (router entry point):
     run_ocr_cloud(raw_bytes, zone1_result, economy_config) -> FetchedDocument | None
@@ -10,13 +10,9 @@ Cloud-first cascade (router entry point):
 Per-page helpers:
     run_azure_di(image_bytes)    -> tuple[str, float]   — (text, cer)
     run_mistral_ocr(image_bytes) -> tuple[str, float]   — (text, cer)
-
-Models:
-    OCRResult — text, cer, engine_used, stage2_triggered
 """
 
 from src.ocr.processor import (
-    OCRResult,
     run_azure_di,
     run_mistral_ocr,
     run_ocr_cloud,
@@ -26,5 +22,4 @@ __all__ = [
     "run_ocr_cloud",
     "run_azure_di",
     "run_mistral_ocr",
-    "OCRResult",
 ]

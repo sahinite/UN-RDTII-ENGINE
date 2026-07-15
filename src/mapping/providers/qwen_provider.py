@@ -1,4 +1,4 @@
-"""Qwen direct provider — DashScope OpenAI-compatible API. [Z2-4]"""
+"""Qwen direct provider — DashScope OpenAI-compatible API."""
 
 from __future__ import annotations
 
