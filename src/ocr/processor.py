@@ -16,6 +16,7 @@ import base64
 import os
 import time
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,10 @@ logger = get_logger("ocr_stage2")
 _sleep = time.sleep  # alias for testable rate-limiting
 
 _CER_THRESHOLD = 0.05
+
+# Per-page cloud OCR prices (used for cost accounting). Mistral rate is env-tunable.
+_MISTRAL_OCR_PRICE_PER_PAGE = float(os.getenv("MISTRAL_OCR_COST_PER_PAGE", "0.001"))
+_AZURE_OCR_PRICE_PER_PAGE = 0.0015
 
 
 # ── OCR result container ────────────────────────────────────────────────────────
@@ -202,26 +207,27 @@ def run_mistral_ocr(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
 
 # ── ST5: Stage 2 Controller ────────────────────────────────────────────────────
 
+def _azure_configured() -> bool:
+    """True only when Azure DI has a key AND a real (non-placeholder) endpoint.
+
+    A leftover placeholder like `AZURE_DI_ENDPOINT=https://...` is non-empty but has
+    no real host, so it's treated as unconfigured — this stops the idna crash that
+    otherwise fired on every page. Guards the whole Azure tier."""
+    key = os.getenv("AZURE_DI_KEY", "").strip()
+    endpoint = os.getenv("AZURE_DI_ENDPOINT", "").strip().rstrip("/")
+    if not key or not endpoint:
+        return False
+    parsed = urllib.parse.urlparse(endpoint)
+    # Real endpoint = http(s) scheme + a host with at least one non-dot label.
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc.strip("."))
+
+
 def _route_stage2(image_bytes: bytes) -> tuple[str, float, str]:
     """
-    Azure DI → Mistral OCR cascade for a single image.
-    Returns (text, cer, engine_used).
-    Raises RuntimeError if all providers fail.
+    Per-page cloud cascade for a single image: Mistral → Azure (if configured).
+    Returns (text, cer, engine_used). Raises RuntimeError if all providers fail.
     """
     errors: list[str] = []
-
-    if os.getenv("AZURE_DI_KEY"):
-        try:
-            text, cer = run_azure_di(image_bytes)
-            return text, cer, "azure_di"
-        except Exception as exc:
-            errors.append(f"azure_di: {exc}")
-            logger.warning({
-                "event": "ocr_stage2_azure_di_failed",
-                "error": str(exc),
-                "url": "",
-                "economy": "",
-            })
 
     if os.getenv("MISTRAL_API_KEY"):
         try:
@@ -231,6 +237,19 @@ def _route_stage2(image_bytes: bytes) -> tuple[str, float, str]:
             errors.append(f"mistral_ocr: {exc}")
             logger.warning({
                 "event": "ocr_stage2_mistral_failed",
+                "error": str(exc),
+                "url": "",
+                "economy": "",
+            })
+
+    if _azure_configured():
+        try:
+            text, cer = run_azure_di(image_bytes)
+            return text, cer, "azure_di"
+        except Exception as exc:
+            errors.append(f"azure_di: {exc}")
+            logger.warning({
+                "event": "ocr_stage2_azure_di_failed",
                 "error": str(exc),
                 "url": "",
                 "economy": "",
@@ -385,3 +404,184 @@ def run_ocr_stage2(
         "economy": zone1_result.economy,
     })
     return doc
+
+
+# ── Cloud-first OCR cascade ─────────────────────────────────────────────────────
+# Mistral (whole-doc → per-page retry) → Azure (if configured) → LLM-vision.
+# Returns a FetchedDocument, or None when no cloud tier could produce text — the
+# router then falls to the local Tesseract/Paddle floor.
+
+def _mistral_whole_pdf(pdf_bytes: bytes, timeout: int = 300) -> tuple[str, int]:
+    """OCR a whole PDF in ONE call via Mistral's Files API (upload → signed URL →
+    OCR). Returns (markdown_text, page_count). Avoids rasterizing + 100× round-trips."""
+    api_key = os.environ["MISTRAL_API_KEY"]
+    auth = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(timeout=timeout) as client:
+        up = client.post(
+            "https://api.mistral.ai/v1/files",
+            headers=auth,
+            files={"file": ("document.pdf", pdf_bytes, "application/pdf")},
+            data={"purpose": "ocr"},
+        )
+        up.raise_for_status()
+        file_id = up.json()["id"]
+
+        signed = client.get(
+            f"https://api.mistral.ai/v1/files/{file_id}/url",
+            headers=auth, params={"expiry": 1},
+        )
+        signed.raise_for_status()
+
+        resp = client.post(
+            "https://api.mistral.ai/v1/ocr",
+            headers={**auth, "Content-Type": "application/json"},
+            json={
+                "model": "mistral-ocr-latest",
+                "document": {"type": "document_url", "document_url": signed.json()["url"]},
+            },
+        )
+        resp.raise_for_status()
+
+    pages = resp.json().get("pages", [])
+    text = "\n\n".join(p.get("markdown", "") for p in pages)
+    return text, len(pages)
+
+
+def _build_cloud_doc(
+    zone1_result: "Zone1Result", text: str, pages: int, engine: str,
+    cer: float, cost_usd: float, is_pdf: bool, is_segment: bool,
+    flag_for_review: bool | None = None, flag_reason: str | None = None,
+) -> FetchedDocument:
+    """Assemble a validated FetchedDocument for a cloud OCR result (shared builder)."""
+    if flag_for_review is None:
+        flag_for_review = cer >= _CER_THRESHOLD
+        flag_reason = f"OCR CER above threshold: {cer:.3f}" if flag_for_review else None
+    doc = FetchedDocument(
+        source_url=zone1_result.url,
+        resolved_url=zone1_result.url,
+        economy=zone1_result.economy,
+        act_title=zone1_result.act_title,
+        discovery_tag=zone1_result.discovery_tag,
+        archive_url=zone1_result.archive_url,
+        doc_type="SCANNED_PDF" if is_pdf else "IMAGE",
+        extraction_method=engine,  # type: ignore[arg-type]
+        page_count=pages,
+        raw_text=text,
+        section_hierarchy=[],
+        cer_score=cer,
+        is_segment=is_segment,
+        flag_for_review=flag_for_review,
+        flag_reason=flag_reason,
+        cost_log_entry=CostLogEntry(
+            engine=engine, pages=pages, cost_usd=cost_usd, processing_time_ms=0.0, cer_score=cer,
+        ),
+    )
+    doc.validate()
+    logger.info({
+        "event": "ocr_cloud_completed", "engine": engine, "pages": pages,
+        "cer": round(cer, 4), "cost_usd": round(cost_usd, 4),
+        "flag_for_review": flag_for_review, "url": zone1_result.url,
+        "economy": zone1_result.economy,
+    })
+    return doc
+
+
+def _cloud_perpage(raw_bytes: bytes, zone1_result: "Zone1Result", is_pdf: bool, is_segment: bool):
+    """Per-page Mistral → Azure cascade (whole-doc retry / image input). None if all fail."""
+    images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
+    texts: list[str] = []
+    engine = "mistral_ocr"
+    paid_pages = 0
+    for img in images:
+        try:
+            text, _cer, engine = _route_stage2(img)
+            texts.append(text)
+            paid_pages += 1
+        except RuntimeError:
+            texts.append("")
+    if not any(t.strip() for t in texts):
+        return None
+    full = assemble_pages(texts)
+    rate = _MISTRAL_OCR_PRICE_PER_PAGE if engine == "mistral_ocr" else _AZURE_OCR_PRICE_PER_PAGE
+    return _build_cloud_doc(
+        zone1_result, full, len(images), engine,
+        _estimate_cer_from_text(full), paid_pages * rate, is_pdf, is_segment,
+    )
+
+
+def _llm_vision_perpage(raw_bytes: bytes, zone1_result: "Zone1Result", is_pdf: bool, is_segment: bool):
+    """LLM-vision OCR on the configured provider, page by page. None if unavailable/empty."""
+    from src.fetcher.extractors.llm_ocr import LLMOCRUnavailableError, run_llm_ocr
+    from src.output.cost_logger import compute_llm_cost
+
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
+    texts: list[str] = []
+    in_tok = out_tok = 0
+    for img in images:
+        try:
+            text, _cer, i_tok, o_tok = run_llm_ocr(img)
+            texts.append(text)
+            in_tok += i_tok
+            out_tok += o_tok
+        except LLMOCRUnavailableError:
+            return None  # provider can't do vision at all → skip the whole tier
+        except Exception as exc:
+            logger.warning({"event": "ocr_llm_vision_page_failed", "error": str(exc)[:200]})
+            texts.append("")
+    if not any(t.strip() for t in texts):
+        return None
+    full = assemble_pages(texts)
+    return _build_cloud_doc(
+        zone1_result, full, len(images), "llm_ocr",
+        _estimate_cer_from_text(full), compute_llm_cost(provider, in_tok, out_tok),
+        is_pdf, is_segment,
+        flag_for_review=True,  # LLMs can hallucinate — always verify verbatim
+        flag_reason="LLM-vision OCR — verify verbatim (hallucination risk)",
+    )
+
+
+def run_ocr_cloud(
+    raw_bytes: bytes,
+    zone1_result: "Zone1Result",
+    economy_config: "EconomyConfig",
+    is_segment: bool = False,
+) -> FetchedDocument | None:
+    """Cloud-first OCR cascade. Returns a FetchedDocument, or None when no cloud
+    tier is configured/succeeds (caller falls to the local Tesseract/Paddle floor)."""
+    is_pdf = b"%PDF" in raw_bytes[:512]
+
+    # Tier 1 — Mistral: whole-doc single call, then per-page retry.
+    if os.getenv("MISTRAL_API_KEY"):
+        if is_pdf:
+            try:
+                text, pages = _mistral_whole_pdf(raw_bytes)
+                if text.strip():
+                    return _build_cloud_doc(
+                        zone1_result, text, pages, "mistral_ocr",
+                        _estimate_cer_from_text(text),
+                        pages * _MISTRAL_OCR_PRICE_PER_PAGE, is_pdf, is_segment,
+                    )
+            except Exception as exc:
+                logger.warning({
+                    "event": "ocr_mistral_wholedoc_failed_retry_perpage",
+                    "error": str(exc)[:200], "url": zone1_result.url,
+                })
+        doc = _cloud_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
+        if doc is not None:
+            return doc
+
+    # Tier 2 — Azure DI (only if truly configured).
+    if _azure_configured():
+        doc = _cloud_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
+        if doc is not None:
+            return doc
+
+    # Tier 3 — LLM-vision on the configured provider.
+    from src.fetcher.extractors.llm_ocr import llm_vision_available
+    if llm_vision_available():
+        doc = _llm_vision_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
+        if doc is not None:
+            return doc
+
+    return None

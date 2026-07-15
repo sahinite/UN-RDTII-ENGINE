@@ -1,20 +1,13 @@
 """
-OCR Stage 2 cascade package. [Z2-5]
+OCR cascade package. [Z2-5]
 
-Stage 2 triggers automatically when Stage 1 CER >= 5%.
-Provider cascade: Azure Document Intelligence → Mistral OCR.
-Both providers are credentials-gated (ADR-024): if neither key is set,
-Stage 1 text is returned with flag_for_review=True.
+Cloud-first cascade (router entry point):
+    run_ocr_cloud(raw_bytes, zone1_result, economy_config) -> FetchedDocument | None
+        Mistral (whole-doc → per-page retry) → Azure DI (if configured) → LLM-vision.
+        Returns None when no cloud tier is configured/succeeds → router falls to the
+        local Tesseract/Paddle floor.
 
-Public API:
-    maybe_stage2_fallback(cer, image_bytes, stage1_text, zone1_result, economy_config)
-        -> OCRResult
-        Triggered per-page: runs Stage 2 only when cer >= CER_THRESHOLD (5%).
-
-    run_ocr_stage2(raw_bytes, zone1_result, economy_config, stage1_cer, ...)
-        -> FetchedDocument
-        Full document-level Stage 2 entry point called by router.py.
-
+Per-page helpers:
     run_azure_di(image_bytes)    -> tuple[str, float]   — (text, cer)
     run_mistral_ocr(image_bytes) -> tuple[str, float]   — (text, cer)
 
@@ -24,15 +17,13 @@ Models:
 
 from src.ocr.processor import (
     OCRResult,
-    maybe_stage2_fallback,
     run_azure_di,
     run_mistral_ocr,
-    run_ocr_stage2,
+    run_ocr_cloud,
 )
 
 __all__ = [
-    "maybe_stage2_fallback",
-    "run_ocr_stage2",
+    "run_ocr_cloud",
     "run_azure_di",
     "run_mistral_ocr",
     "OCRResult",

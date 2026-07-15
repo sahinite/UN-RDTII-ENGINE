@@ -114,9 +114,17 @@ class CostLogger:
         engine: str,
         pages: int = 1,
         latency_ms: float = 0.0,
+        cost_usd: float | None = None,
     ) -> None:
-        """Record OCR processing cost for N pages."""
-        if engine in ("azure", "azure_ocr"):
+        """Record OCR processing cost for N pages.
+
+        cost_usd, when given, is used directly (the OCR engine already computed the
+        real cost — e.g. LLM-vision token cost). Otherwise it's derived from the
+        per-page price table below.
+        """
+        if cost_usd is not None:
+            cost = cost_usd
+        elif engine in ("azure", "azure_ocr", "azure_di"):
             cost = pages * _AZURE_OCR_PRICE_PER_PAGE
         elif engine in ("mistral_ocr", "mistral"):
             cost = pages * _MISTRAL_OCR_PRICE_PER_PAGE

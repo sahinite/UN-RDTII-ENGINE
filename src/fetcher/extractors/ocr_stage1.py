@@ -382,7 +382,15 @@ def extract_ocr_stage1(
     zone1_result: "Zone1Result",
     economy_config: "EconomyConfig",
     is_segment: bool = False,
+    gate_cer: bool = True,
 ) -> FetchedDocument:
+    """Local OCR (Tesseract/PaddleOCR per YAML).
+
+    gate_cer=True raises OCRQualityError when mean CER >= 5% (legacy escalation).
+    gate_cer=False makes CER advisory only: it never raises — the document is
+    returned with flag_for_review set instead. The cloud-first cascade uses the
+    latter, since this is now the offline last-resort floor, not the first tier.
+    """
     start = time.monotonic()
 
     engine = get_ocr_engine(economy_config)
@@ -470,7 +478,9 @@ def extract_ocr_stage1(
             })
 
     mean_cer = sum(all_cers) / len(all_cers) if all_cers else 1.0
-    check_cer(mean_cer, engine_used=engine)
+    if gate_cer:
+        check_cer(mean_cer, engine_used=engine)  # legacy: raises → escalate to Stage 2
+    low_quality = mean_cer >= 0.05
 
     full_text = assemble_pages(page_texts)
     elapsed_ms = (time.monotonic() - start) * 1000
@@ -498,6 +508,8 @@ def extract_ocr_stage1(
         section_hierarchy=[],
         cer_score=mean_cer,
         is_segment=is_segment,
+        flag_for_review=low_quality,
+        flag_reason=f"local OCR CER above threshold: {mean_cer:.3f}" if low_quality else None,
         cost_log_entry=cost_log,
     )
     doc.validate()

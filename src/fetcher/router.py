@@ -17,7 +17,7 @@ import httpx
 from src.fetcher.extractors.docx_text import extract_docx
 from src.fetcher.extractors.html_extractor import ExtractionError as HTMLExtractionError
 from src.fetcher.extractors.html_extractor import extract_html
-from src.fetcher.extractors.ocr_stage1 import OCRQualityError, extract_ocr_stage1
+from src.fetcher.extractors.ocr_stage1 import extract_ocr_stage1
 from src.fetcher.extractors.pdf_text import ExtractionError as PDFExtractionError
 from src.fetcher.extractors.pdf_text import ReclassifyToScannedError, extract_text_pdf
 from src.fetcher.logger import get_logger
@@ -793,7 +793,7 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         return extract_docx(raw_bytes, zone1_result_resolved, economy_config)
 
     if doc_type == "IMAGE":
-        return extract_ocr_stage1(raw_bytes, zone1_result_resolved, economy_config)
+        return _try_ocr(raw_bytes, zone1_result_resolved, economy_config)
 
     # PDF path — check consolidated volume first (skipped for single-act fetches)
     if doc_type in ("TEXT_PDF", "SCANNED_PDF"):
@@ -857,37 +857,25 @@ def _try_ocr(
     economy_config: "EconomyConfig",
     is_segment: bool = False,
 ) -> FetchedDocument:
-    """Run OCR Stage 1; escalate to Stage 2 (cloud) on quality failure OR any
-    Stage 1 engine failure — a missing local language pack (e.g. Tesseract has no
-    `msa` data) or a missing binary must fall through to Azure DI / Mistral, not
-    fail the document."""
-    try:
-        return extract_ocr_stage1(raw_bytes, zone1_result, economy_config, is_segment=is_segment)
-    except OCRQualityError as exc:
-        stage1_cer, stage1_engine = exc.cer, exc.engine_used
-        logger.info({
-            "event": "ocr_stage1_quality_failed_escalating",
-            "stage1_cer": round(stage1_cer, 4),
-            "stage1_engine": stage1_engine,
-            "url": zone1_result.url,
-            "economy": zone1_result.economy,
-        })
-    except Exception as exc:
-        # Stage 1 could not run at all (missing language pack / tesseract binary /
-        # image preprocessing crash). Cloud Stage 2 is exactly the fallback for this.
-        stage1_cer, stage1_engine = 1.0, "stage1_unavailable"
-        logger.warning({
-            "event": "ocr_stage1_engine_failed_escalating",
-            "error": str(exc)[:300],
-            "url": zone1_result.url,
-            "economy": zone1_result.economy,
-        })
-    from src.ocr.processor import run_ocr_stage2
-    return run_ocr_stage2(
-        raw_bytes=raw_bytes,
-        zone1_result=zone1_result,
-        economy_config=economy_config,
-        stage1_cer=stage1_cer,
-        stage1_engine=stage1_engine,
-        is_segment=is_segment,
+    """Cloud-first OCR: Mistral → Azure (if configured) → LLM-vision → local floor.
+
+    Cloud engines read scanned government PDFs far better and faster than local
+    Tesseract/Paddle, which now serve only as the offline last resort (no cloud key,
+    or every cloud tier failed). Falling straight to cloud also avoids the old wasted
+    full Tesseract pass whose output was thrown away on the CER gate."""
+    from src.ocr.processor import run_ocr_cloud
+
+    doc = run_ocr_cloud(raw_bytes, zone1_result, economy_config, is_segment=is_segment)
+    if doc is not None:
+        return doc
+
+    # No cloud tier available/succeeded → local floor. gate_cer=False: CER is advisory
+    # (flags for review) and never raises, so we always return the best local text.
+    logger.info({
+        "event": "ocr_cloud_unavailable_local_floor",
+        "url": zone1_result.url,
+        "economy": zone1_result.economy,
+    })
+    return extract_ocr_stage1(
+        raw_bytes, zone1_result, economy_config, is_segment=is_segment, gate_cer=False,
     )

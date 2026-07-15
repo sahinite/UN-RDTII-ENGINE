@@ -213,9 +213,12 @@ def _build_extraction_result(
     known_provisions: "set[str]" = frozenset(),
     known_sections: "dict[str, set[str]] | None" = None,
 ) -> Optional[ExtractionResult]:
-    snippet = prov.get("verbatim_snippet", "").strip()
-    article = prov.get("article", "").strip()
-    rationale = prov.get("mapping_rationale", "").strip()
+    # Guard against JSON null: prov.get(key, "") still returns None when the key is
+    # present with value null (common from local models e.g. qwen3.5), and None.strip()
+    # would crash the whole extraction. `or ""` coerces null → empty string.
+    snippet = (prov.get("verbatim_snippet") or "").strip()
+    article = (prov.get("article") or "").strip()
+    rationale = (prov.get("mapping_rationale") or "").strip()
     confidence = prov.get("confidence")
     non_consecutive = prov.get("non_consecutive", False)
 

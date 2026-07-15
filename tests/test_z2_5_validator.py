@@ -625,43 +625,35 @@ class TestValidateAndFlag:
 
 class TestRouterStage2Integration:
 
-    def test_ocr_quality_error_triggers_stage2(self, sg_economy):
-        """OCRQualityError from Stage 1 → run_ocr_stage2 called automatically. AC1."""
-        from src.fetcher.extractors.ocr_stage1 import OCRQualityError
-        from src.fetcher.models import Zone1Result
+    def test_cloud_ocr_used_first(self, sg_economy):
+        """_try_ocr runs the cloud cascade first; its document is returned as-is."""
         from src.fetcher.router import _try_ocr
 
         zone1 = _make_zone1()
         fake_doc = MagicMock()
-        fake_doc.raw_text = "Stage 2 extracted text"
+        fake_doc.raw_text = "cloud OCR text"
 
-        with patch(
-            "src.fetcher.router.extract_ocr_stage1",
-            side_effect=OCRQualityError(cer=0.12, engine_used="tesseract"),
-        ):
-            with patch("src.ocr.processor.run_ocr_stage2", return_value=fake_doc) as mock_s2:
-                result = _try_ocr(b"fake_pdf_bytes", zone1, sg_economy)
+        with patch("src.ocr.processor.run_ocr_cloud", return_value=fake_doc) as mock_cloud:
+            with patch("src.fetcher.router.extract_ocr_stage1") as mock_floor:
+                result = _try_ocr(b"%PDF fake", zone1, sg_economy)
 
-        mock_s2.assert_called_once()
-        call_kwargs = mock_s2.call_args
-        assert call_kwargs.kwargs["stage1_cer"] == 0.12
-        assert call_kwargs.kwargs["stage1_engine"] == "tesseract"
+        mock_cloud.assert_called_once()
+        mock_floor.assert_not_called()
         assert result is fake_doc
 
-    def test_good_ocr_does_not_trigger_stage2(self, sg_economy):
-        """CER below threshold → Stage 1 result returned, Stage 2 never called."""
-        from src.fetcher.models import Zone1Result
+    def test_local_floor_when_cloud_unavailable(self, sg_economy):
+        """Cloud cascade returns None → local floor runs with advisory CER (gate_cer=False)."""
         from src.fetcher.router import _try_ocr
 
         zone1 = _make_zone1()
         fake_doc = MagicMock()
 
-        with patch("src.fetcher.router.extract_ocr_stage1", return_value=fake_doc):
-            with patch("src.ocr.processor.run_ocr_stage2") as mock_s2:
+        with patch("src.ocr.processor.run_ocr_cloud", return_value=None):
+            with patch("src.fetcher.router.extract_ocr_stage1", return_value=fake_doc) as mock_floor:
                 result = _try_ocr(b"fake_pdf_bytes", zone1, sg_economy)
 
-        mock_s2.assert_not_called()
         assert result is fake_doc
+        assert mock_floor.call_args.kwargs["gate_cer"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -8,10 +8,16 @@ Zero real HTTP calls — all network access is mocked.
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Cloud OCR is tried before the local Tesseract/Paddle floor. Tests that exercise the
+# LOCAL engine must clear cloud keys so the cascade falls through deterministically
+# (and isn't polluted by env vars leaking from other tests).
+_NO_CLOUD_OCR = {"MISTRAL_API_KEY": "", "AZURE_DI_KEY": "", "LLM_PROVIDER": ""}
 
 from src.config.economy_config import EconomyConfig
 from src.fetcher.models import CostLogEntry, FetchedDocument, Zone1Result
@@ -709,6 +715,7 @@ class TestRouteIntegration:
         from src.fetcher.extractors import ocr_stage1
 
         with (
+            patch.dict(os.environ, _NO_CLOUD_OCR),
             patch.object(router, "download", return_value=(scanned_pdf_bytes, "application/pdf", sg_zone1.url)),
             patch.object(router, "is_consolidated_volume", return_value=False),
             patch.object(ocr_stage1, "pdf_to_images", return_value=[b"PNG"]),
@@ -742,6 +749,7 @@ class TestRouteIntegration:
         from src.fetcher.extractors import ocr_stage1
         png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
         with (
+            patch.dict(os.environ, _NO_CLOUD_OCR),
             patch.object(router, "download", return_value=(png_bytes, "image/png", sg_zone1.url)),
             patch.object(ocr_stage1, "pdf_to_images", return_value=[png_bytes]),
             patch.object(ocr_stage1, "run_tesseract", return_value=("Image extracted text content.", 0.03)),
@@ -754,6 +762,7 @@ class TestRouteIntegration:
         from src.fetcher.extractors import ocr_stage1
         from src.fetcher.extractors.pdf_text import ReclassifyToScannedError
         with (
+            patch.dict(os.environ, _NO_CLOUD_OCR),
             patch.object(router, "download", return_value=(scanned_pdf_bytes, "application/pdf", sg_zone1.url)),
             patch.object(router, "is_consolidated_volume", return_value=False),
             patch.object(router, "classify_pdf", return_value="TEXT_PDF"),
@@ -1321,37 +1330,33 @@ class TestResolvePdfLink:
 
 
 class TestOcrEngineFailureEscalation:
-    """A Stage 1 engine failure (missing language pack / binary), not just a CER
-    quality failure, must escalate to Stage 2 cloud OCR — never fail the document."""
+    """Cloud-first OCR: the cloud cascade runs first and handles scanned docs; the
+    local Tesseract/Paddle engine is only the offline last-resort floor."""
 
     def _zone1(self):
         return Zone1Result(url="https://x.gov.my/act.pdf", economy="MY",
                            act_title="Act 563", discovery_tag="KNOWN", archive_url="")
 
-    def test_missing_language_pack_escalates_to_stage2(self):
+    def test_cloud_ocr_used_when_available(self):
         from src.fetcher import router
         sentinel = object()
-        # Simulate Tesseract's "Failed loading language 'msa'" crash.
         with (
-            patch.object(router, "extract_ocr_stage1",
-                         side_effect=RuntimeError("Failed loading language 'msa'")),
-            patch("src.ocr.processor.run_ocr_stage2", return_value=sentinel) as mock_s2,
+            patch("src.ocr.processor.run_ocr_cloud", return_value=sentinel) as mock_cloud,
+            patch.object(router, "extract_ocr_stage1") as mock_floor,
         ):
             out = router._try_ocr(b"%PDF-1.4 scanned", self._zone1(), MagicMock())
         assert out is sentinel
-        assert mock_s2.call_args.kwargs["stage1_engine"] == "stage1_unavailable"
-        assert mock_s2.call_args.kwargs["stage1_cer"] == 1.0
+        mock_cloud.assert_called_once()
+        mock_floor.assert_not_called()
 
-    def test_quality_failure_still_escalates_with_real_cer(self):
+    def test_local_floor_used_when_cloud_unavailable(self):
         from src.fetcher import router
-        from src.fetcher.extractors.ocr_stage1 import OCRQualityError
         sentinel = object()
         with (
-            patch.object(router, "extract_ocr_stage1",
-                         side_effect=OCRQualityError(cer=0.42, engine_used="tesseract")),
-            patch("src.ocr.processor.run_ocr_stage2", return_value=sentinel) as mock_s2,
+            patch("src.ocr.processor.run_ocr_cloud", return_value=None),
+            patch.object(router, "extract_ocr_stage1", return_value=sentinel) as mock_floor,
         ):
             out = router._try_ocr(b"%PDF-1.4", self._zone1(), MagicMock())
         assert out is sentinel
-        assert mock_s2.call_args.kwargs["stage1_cer"] == 0.42
-        assert mock_s2.call_args.kwargs["stage1_engine"] == "tesseract"
+        # Local floor runs with advisory CER (never raises) as the last resort.
+        assert mock_floor.call_args.kwargs["gate_cer"] is False

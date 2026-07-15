@@ -31,14 +31,10 @@ def test_stage1_engine_selected_by_economy_script_type():
     assert get_ocr_engine(_economy("latin")) == "tesseract"
 
 
-def test_stage2_fallback_triggers_above_cer_threshold():
-    """Router escalates to Stage 2 when Stage 1 raises OCRQualityError (CER ≥ 5%),
-    and does NOT escalate when Stage 1 succeeds (CER below threshold)."""
+def test_cloud_first_ocr_then_local_floor():
+    """Router runs cloud OCR first; it only falls to the local Tesseract/Paddle floor
+    when the cloud cascade returns None (no key / all cloud tiers failed)."""
     from src.fetcher import router
-    from src.fetcher.extractors.ocr_stage1 import OCRQualityError
-    from src.ocr.processor import _CER_THRESHOLD
-
-    assert _CER_THRESHOLD == 0.05
 
     zone1 = Zone1Result(
         url="https://example.gov/scan.pdf",
@@ -50,34 +46,28 @@ def test_stage2_fallback_triggers_above_cer_threshold():
     economy = _economy("latin")
     raw = b"%PDF-fake-scanned-bytes"
 
-    # Stage 1 fails the CER gate (0.08 ≥ 0.05) → Stage 2 must be called with the
-    # Stage 1 CER + engine.
-    stage2_sentinel = object()
+    # Cloud tier produces a document → returned, local floor never touched.
+    cloud_sentinel = object()
     with (
-        patch.object(
-            router, "extract_ocr_stage1",
-            side_effect=OCRQualityError(cer=0.08, engine_used="tesseract"),
-        ),
-        patch("src.ocr.processor.run_ocr_stage2", return_value=stage2_sentinel) as mock_stage2,
+        patch("src.ocr.processor.run_ocr_cloud", return_value=cloud_sentinel) as mock_cloud,
+        patch.object(router, "extract_ocr_stage1") as mock_floor,
     ):
         result = router._try_ocr(raw, zone1, economy)
 
-    assert result is stage2_sentinel, "Stage 2 result must be returned on CER-gate failure"
-    assert mock_stage2.call_count == 1
-    _, kwargs = mock_stage2.call_args
-    assert kwargs["stage1_cer"] == 0.08
-    assert kwargs["stage1_engine"] == "tesseract"
+    assert result is cloud_sentinel
+    mock_cloud.assert_called_once()
+    mock_floor.assert_not_called()
 
-    # Stage 1 succeeds (CER under threshold → no OCRQualityError) → no escalation.
-    stage1_sentinel = object()
+    # No cloud tier available (None) → local floor used with gate_cer=False (advisory CER).
+    floor_sentinel = object()
     with (
-        patch.object(router, "extract_ocr_stage1", return_value=stage1_sentinel),
-        patch("src.ocr.processor.run_ocr_stage2") as mock_stage2_no,
+        patch("src.ocr.processor.run_ocr_cloud", return_value=None),
+        patch.object(router, "extract_ocr_stage1", return_value=floor_sentinel) as mock_floor,
     ):
         result = router._try_ocr(raw, zone1, economy)
 
-    assert result is stage1_sentinel
-    mock_stage2_no.assert_not_called()
+    assert result is floor_sentinel
+    assert mock_floor.call_args.kwargs["gate_cer"] is False
 
 
 # ── Config-driven tesseract language-pack bootstrap ────────────────────────────

@@ -271,6 +271,18 @@ def run_pipeline(
         docs = fetched if isinstance(fetched, list) else [fetched]
         p.done(f"{prefix} Fetched — {title}")
 
+        # Record real OCR cost (Mistral/Azure/LLM-vision compute it into cost_log_entry;
+        # local Tesseract/Paddle/pdfplumber are $0). Keeps logs/cost_report.json truthful.
+        for doc in docs:
+            cle = getattr(doc, "cost_log_entry", None)
+            if cle is not None:
+                cost_logger.record_ocr_page(
+                    engine=doc.extraction_method,
+                    pages=doc.page_count or 1,
+                    latency_ms=cle.processing_time_ms,
+                    cost_usd=cle.cost_usd,
+                )
+
         # Source authority: the portal's declared type (primary legislation vs
         # secondary regulator guidance). Drives a review flag on provisions
         # extracted from non-primary sources — a summary/guidance page is not the
