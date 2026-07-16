@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 import time
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 

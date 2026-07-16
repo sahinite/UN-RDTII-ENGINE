@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Union
 
 from src.cli.progress import substep
 from src.mapping.exceptions import AllProvidersExhaustedError, ConfigError, PDPAGateError
@@ -18,7 +17,6 @@ from src.mapping.llm_client import call_llm_with_cascade, get_active_model_versi
 from src.mapping.models import ExtractionResult, LLMCostEntry
 from src.mapping.parser import expand_non_consecutive, parse_llm_response
 from src.mapping.prompts import SYSTEM_PROMPT, build_user_prompt, load_taxonomy_dict, trim_chunks_to_budget
-from src.retrieval.models import RetrievedChunk
 
 logger = logging.getLogger("mapping.mapper")
 

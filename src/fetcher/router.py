@@ -15,10 +15,8 @@ from typing import TYPE_CHECKING, Literal
 import httpx
 
 from src.fetcher.extractors.docx_text import extract_docx
-from src.fetcher.extractors.html_extractor import ExtractionError as HTMLExtractionError
 from src.fetcher.extractors.html_extractor import extract_html
 from src.fetcher.extractors.ocr_stage1 import extract_ocr_stage1
-from src.fetcher.extractors.pdf_text import ExtractionError as PDFExtractionError
 from src.fetcher.extractors.pdf_text import ReclassifyToScannedError, extract_text_pdf
 from src.fetcher.logger import get_logger
 from src.fetcher.models import FetchedDocument, Zone1Result

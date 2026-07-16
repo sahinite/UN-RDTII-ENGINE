@@ -92,7 +92,6 @@ def run_pipeline(
     Returns:
         write_outputs() summary dict
     """
-    from src.fetcher.models import Zone1Result
     from src.fetcher.router import route, _find_portal_for_url
     from src.fetcher.translator import translate_document
     from src.mapping.llm_client import pin_active_provider
@@ -460,7 +459,6 @@ def run_pipeline(
     )
     p.done(f"Outputs written — {summary.get('written', 0)} records → {output_dir}/")
 
-    from src.output.cost_logger import CostLogger as _CL
     report = cost_logger.to_report()
     p.summary(
         records=summary.get("written", 0),

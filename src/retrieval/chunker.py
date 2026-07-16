@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
 from typing import TYPE_CHECKING, Union
 
 from src.retrieval.models import Chunk, LocationReference
