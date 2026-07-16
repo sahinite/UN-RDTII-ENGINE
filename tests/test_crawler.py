@@ -1,27 +1,13 @@
 """Unit tests for crawler.py URL/link helpers."""
 
-from src.crawler.crawl4ai_runner import is_js_portal
 from src.crawler.crawler import (
     _extract_act_links,
     _normalise_url,
     _registered_domain,
 )
-from src.config.economy_config import Portal
 
 
-# ── 1. JS-portal detection ─────────────────────────────────────────────────────
-
-def test_is_js_portal_true_for_sso():
-    portal = Portal(name="SSO", url="https://sso.agc.gov.sg", js_required=True)
-    assert is_js_portal(portal) is True
-
-
-def test_is_js_portal_false_for_static():
-    portal = Portal(name="Gazette", url="https://www.egazette.gov.sg")
-    assert is_js_portal(portal) is False
-
-
-# ── 2. URL extraction ──────────────────────────────────────────────────────────
+# ── 1. URL extraction ──────────────────────────────────────────────────────────
 
 def test_pdf_link_detected():
     """.pdf URL is extracted as a candidate."""

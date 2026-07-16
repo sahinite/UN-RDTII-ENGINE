@@ -17,10 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.config.economy_config import Portal
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +47,6 @@ _REAL_HEADERS = {
 }
 
 
-# ── Portal type detection ──────────────────────────────────────────────────────
-
-def is_js_portal(portal: "Portal") -> bool:
-    """Return True when the Portal's YAML config declares js_required=true."""
-    return portal.js_required
-
-
 # ── Config builders (stealth / anti-bot) ───────────────────────────────────────
 
 def _stealth_browser_config(headless: bool = True):
@@ -80,8 +69,8 @@ def _build_run_config(wait_for: str | None, timeout_ms: int):
 
     NOTE: ``magic=True`` already bundles user-simulation and navigator spoofing.
     We deliberately omit ``simulate_user`` / ``mean_delay`` here — those add
-    several seconds of synthetic mouse movement per page, which on a multi-URL
-    BFS turns a 1-minute crawl into 30+ minutes.
+    several seconds of synthetic mouse movement per page, which across a
+    multi-page run turns a 1-minute fetch into 30+ minutes.
     """
     from crawl4ai import CacheMode, CrawlerRunConfig  # type: ignore[import]
 
@@ -97,11 +86,11 @@ def _build_run_config(wait_for: str | None, timeout_ms: int):
     return CrawlerRunConfig(**kwargs)
 
 
-# ── Shared browser (reused across the whole crawl) ──────────────────────────────
+# ── Shared browser (reused across fetch_with_playwright calls) ──────────────────
 #
 # Launching a fresh Chromium per URL costs ~3-8s each. We keep ONE browser open
-# and reuse it across fetch_with_playwright() calls; close_shared_crawler()
-# releases it (call in a finally when driving a batch of pages).
+# and reuse it across fetch_with_playwright() calls for the process lifetime
+# (it is torn down when the process exits).
 
 _shared_crawler = None  # type: ignore[var-annotated]
 
@@ -114,18 +103,6 @@ async def _get_shared_crawler():
         await _shared_crawler.start()
         logger.info("[CRAWL] shared Chromium started (reused for all URLs)")
     return _shared_crawler
-
-
-async def close_shared_crawler() -> None:
-    """Tear down the reused browser. Safe to call when none was started."""
-    global _shared_crawler
-    if _shared_crawler is not None:
-        try:
-            await _shared_crawler.close()
-        except Exception:  # noqa: BLE001
-            pass
-        _shared_crawler = None
-        logger.info("[CRAWL] shared Chromium closed")
 
 
 async def fetch_isolated(url: str, timeout_ms: int) -> tuple[str, int]:
@@ -173,37 +150,6 @@ async def fetch_isolated(url: str, timeout_ms: int) -> tuple[str, int]:
 
 
 # ── Crawl4AI page fetch ────────────────────────────────────────────────────────
-
-async def probe_js_page(url: str) -> tuple[str, bool]:
-    """
-    Minimal Crawl4AI fetch for portal probing (no wait selector, no scroll JS).
-
-    Used by probe.py to check hit counts on JS-rendered search pages.
-    Returns ``(html_content, success)``. Uses stealth mode so probes are not
-    blocked by bot-detection on the target portal.
-    """
-    from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
-
-    try:
-        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
-    except ImportError as exc:
-        raise CrawlerError(
-            "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"
-        ) from exc
-
-    try:
-        crawler = await _get_shared_crawler()
-        run_cfg = _build_run_config(wait_for=None, timeout_ms=SSO_TIMEOUT_MS)
-        result = await asyncio.wait_for(
-            crawler.arun(url=url, config=run_cfg),
-            timeout=(SSO_TIMEOUT_MS / 1000) + 10,
-        )
-        html = getattr(result, "html", "") or getattr(result, "cleaned_html", "") or ""
-        return html, bool(getattr(result, "success", False))
-    except Exception as exc:
-        logger.warning("Playwright probe failed for %s: %s", url, exc)
-        return "", False
-
 
 async def fetch_with_playwright(
     url: str,
