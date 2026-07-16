@@ -33,20 +33,9 @@ class ParseError(MappingError):
     """LLM response could not be parsed as valid JSON."""
 
 
-class PromptTooLongError(MappingError):
-    def __init__(self, estimated: int, limit: int):
-        super().__init__(f"Prompt too long: {estimated} estimated tokens > {limit} limit")
-        self.estimated = estimated
-        self.limit = limit
-
-
 class PDPAGateError(MappingError):
     """Singapore PDPA-first gate failed — engine must not proceed."""
 
 
 class ConfigError(MappingError):
     """Misconfiguration — missing env var, unknown economy, invalid YAML."""
-
-
-class TaxonomyError(MappingError):
-    """Invalid or missing indicator ID in taxonomy.json."""

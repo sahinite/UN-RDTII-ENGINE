@@ -37,12 +37,6 @@ def _term_width() -> int:
         return 80
 
 
-def _clear_lines(n: int) -> None:
-    """Move cursor up n lines and clear each one."""
-    for _ in range(n):
-        sys.stdout.write("\033[1A\033[2K")
-
-
 class Progress:
     """
     Single active step + optional substep line rendered below the spinner.

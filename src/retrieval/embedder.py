@@ -140,11 +140,3 @@ def build_index(chunks: list[Chunk]) -> EmbeddingIndex:
     return idx
 
 
-def embed_query(text: str) -> np.ndarray:
-    """Convenience: embed a single query string, returns normalised float32 vector."""
-    return _get_model().encode(
-        [text],
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype("float32")[0]
