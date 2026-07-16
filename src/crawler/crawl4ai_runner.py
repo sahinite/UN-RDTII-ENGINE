@@ -99,10 +99,9 @@ def _build_run_config(wait_for: str | None, timeout_ms: int):
 
 # ── Shared browser (reused across the whole crawl) ──────────────────────────────
 #
-# Launching a fresh Chromium per URL costs ~3-8s each — across a BFS of dozens of
-# pages that alone is the bulk of a "stuck" crawl. We keep ONE browser open for
-# the duration of run_crawler and reuse it for every arun(). run_crawler must call
-# close_shared_crawler() in a finally to release it.
+# Launching a fresh Chromium per URL costs ~3-8s each. We keep ONE browser open
+# and reuse it across fetch_with_playwright() calls; close_shared_crawler()
+# releases it (call in a finally when driving a batch of pages).
 
 _shared_crawler = None  # type: ignore[var-annotated]
 

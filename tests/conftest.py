@@ -102,15 +102,3 @@ def reset_wayback_latch_fixture():
     _v.reset_wayback_latch()
 
 
-@pytest.fixture(autouse=True)
-def clear_translation_memory(monkeypatch):
-    """
-    Clear the in-session translation cache between tests and prevent disk I/O.
-    Mocking _load/_save ensures tests are not affected by leftover cache files.
-    """
-    from src.crawler import probe as probe_module
-    probe_module._translation_memory.clear()
-    monkeypatch.setattr(probe_module, "_load_translation_cache", lambda *a, **kw: None)
-    monkeypatch.setattr(probe_module, "_save_translation_cache", lambda *a, **kw: None)
-    yield
-    probe_module._translation_memory.clear()
