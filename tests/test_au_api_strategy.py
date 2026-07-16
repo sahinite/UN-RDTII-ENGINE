@@ -125,18 +125,6 @@ class TestTitleIdExtraction:
 
 class TestVersionResolution:
     @respx.mock
-    def test_picks_islatest_row_skips_future(self):
-        from src.fetcher.router import _latest_version_start
-        respx.get(url__startswith=f"{API}/versions/search").mock(
-            return_value=httpx.Response(200, json={"value": [
-                {"start": "2026-12-10T00:00:00", "isLatest": False, "registerId": None},
-                {"start": "2026-06-04T00:00:00", "isLatest": True, "registerId": "C2026C00227"},
-                {"start": "2025-06-10T00:00:00", "isLatest": False, "registerId": "C2025C00378"},
-            ]})
-        )
-        assert _latest_version_start(API, "C2004A03712") == "2026-06-04"
-
-    @respx.mock
     def test_resolve_versioned_pdf_url_builds_dated_url(self):
         from src.fetcher import router
         respx.get(url__startswith=f"{API}/versions/search").mock(

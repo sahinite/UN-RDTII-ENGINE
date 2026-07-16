@@ -15,13 +15,11 @@ import pytest
 
 from src.config.economy_config import EconomyConfig
 from src.fetcher.models import (
-    ArticleReference,
     CostLogEntry,
     FetchedDocument,
     TranslatedDocument,
     TranslationCostEntry,
 )
-from src.fetcher.segmenter import extract_article_references
 from src.fetcher.translator import (
     normalise_law_reference,
     translate_act_title,
@@ -307,82 +305,6 @@ class TestTranslateDocument:
         mock_deepl.assert_not_called()
 
 
-# ── Article reference mapping ────────────────────────────────────────────
-
-class TestExtractArticleReferences:
-    def _hier(self, entries: list[dict]) -> list[dict]:
-        return entries
-
-    def test_extracts_numbered_sections(self):
-        hierarchy = [
-            {"level": 2, "title": "1. Short title", "text": "", "anchor": ""},
-            {"level": 2, "title": "2. Interpretation", "text": "", "anchor": ""},
-        ]
-        refs = extract_article_references(hierarchy, "PDPA 2012")
-        assert len(refs) == 2
-        assert refs[0].article_number == "1"
-        assert refs[1].article_number == "2"
-
-    def test_tracks_part_context(self):
-        hierarchy = [
-            {"level": 1, "title": "PART I — PRELIMINARY", "text": "", "anchor": ""},
-            {"level": 2, "title": "1. Short title", "text": "", "anchor": ""},
-            {"level": 1, "title": "PART II — DATA PROTECTION", "text": "", "anchor": ""},
-            {"level": 2, "title": "4. Obligations", "text": "", "anchor": ""},
-        ]
-        refs = extract_article_references(hierarchy, "PDPA 2012")
-        assert refs[0].part == "PART I"
-        assert refs[1].part == "PART II"
-
-    def test_extracts_section_keyword_style(self):
-        hierarchy = [
-            {"level": 2, "title": "Section 12 — Data breach notification", "text": "", "anchor": ""},
-        ]
-        refs = extract_article_references(hierarchy, "PDPA 2012")
-        assert len(refs) == 1
-        assert refs[0].article_number == "12"
-
-    def test_disambiguates_duplicate_article_numbers(self):
-        hierarchy = [
-            {"level": 1, "title": "PART I", "text": "", "anchor": ""},
-            {"level": 2, "title": "1. Scope", "text": "", "anchor": ""},
-            {"level": 1, "title": "PART II", "text": "", "anchor": ""},
-            {"level": 2, "title": "1. Application", "text": "", "anchor": ""},
-        ]
-        refs = extract_article_references(hierarchy, "Act")
-        numbers = [r.article_number for r in refs]
-        # Second "1" should be disambiguated
-        assert numbers[0] != numbers[1]
-
-    def test_empty_hierarchy_returns_empty(self):
-        refs = extract_article_references([], "Empty Act")
-        assert refs == []
-
-    def test_act_title_propagated(self):
-        hierarchy = [{"level": 2, "title": "3. Definitions", "text": "", "anchor": ""}]
-        refs = extract_article_references(hierarchy, "My Act")
-        assert refs[0].act_title == "My Act"
-
-    def test_anchor_preserved(self):
-        hierarchy = [{"level": 2, "title": "5. Penalties", "text": "", "anchor": "section-5"}]
-        refs = extract_article_references(hierarchy, "My Act")
-        assert refs[0].text_anchor == "section-5"
-
-    def test_heading_preserved(self):
-        hierarchy = [{"level": 2, "title": "7A. Transitional provisions", "text": "", "anchor": ""}]
-        refs = extract_article_references(hierarchy, "My Act")
-        assert refs[0].heading == "7A. Transitional provisions"
-        assert refs[0].article_number == "7A"
-
-    def test_chapter_pattern_recognised(self):
-        hierarchy = [
-            {"level": 1, "title": "CHAPTER 3 — OBLIGATIONS", "text": "", "anchor": ""},
-            {"level": 2, "title": "10. Duty of care", "text": "", "anchor": ""},
-        ]
-        refs = extract_article_references(hierarchy, "Act")
-        assert refs[0].part == "CHAPTER 3"
-
-
 # ── Dataclass integrity ────────────────────────────────────────────────────────
 
 class TestDataclassIntegrity:
@@ -397,18 +319,6 @@ class TestDataclassIntegrity:
         assert entry.provider == "deepl"
         assert entry.chars_translated == 1000
         assert entry.cost_usd == pytest.approx(0.02)
-
-    def test_article_reference_fields(self):
-        ref = ArticleReference(
-            act_title="PDPA",
-            part="PART I",
-            article_number="12",
-            heading="12. Data breach",
-            text_anchor="s12",
-        )
-        assert ref.act_title == "PDPA"
-        assert ref.part == "PART I"
-        assert ref.article_number == "12"
 
 
 class TestGoogleTranslateAsyncFallback:

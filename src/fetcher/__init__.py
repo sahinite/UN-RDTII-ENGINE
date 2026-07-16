@@ -15,7 +15,6 @@ Models:
     FetchedDocument    — single Zone 2 output contract (all extractors return this)
     TranslatedDocument — FetchedDocument + translated text + cost entry
     CostLogEntry       — per-document OCR/extraction cost record
-    ArticleReference   — (act, part, article) citation extracted from section hierarchy
 
 Exceptions:
     DownloadError, UnsupportedDocTypeError
@@ -28,7 +27,6 @@ from src.fetcher.router import (
 )
 from src.fetcher.translator import translate_document
 from src.fetcher.models import (
-    ArticleReference,
     CostLogEntry,
     FetchedDocument,
     TranslatedDocument,
@@ -44,7 +42,6 @@ __all__ = [
     "FetchedDocument",
     "TranslatedDocument",
     "CostLogEntry",
-    "ArticleReference",
     # Exceptions
     "DownloadError",
     "UnsupportedDocTypeError",

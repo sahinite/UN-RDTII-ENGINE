@@ -1,6 +1,6 @@
 """
 Shared dataclasses for Zone 2: FetchedDocument, CostLogEntry, Zone1Result,
-TranslatedDocument, ArticleReference.
+TranslatedDocument.
 
 FetchedDocument is the routing contract between router.py, all extractors,
 and downstream Zone 2 modules (RAG, mapper, output writer).
@@ -114,16 +114,6 @@ class ActSegment:
 
 # ── Article reference ────────────────────────────────────────────
 
-@dataclass
-class ArticleReference:
-    """A citable (act_title, part, article_number) tuple within a segment."""
-    act_title: str
-    part: str           # e.g. "PART I", "CHAPTER 2" — empty string if none
-    article_number: str # e.g. "1", "5A", "12(1)"
-    heading: str        # Full heading text as it appears in the document
-    text_anchor: str    # HTML anchor id or empty string for PDF
-
-
 # ── Translation cost tracking ───────────────────────────────────────────
 
 @dataclass
@@ -153,7 +143,6 @@ class TranslatedDocument:
     translation_provider: str        # "deepl" | "google" | "none" | "failed"
     translation_cost_entry: TranslationCostEntry
     be_year_conversions: list        # [(be_str, ce_int)] — empty for non-BE economies
-    article_references: list = field(default_factory=list)  # list[ArticleReference]
 
     # ── Proxy attributes delegating to wrapped FetchedDocument ─────────────────
     # Required so mapper._build_doc_metadata() and main.py getattr() calls

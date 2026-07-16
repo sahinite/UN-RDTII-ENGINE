@@ -80,33 +80,6 @@ def _extract_title_id(url: str) -> str | None:
     return m.group(0).upper() if m else None
 
 
-def _latest_version_start(api_base: str, title_id: str, timeout: int = 30) -> str | None:
-    """Resolve the latest in-force compilation's start date (YYYY-MM-DD) via the
-    versions API. Prefers the `isLatest` row; future rows have registerId=null and
-    isLatest=false and are skipped."""
-    import urllib.parse
-    crit = urllib.parse.quote("affects(Amend,Disallow)")
-    filt = urllib.parse.quote(f"titleId eq '{title_id}'")
-    order = urllib.parse.quote("start desc")
-    url = (
-        f"{api_base}/versions/search(criteria='{crit}')"
-        f"?$filter={filt}&$select=start,isLatest,registerId&$orderby={order}&$top=20"
-    )
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            resp = client.get(url, headers={"Accept": "application/json"})
-        if resp.status_code != 200:
-            return None
-        rows = resp.json().get("value", [])
-    except (httpx.HTTPError, ValueError):
-        return None
-    latest = next((r for r in rows if r.get("isLatest")), None)
-    if latest is None:
-        latest = next((r for r in rows if r.get("registerId")), None)
-    start = (latest or {}).get("start") or ""
-    return start.split("T")[0] if start else None
-
-
 def _inforce_version_dates(api_base: str, title_id: str, timeout: int = 30) -> list[str]:
     """All in-force compilation start dates (YYYY-MM-DD), latest first. FRL frequently
     has NOT yet generated the text/original/pdf for the newest compilations (they 404),

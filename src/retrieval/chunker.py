@@ -290,9 +290,6 @@ def chunk_document(
     source_url: str = fetched.source_url
     hierarchy: list[dict] = fetched.section_hierarchy or []
 
-    # Article references from Z2-2 (if available)
-    article_refs = getattr(doc, "article_references", [])
-
     chunks: list[Chunk] = []
     seq = 0
 
@@ -338,11 +335,6 @@ def chunk_document(
         seq = 0
 
     # ── Strategy 2: regex-based article splitting on raw_text ─────────────────
-    # Build a lookup from article_number → ArticleReference for provenance
-    ref_by_num: dict[str, object] = {}
-    for ref in article_refs:
-        ref_by_num[ref.article_number] = ref
-
     current_part = ""
     for art_num, art_text in _split_text_by_regex(text, act_title):
         # Detect part context once per section (from its head), not per sub-chunk.
@@ -350,15 +342,10 @@ def chunk_document(
         if part_m:
             current_part = f"{part_m.group(1).upper()} {part_m.group(2).upper()}"
 
-        # Look up page from ArticleReference if available
-        ref = ref_by_num.get(art_num)
-        page = getattr(ref, "page", None) if ref else None
-
         loc = LocationReference(
             act_title=act_title,
             part=current_part,
             article_number=art_num,
-            page=page,
         )
         prefix = _heading_prefix(act_title, current_part, art_num)
 

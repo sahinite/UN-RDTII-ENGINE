@@ -75,7 +75,6 @@ def _make_translated(text: str = PDPA_TEXT) -> MagicMock:
     doc.fetched = fetched
     doc.translated_text = text
     doc.act_title_translated = "Personal Data Protection Act 2012"
-    doc.article_references = []
     return doc
 
 
