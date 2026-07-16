@@ -50,11 +50,12 @@ Two zones wired together in `main.py`:
 - `src/crawler/discover.py` — **primary entry point**: single `discover()` step driven by per-portal strategy fields in YAML (replaces old probe→crawl→currency→rank pipeline)
 - `src/crawler/transport.py` — transport ladder: plain httpx → httpx+browser headers → Playwright stealth
 - `src/crawler/seed_loader.py` — Round 1 DB xlsx + Sample CSV parser; builds KNOWN URL/title/provision sets
-- `src/crawler/crawl4ai_runner.py` — Crawl4AI + Playwright stealth browser (shared singleton)
-- `src/crawler/probe.py` — taxonomy loader + keyword probe (legacy; `discover.py` is the active path)
-- `src/crawler/crawler.py` — BFS crawler (legacy; used only if discover() falls back)
-- `src/crawler/currency.py` — currency/freshness check (legacy)
-- `src/crawler/ranker.py` — ranking + LLM gate (legacy)
+- `src/crawler/crawl4ai_runner.py` — Crawl4AI + Playwright stealth browser (shared singleton); exposes `fetch_isolated` / `fetch_with_playwright`
+- `src/crawler/probe.py` — taxonomy loader (`load_taxonomy` / `validate_taxonomy`)
+- `src/crawler/crawler.py` — shared URL/link helpers (`_normalise_url`, `_registered_domain`, `_extract_act_links`) used by `discover.py`
+- `src/crawler/spa_probe.py` — SPA-vs-SSR render classifier (`classify_render`) used by `discover.py`
+
+> The old `probe → crawl → currency → rank` pipeline (and its `currency.py` / `ranker.py` modules, the BFS crawler, and the keyword probe) was removed once `discover.py` replaced it — only the shared helpers above remain.
 
 ### Zone 2 — Intelligent Mapping
 - `src/fetcher/router.py` — routes documents to PDF/HTML path; `segmenter.py` splits long docs; `pdf_endpoint` rewrite for portals with `fetch: pdf_endpoint`
