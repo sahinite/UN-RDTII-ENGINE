@@ -17,7 +17,12 @@ def test_anthropic_is_available_when_key_set():
 
 
 def test_anthropic_not_available_when_key_missing():
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    # Also strip the unified LLM_API_KEY fallback (resolve_api_key checks it after
+    # the provider-specific var), otherwise a real key loaded from .env — e.g. when
+    # another test imports main.py and triggers load_dotenv — leaks in and the
+    # provider reads as available. See resolve_api_key in base_provider.py.
+    missing = {"ANTHROPIC_API_KEY", "LLM_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k not in missing}
     with patch.dict(os.environ, env, clear=True):
         from src.mapping.providers.anthropic_provider import AnthropicProvider
         assert AnthropicProvider().is_available() is False
@@ -111,7 +116,10 @@ def test_openai_is_available_when_key_set():
 
 
 def test_openai_not_available_when_key_missing():
-    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
+    # Strip the unified LLM_API_KEY fallback too — see the note in the Anthropic
+    # counterpart above (resolve_api_key falls back to it).
+    missing = {"OPENAI_API_KEY", "LLM_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k not in missing}
     with patch.dict(os.environ, env, clear=True):
         from src.mapping.providers.openai_provider import OpenAIProvider
         assert OpenAIProvider().is_available() is False
