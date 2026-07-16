@@ -5,12 +5,11 @@ Public API:
     load_taxonomy(path)      -> list[dict]           — load + return taxonomy.json
     validate_taxonomy(tax)                            — assert all required fields present
     run_probe(economy, tax)  -> list[ProbeResult]    — probe portals for active document URLs
-    run_crawler(probes, econ, pillar) -> list[CandidateAct]  — BFS crawl discovered URLs
     discover(economy_config, pillar, taxonomy, known_urls) -> list[Zone1Result] — strategy-driven discovery
     build_pillar_keywords(taxonomy, pillar) -> list[str]    — pillar-scoped keyword set
 
 Models:
-    ProbeResult, CandidateAct, SeedData
+    ProbeResult, SeedData
 
 Exceptions:
     ProbeError, CrawlerError, ConfigError
@@ -22,7 +21,6 @@ from src.crawler.probe import (
     run_probe,
     validate_taxonomy,
 )
-from src.crawler.crawler import CandidateAct, run_crawler
 from src.crawler.seed_loader import SeedData, load_seed_data
 from src.crawler.exceptions import ConfigError, CrawlerError, ProbeError
 from src.crawler.discover import ZONE2_MAX_ACTS, build_pillar_keywords, discover
@@ -33,7 +31,6 @@ __all__ = [
     "validate_taxonomy",
     # Zone 1 pipeline steps
     "run_probe",
-    "run_crawler",
     "discover",
     # Pillar scoping
     "build_pillar_keywords",
@@ -43,7 +40,6 @@ __all__ = [
     "load_seed_data",
     # Models
     "ProbeResult",
-    "CandidateAct",
     "SeedData",
     # Exceptions
     "ConfigError",
