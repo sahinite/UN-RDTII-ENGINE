@@ -34,10 +34,9 @@ logger = logging.getLogger(__name__)
 
 # ── Environment config ─────────────────────────────────────────────────────────
 
-ZONE2_MAX_ACTS = int(os.getenv("ZONE2_MAX_ACTS", "5"))
 # KNOWN seeds are Round 1 ground truth → fetch all of them, bounded only by a
 # safety ceiling. The strict cap (ZONE2_MAX_NEW_ACTS) applies to speculative NEW
-# discoveries only. ZONE2_MAX_ACTS is kept for back-compat as the NEW default.
+# discoveries only.
 _MAX_KNOWN_ACTS = int(os.getenv("ZONE2_MAX_KNOWN_ACTS", "12"))
 # Run profile — a named bundle so a run can't be *accidentally* submitted with the
 # safe build-gate settings. RUN_PROFILE selects the speculative-NEW-act cap:
@@ -656,7 +655,7 @@ async def discover(
       2. Run strategy-driven discovery with wall-clock budget
       3. Merge Round 1 KNOWN seeds (always retained)
       4. Rank by pillar-scoped keywords; drop NEW below threshold
-      5. Cap output at ZONE2_MAX_ACTS
+      5. Cap KNOWN at ZONE2_MAX_KNOWN_ACTS and NEW at ZONE2_MAX_NEW_ACTS
 
     Degrades gracefully to seed KNOWN URLs on failure/TBD, never hangs.
     Returns list[Zone1Result] ready for Zone 2.

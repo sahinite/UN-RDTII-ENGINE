@@ -17,7 +17,7 @@ Exceptions:
 from src.crawler.probe import load_taxonomy, validate_taxonomy
 from src.crawler.seed_loader import SeedData, load_seed_data
 from src.crawler.exceptions import ConfigError, CrawlerError
-from src.crawler.discover import ZONE2_MAX_ACTS, build_pillar_keywords, discover
+from src.crawler.discover import build_pillar_keywords, discover
 
 __all__ = [
     # Taxonomy
@@ -27,8 +27,6 @@ __all__ = [
     "discover",
     # Pillar scoping
     "build_pillar_keywords",
-    # Caps
-    "ZONE2_MAX_ACTS",
     # Seed data
     "load_seed_data",
     # Models

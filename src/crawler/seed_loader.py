@@ -216,7 +216,7 @@ class SeedData:
     # indicator_id (raw DB form, e.g. "7.3") → normalised act titles that are the
     # Round 1 ground-truth seed acts for that indicator. Drives indicator-aware
     # act selection so one indicator's many seed acts (P7-I3 has 5) don't crowd
-    # the others out of the ZONE2_MAX_ACTS cap.
+    # the others out of the ZONE2_MAX_KNOWN_ACTS cap.
     known_titles_by_indicator: dict[str, set[str]] = field(default_factory=dict)
     economy: str = ""
     pillar: str = ""

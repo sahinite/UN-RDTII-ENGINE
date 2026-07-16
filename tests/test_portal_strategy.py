@@ -467,8 +467,8 @@ class TestIndexDiscovery:
         # At least one relevant act (e.g. PDPA, Cybersecurity) should appear as NEW
         assert len(new_results) >= 1
 
-    def test_discover_capped_at_zone2_max_acts(self):
-        """discover() must never return more than ZONE2_MAX_ACTS results."""
+    def test_discover_capped_at_max_new_acts(self):
+        """discover() must never return more NEW acts than the _MAX_NEW_ACTS cap."""
         from src.crawler.discover import discover
 
         known_urls: set[str] = set()
@@ -481,9 +481,12 @@ class TestIndexDiscovery:
             ) + "</body></html>"
             return big_html, 200
 
+        # No KNOWN seeds → every discovered act is NEW; the NEW cap must bound the
+        # output. (ZONE2_MAX_NEW_ACTS defaults to 0 under the gate profile, so patch
+        # the resolved cap directly.)
         with (
             patch("src.crawler.discover.transport_fetch", side_effect=mock_fetch),
-            patch("src.crawler.discover.ZONE2_MAX_ACTS", 5),
+            patch("src.crawler.discover._MAX_NEW_ACTS", 5),
         ):
             results = asyncio.run(
                 discover(_SG_ECONOMY, 7, _MINI_TAXONOMY, known_urls)
