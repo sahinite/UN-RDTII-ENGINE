@@ -242,12 +242,6 @@ def _find_csv_col(fields_lower: dict[str, str], candidates: list[str]) -> str | 
 
 # ── Loaders ────────────────────────────────────────────────────────────────────
 
-def _extract_anchor_urls(raw: str) -> list[str]:
-    """Split a cell value on ';' and newlines, return strings containing '#'."""
-    parts = re.split(r"[;\n]", raw)
-    return [p.strip() for p in parts if "#" in p.strip()]
-
-
 # Section citations in Round 1 prose: "Section 199", "Sec. 26", "s. 12A", "§ 47".
 # Capture the number + optional single letter suffix; the (subparagraph) is dropped
 # so it matches infer_section_token() on the extraction side.
