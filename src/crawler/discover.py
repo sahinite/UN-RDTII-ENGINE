@@ -662,7 +662,6 @@ async def discover(
     """
     economy_iso = economy_config.iso_code
     budget_deadline = time.monotonic() + _DISCOVER_BUDGET_S
-    known_norm = {_normalise_url(u) for u in known_urls}
 
     # Config-declared seed remap: stale/mirror seed URL → canonical primary. Applied
     # to every discovered/seed URL so dedup, fetch strategy and output provenance all

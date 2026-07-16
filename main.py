@@ -300,7 +300,7 @@ def run_pipeline(
                 # English economies keep the original full flow (translate_body no-op).
                 translated = translate_document(doc, economy_config, translate_body=_translate_body)
                 p.done(f"{prefix} Translation done")
-            except Exception as exc:
+            except Exception:
                 p.warn(f"{prefix} Translation failed — using raw text")
                 doc.flag_for_review = True
                 translated = doc

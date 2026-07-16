@@ -112,7 +112,6 @@ def slice_pdf(raw_bytes: bytes, boundaries: list[int]) -> list[bytes]:
 
     for i, start in enumerate(boundaries):
         end = boundaries[i + 1] if i + 1 < len(boundaries) else total
-        page_indices = list(range(start, end))
         sub = fitz.open()
         sub.insert_pdf(doc, from_page=start, to_page=end - 1)
         slices.append(sub.tobytes())

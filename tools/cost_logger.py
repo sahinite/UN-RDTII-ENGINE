@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -171,7 +170,7 @@ def _run_llm_stage(
     from src.mapping.mapper import extract_provisions
     from src.retrieval.rag import retrieve_batch
 
-    economy = load_economy(economy_name)
+    load_economy(economy_name)  # validate the economy exists (raises on unknown)
     economy_iso = {"Singapore": "SG", "Australia": "AU", "Malaysia": "MY", "Thailand": "TH"}.get(
         economy_name, economy_name[:2].upper()
     )
