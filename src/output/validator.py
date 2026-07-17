@@ -349,15 +349,54 @@ def archive_local(url: str, dest_dir: str | None = None) -> str:
         return ""
 
 
+def archive_content(url: str, content: str, dest_dir: str | None = None) -> str:
+    """
+    Save the exact extracted content the pipeline already has in memory.
+
+    Preferred over `archive_local` for JS-rendered pages: a plain re-fetch there
+    returns the pre-render SSR shell (truncated) or is bot-blocked (empty), so the
+    on-disk snapshot would not match what we actually extracted and verbatim-matched
+    against. Writing `raw_text` guarantees the archive IS the mapped evidence.
+    """
+    dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
+    try:
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(dest_dir) / f"{_safe_slug(url)}.txt"
+        data = content.encode("utf-8")
+        path.write_bytes(data)
+        logger.info({
+            "event": "local_archive_saved",
+            "url": url,
+            "path": str(path),
+            "bytes": len(data),
+            "source": "in_memory",
+            "economy": "",
+        })
+        return str(path)
+    except Exception as exc:  # noqa: BLE001 — best-effort archival, never fatal
+        logger.warning({
+            "event": "local_archive_error",
+            "url": url,
+            "error": str(exc),
+            "economy": "",
+        })
+        return ""
+
+
 def reset_wayback_latch() -> None:
     """Re-enable Wayback archiving (call between independent runs/economies)."""
     global _wayback_disabled
     _wayback_disabled = False
 
 
-def archive_source(url: str) -> str:
+def archive_source(url: str, content: str | None = None) -> str:
     """
     Archive one source URL: Wayback (best-effort) → local snapshot fallback.
+
+    When `content` (the already-extracted `raw_text`) is provided, the local
+    snapshot is written from it rather than re-fetched — this is what fixes
+    truncated/empty archives on JS-rendered portals. `content` is left None for
+    PDFs so the re-fetch preserves the original binary.
 
     Returns a Wayback URL when available, else a local snapshot path, else "".
     """
@@ -365,7 +404,7 @@ def archive_source(url: str) -> str:
     if _WAYBACK_BEST_EFFORT:
         archive_url = archive_wayback(url)
     if not archive_url and _LOCAL_ARCHIVE_FALLBACK:
-        archive_url = archive_local(url)
+        archive_url = archive_content(url, content) if content else archive_local(url)
     return archive_url
 
 
@@ -391,6 +430,7 @@ def validate_and_flag(
     *,
     archive: bool = True,
     wayback_rate_limit_s: float = 1.0,
+    document_texts: "dict[str, str] | None" = None,
 ) -> list[ValidatedResult]:
     """
     Orchestrator: validates URLs, archives them, flags low confidence.
@@ -399,10 +439,14 @@ def validate_and_flag(
         records: ExtractionResult list from the mapper.
         archive: Set False to skip Wayback archiving (useful in tests/offline runs).
         wayback_rate_limit_s: Seconds to wait between Wayback API calls.
+        document_texts: Optional {source_url: extracted raw_text}. When a URL is
+            present, its local snapshot is written from this content instead of a
+            re-fetch — closes truncated/empty archives on JS-rendered portals.
 
     Returns:
         list[ValidatedResult] — one per input record, with URL status + archive URL.
     """
+    document_texts = document_texts or {}
     # NOTE: the Wayback latch (_wayback_disabled) intentionally persists across
     # the whole process — validate_and_flag is called once PER DOCUMENT, so
     # resetting here would re-probe the (blocked) endpoint for every act. Tests
@@ -443,12 +487,17 @@ def validate_and_flag(
         # confidence flagging (before archiving so note is in ValidatedResult)
         _flag_confidence(record)
 
-        # archiving (only live URLs) — Wayback best-effort → local fallback,
-        # cached per unique URL so we don't re-archive the same act per provision.
+        # archiving — Wayback best-effort → local fallback, cached per unique URL
+        # so we don't re-archive the same act per provision. Normally gated on a
+        # live URL, but if we hold the extracted text in memory we archive it
+        # regardless: that content is proof the page was fetched and mapped, so a
+        # re-fetch-based "soft_404" (common on JS portals whose SSR shell trips the
+        # error-page heuristic) must not block its provenance snapshot.
+        src_content = document_texts.get(src)
         arch_url = ""
-        if archive and url_status in ("ok", "redirected"):
+        if archive and (url_status in ("ok", "redirected") or src_content):
             if src not in archive_cache:
-                archive_cache[src] = archive_source(src)
+                archive_cache[src] = archive_source(src, content=src_content)
                 _sleep(wayback_rate_limit_s)
             arch_url = archive_cache[src]
 

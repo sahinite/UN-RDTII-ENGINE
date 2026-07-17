@@ -497,6 +497,45 @@ class TestValidateAndFlag:
         mock_archive.assert_not_called()
         assert results[0].archive_url == ""
 
+    def test_document_text_archived_from_memory(self, tmp_path):
+        """When raw_text is supplied, the local snapshot is written from it (no re-fetch)."""
+        from src.output import validator
+        from src.output.validator import validate_and_flag
+
+        record = _make_record(source_url="https://sso.agc.gov.sg/Act/PDPA", confidence=0.95)
+        body = "FULL RENDERED STATUTE TEXT " * 500  # content a plain re-fetch can't reproduce
+        with patch("src.output.validator.validate_url", return_value=("ok", 200)), \
+             patch("src.output.validator.archive_wayback", return_value=""), \
+             patch("src.output.validator.archive_local") as mock_refetch, \
+             patch("src.output.validator._sleep"), \
+             patch.object(validator, "_LOCAL_ARCHIVE_DIR", str(tmp_path)):
+            results = validate_and_flag(
+                [record],
+                document_texts={"https://sso.agc.gov.sg/Act/PDPA": body},
+            )
+
+        mock_refetch.assert_not_called()  # in-memory content used, not a re-fetch
+        saved = results[0].archive_url
+        assert saved and saved.endswith(".txt")
+        assert open(saved, encoding="utf-8").read() == body
+
+    def test_soft_404_still_archived_when_content_present(self, tmp_path):
+        """A false soft-404 (JS shell) must not block archiving when we hold the content."""
+        from src.output import validator
+        from src.output.validator import validate_and_flag
+
+        record = _make_record(source_url="https://www.pdpc.gov.sg/x", confidence=0.90)
+        with patch("src.output.validator.validate_url", return_value=("soft_404", 200)), \
+             patch("src.output.validator.archive_wayback", return_value=""), \
+             patch("src.output.validator._sleep"), \
+             patch.object(validator, "_LOCAL_ARCHIVE_DIR", str(tmp_path)):
+            results = validate_and_flag(
+                [record],
+                document_texts={"https://www.pdpc.gov.sg/x": "real extracted content"},
+            )
+
+        assert results[0].archive_url  # archived despite soft_404 status
+
     def test_no_archive_skipped_when_archive_false(self):
         with patch("src.output.validator.validate_url", return_value=("ok", 200)):
             with patch("src.output.validator.archive_wayback") as mock_archive:
