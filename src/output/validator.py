@@ -298,6 +298,32 @@ def _safe_slug(url: str) -> str:
     return (slug[:120] or "archive")
 
 
+def _write_snapshot(url: str, data: bytes, ext: str, dest_dir: str, *, source: str = "") -> str:
+    """Write bytes to {dest_dir}/{slug}{ext} and log. Returns the path, or "".
+
+    Shared writer for both archive paths; `source` tags the log line (e.g.
+    "in_memory") when the bytes weren't re-fetched.
+    """
+    try:
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(dest_dir) / f"{_safe_slug(url)}{ext or '.bin'}"
+        path.write_bytes(data)
+        saved = {"event": "local_archive_saved", "url": url, "path": str(path),
+                 "bytes": len(data), "economy": ""}
+        if source:
+            saved["source"] = source
+        logger.info(saved)
+        return str(path)
+    except Exception as exc:  # noqa: BLE001 — best-effort archival, never fatal
+        logger.warning({
+            "event": "local_archive_error",
+            "url": url,
+            "error": str(exc),
+            "economy": "",
+        })
+        return ""
+
+
 def archive_local(url: str, dest_dir: str | None = None) -> str:
     """
     Re-download the source and save a local snapshot (Wayback fallback).
@@ -310,36 +336,21 @@ def archive_local(url: str, dest_dir: str | None = None) -> str:
     try:
         with httpx.Client(timeout=_URL_VALIDATE_TIMEOUT, headers=headers, follow_redirects=True) as client:
             resp = client.get(url)
-        if resp.status_code != 200 or not resp.content:
-            logger.warning({
-                "event": "local_archive_failed",
-                "url": url,
-                "http_status": resp.status_code,
-                "economy": "",
-            })
-            return ""
-        ctype = resp.headers.get("content-type", "").lower()
-        bare = url.lower().split("?")[0]
-        ext = ".pdf" if ("pdf" in ctype or bare.endswith(".pdf")) else (".html" if "html" in ctype else ".bin")
-        Path(dest_dir).mkdir(parents=True, exist_ok=True)
-        path = Path(dest_dir) / f"{_safe_slug(url)}{ext}"
-        path.write_bytes(resp.content)
-        logger.info({
-            "event": "local_archive_saved",
-            "url": url,
-            "path": str(path),
-            "bytes": len(resp.content),
-            "economy": "",
-        })
-        return str(path)
     except Exception as exc:  # noqa: BLE001 — best-effort archival, never fatal
+        logger.warning({"event": "local_archive_error", "url": url, "error": str(exc), "economy": ""})
+        return ""
+    if resp.status_code != 200 or not resp.content:
         logger.warning({
-            "event": "local_archive_error",
+            "event": "local_archive_failed",
             "url": url,
-            "error": str(exc),
+            "http_status": resp.status_code,
             "economy": "",
         })
         return ""
+    ctype = resp.headers.get("content-type", "").lower()
+    bare = url.lower().split("?")[0]
+    ext = ".pdf" if ("pdf" in ctype or bare.endswith(".pdf")) else (".html" if "html" in ctype else ".bin")
+    return _write_snapshot(url, resp.content, ext, dest_dir)
 
 
 def archive_content(url: str, data: bytes, ext: str, dest_dir: str | None = None) -> str:
@@ -351,28 +362,7 @@ def archive_content(url: str, data: bytes, ext: str, dest_dir: str | None = None
     file (e.g. the rendered .html) so the archive is a faithful copy. Returns the
     path, or "".
     """
-    dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
-    try:
-        Path(dest_dir).mkdir(parents=True, exist_ok=True)
-        path = Path(dest_dir) / f"{_safe_slug(url)}{ext or '.bin'}"
-        path.write_bytes(data)
-        logger.info({
-            "event": "local_archive_saved",
-            "url": url,
-            "path": str(path),
-            "bytes": len(data),
-            "source": "in_memory",
-            "economy": "",
-        })
-        return str(path)
-    except Exception as exc:  # noqa: BLE001 — best-effort archival, never fatal
-        logger.warning({
-            "event": "local_archive_error",
-            "url": url,
-            "error": str(exc),
-            "economy": "",
-        })
-        return ""
+    return _write_snapshot(url, data, ext, dest_dir or _LOCAL_ARCHIVE_DIR, source="in_memory")
 
 
 def reset_wayback_latch() -> None:
@@ -483,8 +473,13 @@ def validate_and_flag(
         arch_url = ""
         if archive and (url_status in ("ok", "redirected") or src_blob):
             if src not in archive_cache:
+                # Only pay the inter-call pause when a live Wayback request was
+                # actually made — writing in-memory bytes or a latched-off Wayback
+                # needs no rate limiting.
+                hit_wayback = _WAYBACK_BEST_EFFORT and not _wayback_disabled
                 archive_cache[src] = archive_source(src, blob=src_blob)
-                _sleep(wayback_rate_limit_s)
+                if hit_wayback:
+                    _sleep(wayback_rate_limit_s)
             arch_url = archive_cache[src]
 
         results.append(
