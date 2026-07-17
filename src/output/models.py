@@ -110,7 +110,7 @@ class OutputRecord:
         }
 
     def as_provision_dict(self) -> dict:
-        """Return provision-specific fields for the 'provisions' array in the JSON envelope."""
+        """Provision fields for the 'provisions' array in the JSON envelope."""
         return {
             "indicator_id": self.indicator_id,
             "article": self.article,
@@ -128,19 +128,3 @@ class OutputRecord:
             "verbatim_original": self.verbatim_original,
             "archive_url": self.archive_url,
         }
-
-    def as_json_dict(self) -> dict:
-        """Return full flat dict for JSON envelope (all fields). Used for testing/legacy."""
-        base = self.as_csv_row()
-        base["confidence"] = self.confidence  # keep numeric in JSON
-        base.update({
-            "ocr_quality_cer": self.ocr_quality_cer,
-            "processing_time": self.processing_time,
-            "model_version": self.model_version,
-            "source_pdf_path": self.source_pdf_path,
-            "raw_context_before": self.raw_context_before,
-            "raw_context_after": self.raw_context_after,
-            "verbatim_original": self.verbatim_original,
-            "archive_url": self.archive_url,
-        })
-        return base

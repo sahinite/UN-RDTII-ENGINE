@@ -1,10 +1,8 @@
 """
-Output writer — 13-column CSV + JSON envelope with extended metadata.
+Output writer — 13-column CSV (UTF-8-BOM) + per-document JSON envelope.
 
-write_csv: pandas, UTF-8-BOM, post-write column-order verification
-write_json: 6 extended fields, per-document grouping, post-write verification
-validate_record: pre-write field checks + column order guard
-write_outputs: orchestrator entry point + console summary
+Both writers re-read their output to verify column order / envelope shape;
+validate_record runs pre-write field checks; write_outputs is the entry point.
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -26,9 +24,6 @@ from src.output.models import (
     _REQUIRED_COLUMNS,
 )
 
-if TYPE_CHECKING:
-    pass
-
 logger = get_logger("output.writer")
 
 
@@ -40,20 +35,19 @@ def _get_portal_domains(economy_name: str) -> set[str]:
     if economy_name in _PORTAL_DOMAINS_CACHE:
         return _PORTAL_DOMAINS_CACHE[economy_name]
     try:
-        from pathlib import Path as _Path
-        import yaml as _yaml
-        economies_dir = _Path(__file__).parent.parent.parent / "economies"
+        import yaml
+        from urllib.parse import urlparse
+        economies_dir = Path(__file__).parent.parent.parent / "economies"
         domains: set[str] = set()
         for yaml_path in economies_dir.glob("*.yaml"):
             if yaml_path.stem.lower() == "readme":
                 continue
             try:
-                raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+                raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
                 if raw.get("un_name") == economy_name or raw.get("economy_name") == economy_name:
                     for portal in raw.get("portals", []):
                         url = portal.get("url", "")
                         if url:
-                            from urllib.parse import urlparse
                             domains.add(urlparse(url).netloc)
             except Exception:
                 pass
@@ -141,14 +135,8 @@ def validate_record(record: OutputRecord) -> list[str]:
 # ── CSV Writer ────────────────────────────────────────────────────────────
 
 def write_csv(records: list[OutputRecord], path: Path) -> Path:
-    """
-    Write records to CSV with exact 13-column schema.
-    Encoding: UTF-8-BOM (Excel-compatible).
-    Post-write: re-reads header to verify column order.
-
-    Returns the written path.
-    Raises OutputWriteError on any failure.
-    """
+    """Write the 13-column CSV (UTF-8-BOM), then re-read the header to verify
+    column order. Returns the path; raises OutputWriteError on failure."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -195,15 +183,9 @@ _RETRIEVAL_METHOD = "hybrid BM25 + dense (RRF) + cross-encoder rerank"
 
 
 def write_json(records: list[OutputRecord], path: Path) -> Path:
-    """
-    Write JSON envelope with PDF-specified document-level shape.
-
-    Each document object has document-level metadata at the top and
-    provisions in a 'provisions' array, per the hackathon spec (slides 15-16).
-
-    Returns the written path.
-    Raises OutputWriteError on any failure.
-    """
+    """Write the JSON envelope: records grouped by source_url into documents,
+    each with doc-level metadata + a 'provisions' array (spec slides 15-16).
+    Returns the path; raises OutputWriteError on failure."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 

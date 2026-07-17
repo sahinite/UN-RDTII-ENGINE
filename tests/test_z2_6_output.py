@@ -530,21 +530,13 @@ class TestBuildOutputRecord:
         assert rec.raw_context_after == "25. Retention Limitation Obligation."
 
 
-# ── as_csv_row / as_json_dict ──────────────────────────────────────────────────
+# ── as_csv_row / as_provision_dict ──────────────────────────────────────────────
 
 class TestOutputRecordMethods:
     def test_as_csv_row_column_order(self):
         rec = _make_output_record()
         row = rec.as_csv_row()
         assert list(row.keys()) == CSV_COLUMNS
-
-    def test_as_json_dict_includes_extended_fields(self):
-        rec = _make_output_record()
-        d = rec.as_json_dict()
-        for field in ("ocr_quality_cer", "processing_time", "model_version",
-                      "source_pdf_path", "raw_context_before", "raw_context_after",
-                      "verbatim_original", "archive_url"):
-            assert field in d
 
     def test_as_provision_dict_has_required_fields(self):
         rec = _make_output_record()
