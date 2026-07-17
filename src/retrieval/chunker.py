@@ -1,26 +1,20 @@
 """
 Subsection-aware chunking with legal boundary detection.
 
-chunk_document() accepts a TranslatedDocument (from Z2-2) or a plain FetchedDocument
-and returns a list[Chunk].  Every Chunk carries a LocationReference so downstream
-citations are verifiable.
+chunk_document() accepts a TranslatedDocument or plain FetchedDocument and returns
+a list[Chunk], each carrying a LocationReference so citations are verifiable.
 
-Splitting strategy (in priority order):
-1. Use section_hierarchy if it contains ≥2 entries with meaningful text → each
-   entry's text is split to target size at subsection boundaries.
-2. Fall back to regex-based article boundary splitting on raw_text when
-   section_hierarchy is thin (common for OCR'd PDFs).
-3. If the document is very short, treat the whole text as a single chunk so we
-   never return an empty list.
+Splitting strategy, in priority order:
+1. section_hierarchy (≥2 entries with meaningful text) → split each entry to
+   target size at subsection boundaries.
+2. else regex-based article splitting on raw_text (thin hierarchy, e.g. OCR PDFs).
+3. very short doc → whole text as one chunk (never return empty).
 
-Why subsection-aware (vs one chunk per section): a section like PDPA s.11 packs
-its DPO clause s.11(3) inside a ~3.6k-char block. As one chunk, that clause's
-signal is diluted, the embedding ranks low, and the prompt-budget trim drops it
-before the LLM ever sees it. Splitting each section into ~1.2k-char,
-subsection-preferring chunks — each prefixed with its parent heading so the
-embedding carries the provision's location — gives buried clauses a sharp,
-retrievable embedding. The number of chunks reaching the LLM stays bounded by
-RERANK_TOP_N (the reranker, not chunk size, is the gatekeeper).
+Why subsection-aware (vs one chunk per section): a clause like PDPA s.11(3) buried
+in a ~3.6k-char section embeds weakly and gets trimmed before the LLM sees it.
+Splitting into ~1.2k-char subsection-preferring chunks — each prefixed with its
+parent heading — gives buried clauses a sharp, retrievable embedding. Chunks
+reaching the LLM stay bounded by RERANK_TOP_N (the reranker is the gatekeeper).
 """
 
 from __future__ import annotations

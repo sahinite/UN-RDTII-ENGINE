@@ -163,18 +163,12 @@ def call_llm_with_cascade(
 
 
 def smoke_check_llm() -> "tuple[bool, str]":
-    """One tiny real call to prove the LLM can actually PRODUCE PARSEABLE OUTPUT —
-    not merely that a key is present (which is all `is_available()` checks).
-
-    This catches, in ~seconds, the three ways the LLM silently yields nothing and
-    turns every provision into a false "no barrier" N/A over a full run:
-      1. provider dead — bad/quota'd key, network → all tiers raise;
-      2. empty response — a thinking-only model (answer went to Ollama's `thinking`
-         field), or the prompt overran the context window;
-      3. unparseable — truncated/garbled JSON.
-
-    Uses the real cascade path, so it validates exactly what extraction will use.
-    Returns (ok, human-readable detail).
+    """One tiny real call to prove the LLM can PRODUCE PARSEABLE OUTPUT — not just
+    that a key is present (all `is_available()` checks). Catches in ~seconds the
+    three ways the LLM silently yields nothing and turns every provision into a
+    false "no barrier" N/A: (1) provider dead (bad/quota'd key → all tiers raise);
+    (2) empty response (thinking-only model, or prompt overran the context window);
+    (3) unparseable JSON. Uses the real cascade path. Returns (ok, detail).
     """
     from src.mapping.parser import _extract_json
 

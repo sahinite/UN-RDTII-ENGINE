@@ -71,26 +71,19 @@ def resolve_provision_tag(
     """
     Resolve discovery_tag at provision level.
 
-    KNOWN is an IDENTITY judgement, not a URL/portal one: if the act+provision
-    exists in the Round 1 database it is KNOWN regardless of which portal or URL
-    the run happened to fetch it from (a single KNOWN act may carry several Round 1
-    reference URLs, and the engine may reach it via a different URL entirely). So
-    the identity checks below run for EVERY provision — including those found in a
-    document discovered as a NEW act, since a "new" URL can still resolve to a
-    Round 1 act under a different title/portal. Two matches, either satisfies KNOWN
+    KNOWN is an IDENTITY judgement, not a URL/portal one: if the act+provision is in
+    the Round 1 database it is KNOWN regardless of which URL fetched it. So the
+    identity checks run for EVERY provision (even those in a NEW-tagged document, as
+    a "new" URL can still resolve to a Round 1 act). Either match satisfies KNOWN
     (indicator-agnostic, per the Round 2 rubric):
-      1. anchor-URL match: the reconstructed act-URL + #anchor is in
-         ``known_provisions`` (Round 1 References that carried a #section anchor).
-      2. act+section match: (normalised act title, section number) is in
-         ``known_sections`` — this is the URL-independent signal, and it catches
-         Round 1's *prose* citations ("Section 199", "Section 11(3)") that have no
-         anchor URL at all. This is the primary KNOWN signal.
+      1. anchor-URL match: reconstructed act-URL + #anchor is in ``known_provisions``.
+      2. act+section match: (normalised title, section) is in ``known_sections`` —
+         the URL-independent, primary signal; catches Round 1's *prose* citations
+         ("Section 199", "Section 11(3)") that carry no anchor URL.
 
-    The document-level ``doc_discovery_tag`` is only a fallback, used when the
-    provision cannot be tested at all (no anchor and no section token).
-
-    Returns (tag, flag_unresolvable) where flag_unresolvable is True only when we
-    had neither an anchor nor a section token to test and fell back to doc tag.
+    ``doc_discovery_tag`` is only a fallback when the provision can't be tested at
+    all (no anchor and no section token). Returns (tag, flag_unresolvable), the
+    latter True only when it fell back to the doc tag.
     """
     section_token = infer_section_token(article) if article else None
 

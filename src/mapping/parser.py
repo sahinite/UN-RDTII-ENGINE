@@ -176,17 +176,14 @@ def _assert_verbatim_in_context(
     top_chunks: list[RetrievedChunk],
 ) -> tuple[bool, Optional[str]]:
     """
-    Verifies verbatim_snippet appears in the retrieved source chunks.
-    Returns (True, None) on pass, (False, reason) on fail.
-    Failed assertion discards the row unless ALLOW_UNVERIFIED_SNIPPETS=true.
+    Verify verbatim_snippet appears in the retrieved source chunks. Returns
+    (True, None) on pass, (False, reason) on fail; a failure discards the row
+    unless ALLOW_UNVERIFIED_SNIPPETS=true.
 
-    Matching is tolerant of two extraction artefacts that do NOT mean the LLM
-    invented text:
-      - pdfplumber sometimes drops the spaces between words ("tooverseeand…"),
-        so we also compare with ALL whitespace removed.
-      - Unicode punctuation variants (curly quotes, en/em dashes, ligatures) are
-        normalised. We also match across the *joined* chunks so a snippet that
-        straddles a chunk boundary still verifies.
+    Tolerant of two extraction artefacts that don't mean invented text: pdfplumber
+    dropping inter-word spaces (so we also compare whitespace-stripped) and Unicode
+    punctuation variants (normalised). Matches across the *joined* chunks so a
+    snippet straddling a chunk boundary still verifies.
     """
     joined = " ".join(rc.chunk.text for rc in top_chunks)
     snip_collapse, hay_collapse = _collapse_ws(snippet), _collapse_ws(joined)

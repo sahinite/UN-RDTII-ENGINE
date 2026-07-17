@@ -49,16 +49,9 @@ def retrieve(
     top_n: int = RERANK_TOP_N,
 ) -> list[RetrievedChunk]:
     """
-    Full RAG pipeline for a single indicator.
-
-    Steps:
-      1. chunk_document  → list[Chunk]
-      2. build_index     → EmbeddingIndex (FAISS)
-      3. build_bm25      → BM25Index
-      4. dense_search    → top-DENSE_TOP_K
-      5. bm25 search     → top-BM25_TOP_K
-      6. rrf_fusion      → top-FUSION_TOP_K
-      7. rerank          → top-top_n RetrievedChunk
+    Full RAG pipeline for a single indicator:
+      chunk_document → build_index (FAISS) + build_bm25 → dense + BM25 search →
+      rrf_fusion → rerank → top-`top_n` RetrievedChunk.
 
     Returns an empty list if the document has no usable text.
     """
@@ -188,17 +181,14 @@ _NEXT_HEADING = re.compile(r"\n\s*\d+[A-Z]?\.\s")
 
 
 def _find_section_chunk(all_chunks: list[Chunk], token: str) -> "Chunk | None":
-    """Locate the operative provision for a section token. Two ways, because the
-    chunker often leaves `article_number` empty on large acts (e.g. Employment
-    Act s.95 and PDPA s.25 live in chunks labelled ''):
-      1. exact `article_number` match (clean, when the chunker labelled it);
-      2. the `N.` heading at a line start in the chunk TEXT, scored by how much
-         body follows before the next section heading. The operative provision
-         ("25. An organisation must cease to retain…") has a long body; a
-         Contents/TOC listing ("25. Retention…\n26. …") has only a short title,
-         so the longest-body match wins and pure-TOC chunks (body < 80) are
-         rejected. Handles both subsectioned (95.—(1)) and single-sentence (25.)
-         provisions without matching the TOC.
+    """Locate the operative provision for a section token. Two ways, since the
+    chunker often leaves `article_number` empty on large acts:
+      1. exact `article_number` match (when the chunker labelled it);
+      2. the `N.` heading at a line start in the chunk TEXT, scored by body length
+         before the next heading. The operative provision has a long body; a
+         Contents/TOC listing has only a short title, so the longest-body match
+         wins and pure-TOC chunks (body < 80) are rejected — handling both
+         subsectioned (95.—(1)) and single-sentence (25.) provisions.
     """
     # 1. Explicitly labelled chunk(s) take priority. A section number can appear
     #    twice — a short arrangement-of-provisions/Contents stub AND the operative
