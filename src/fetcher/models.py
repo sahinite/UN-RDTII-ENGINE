@@ -85,6 +85,12 @@ class FetchedDocument:
     law_number_ref: Optional[str] = None   # e.g. "Act 26 of 2012" / "2020 Rev. Ed."
     last_amended: Optional[str] = None     # e.g. "2020" or "2026-05-29" (version date)
 
+    # Exact source bytes + file extension for provenance archiving. Set for
+    # JS-rendered HTML (the rendered DOM), which a plain re-fetch can't reproduce;
+    # left None for static files (PDF/DOCX) that the archiver re-fetches verbatim.
+    archive_bytes: Optional[bytes] = None
+    archive_ext: Optional[str] = None
+
     def validate(self) -> None:
         if not self.raw_text:
             raise ValueError(f"raw_text is empty for {self.source_url}")

@@ -497,13 +497,13 @@ class TestValidateAndFlag:
         mock_archive.assert_not_called()
         assert results[0].archive_url == ""
 
-    def test_document_text_archived_from_memory(self, tmp_path):
-        """When raw_text is supplied, the local snapshot is written from it (no re-fetch)."""
+    def test_document_bytes_archived_from_memory(self, tmp_path):
+        """When exact bytes are supplied, the snapshot is the real file (no re-fetch)."""
         from src.output import validator
         from src.output.validator import validate_and_flag
 
         record = _make_record(source_url="https://sso.agc.gov.sg/Act/PDPA", confidence=0.95)
-        body = "FULL RENDERED STATUTE TEXT " * 500  # content a plain re-fetch can't reproduce
+        body = b"<html>FULL RENDERED STATUTE</html>" * 500  # a re-fetch can't reproduce this
         with patch("src.output.validator.validate_url", return_value=("ok", 200)), \
              patch("src.output.validator.archive_wayback", return_value=""), \
              patch("src.output.validator.archive_local") as mock_refetch, \
@@ -511,16 +511,16 @@ class TestValidateAndFlag:
              patch.object(validator, "_LOCAL_ARCHIVE_DIR", str(tmp_path)):
             results = validate_and_flag(
                 [record],
-                document_texts={"https://sso.agc.gov.sg/Act/PDPA": body},
+                document_blobs={"https://sso.agc.gov.sg/Act/PDPA": (body, ".html")},
             )
 
-        mock_refetch.assert_not_called()  # in-memory content used, not a re-fetch
+        mock_refetch.assert_not_called()  # in-memory bytes used, not a re-fetch
         saved = results[0].archive_url
-        assert saved and saved.endswith(".txt")
-        assert open(saved, encoding="utf-8").read() == body
+        assert saved and saved.endswith(".html")  # exact file, not .txt
+        assert open(saved, "rb").read() == body
 
-    def test_soft_404_still_archived_when_content_present(self, tmp_path):
-        """A false soft-404 (JS shell) must not block archiving when we hold the content."""
+    def test_soft_404_still_archived_when_bytes_present(self, tmp_path):
+        """A false soft-404 (JS shell) must not block archiving when we hold the bytes."""
         from src.output import validator
         from src.output.validator import validate_and_flag
 
@@ -531,7 +531,7 @@ class TestValidateAndFlag:
              patch.object(validator, "_LOCAL_ARCHIVE_DIR", str(tmp_path)):
             results = validate_and_flag(
                 [record],
-                document_texts={"https://www.pdpc.gov.sg/x": "real extracted content"},
+                document_blobs={"https://www.pdpc.gov.sg/x": (b"<html>real</html>", ".html")},
             )
 
         assert results[0].archive_url  # archived despite soft_404 status

@@ -1,12 +1,9 @@
 """
-Validate + Archive + Confidence Flagging.
+Validate + archive + confidence-flag each output record.
 
-Live URL Validator: HTTP GET each source_url (retry on 429/5xx,
-      soft-404 detection, broken-URL flagging).
-Wayback Machine Archiver: POST to save/{url} at output time,
-      store archive URL in notes + JSON envelope.
-Confidence Flagging + ValidatedResult dataclass + Orchestrator:
-      confidence < 0.80 → append "Recommend human review — OCR/translation source".
+- Validate: GET each source_url (retry 429/5xx, soft-404 + broken detection).
+- Archive: Wayback best-effort → local snapshot fallback.
+- Flag: confidence < 0.80 appends a human-review note.
 """
 
 from __future__ import annotations
@@ -36,11 +33,9 @@ REVIEW_NOTE = "Recommend human review — OCR/translation source"
 _URL_VALIDATE_TIMEOUT = 15
 _URL_MAX_RETRIES = 3
 _WAYBACK_TIMEOUT = 30
-# Wayback is flaky (429/520) and unreachable from some networks. Keep retries
-# cheap and fall back to a local snapshot. `max_tries` caps waybackpy's OWN
-# internal retry loop (default 8 → minutes of wasted backoff per URL when the
-# endpoint is blocked). Once a save hard-fails, disable Wayback for the rest of
-# the run so only the first URL pays the probe cost.
+# Wayback is flaky/often blocked. Keep retries cheap and fall back to a local
+# snapshot. `max_tries` caps waybackpy's own retry loop; after the first hard
+# failure we latch Wayback off so only one URL pays the probe cost.
 _WAYBACK_RETRY_WAIT = float(os.getenv("WAYBACK_RETRY_WAIT_S", "2.0"))
 _WAYBACK_MAX_TRIES = int(os.getenv("WAYBACK_MAX_TRIES", "2"))
 _WAYBACK_BEST_EFFORT = os.getenv("WAYBACK_BEST_EFFORT", "true").lower() in ("1", "true", "yes")
@@ -54,9 +49,8 @@ _USER_AGENT = (
     "waybackpy/3.0.6"
 )
 
-# Real-browser header set for validating/archiving source URLs. Header-gated
-# portals (e.g. Singapore SSO) return 403 to the bot User-Agent above; the
-# document download path uses browser headers, so validation must too.
+# Browser headers for validating/archiving: header-gated portals (e.g. Singapore
+# SSO) 403 the bot User-Agent above, so validation must match the download path.
 _BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -306,11 +300,10 @@ def _safe_slug(url: str) -> str:
 
 def archive_local(url: str, dest_dir: str | None = None) -> str:
     """
-    Download the source document once and save a local snapshot.
+    Re-download the source and save a local snapshot (Wayback fallback).
 
-    Returns the relative path to the saved file, or "" on failure. Used as a
-    fallback when the Wayback Machine is unavailable — a local copy of the exact
-    bytes we extracted from is stronger provenance than a best-effort web snapshot.
+    Returns the saved path, or "" on failure. Used when no in-memory content is
+    supplied (e.g. PDFs) — see archive_content for the JS-rendered HTML path.
     """
     dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
     headers = dict(_BROWSER_HEADERS)
@@ -349,20 +342,19 @@ def archive_local(url: str, dest_dir: str | None = None) -> str:
         return ""
 
 
-def archive_content(url: str, content: str, dest_dir: str | None = None) -> str:
+def archive_content(url: str, data: bytes, ext: str, dest_dir: str | None = None) -> str:
     """
-    Save the exact extracted content the pipeline already has in memory.
+    Save the exact source bytes the pipeline already holds in memory.
 
-    Preferred over `archive_local` for JS-rendered pages: a plain re-fetch there
-    returns the pre-render SSR shell (truncated) or is bot-blocked (empty), so the
-    on-disk snapshot would not match what we actually extracted and verbatim-matched
-    against. Writing `raw_text` guarantees the archive IS the mapped evidence.
+    Preferred over archive_local for JS-rendered pages, where a plain re-fetch
+    returns the SSR shell (truncated) or is bot-blocked (empty). Writes the real
+    file (e.g. the rendered .html) so the archive is a faithful copy. Returns the
+    path, or "".
     """
     dest_dir = dest_dir or _LOCAL_ARCHIVE_DIR
     try:
         Path(dest_dir).mkdir(parents=True, exist_ok=True)
-        path = Path(dest_dir) / f"{_safe_slug(url)}.txt"
-        data = content.encode("utf-8")
+        path = Path(dest_dir) / f"{_safe_slug(url)}{ext or '.bin'}"
         path.write_bytes(data)
         logger.info({
             "event": "local_archive_saved",
@@ -389,14 +381,14 @@ def reset_wayback_latch() -> None:
     _wayback_disabled = False
 
 
-def archive_source(url: str, content: str | None = None) -> str:
+def archive_source(url: str, blob: "tuple[bytes, str] | None" = None) -> str:
     """
     Archive one source URL: Wayback (best-effort) → local snapshot fallback.
 
-    When `content` (the already-extracted `raw_text`) is provided, the local
-    snapshot is written from it rather than re-fetched — this is what fixes
-    truncated/empty archives on JS-rendered portals. `content` is left None for
-    PDFs so the re-fetch preserves the original binary.
+    When `blob` (exact source bytes + extension) is provided, the local snapshot
+    is written from it rather than re-fetched — this fixes truncated/empty
+    archives on JS-rendered portals. It is None for static files (PDF/DOCX), so
+    archive_local re-fetches and preserves the original file.
 
     Returns a Wayback URL when available, else a local snapshot path, else "".
     """
@@ -404,7 +396,7 @@ def archive_source(url: str, content: str | None = None) -> str:
     if _WAYBACK_BEST_EFFORT:
         archive_url = archive_wayback(url)
     if not archive_url and _LOCAL_ARCHIVE_FALLBACK:
-        archive_url = archive_content(url, content) if content else archive_local(url)
+        archive_url = archive_content(url, blob[0], blob[1]) if blob else archive_local(url)
     return archive_url
 
 
@@ -430,7 +422,7 @@ def validate_and_flag(
     *,
     archive: bool = True,
     wayback_rate_limit_s: float = 1.0,
-    document_texts: "dict[str, str] | None" = None,
+    document_blobs: "dict[str, tuple[bytes, str]] | None" = None,
 ) -> list[ValidatedResult]:
     """
     Orchestrator: validates URLs, archives them, flags low confidence.
@@ -439,19 +431,17 @@ def validate_and_flag(
         records: ExtractionResult list from the mapper.
         archive: Set False to skip Wayback archiving (useful in tests/offline runs).
         wayback_rate_limit_s: Seconds to wait between Wayback API calls.
-        document_texts: Optional {source_url: extracted raw_text}. When a URL is
-            present, its local snapshot is written from this content instead of a
+        document_blobs: Optional {source_url: (exact bytes, ext)}. When a URL is
+            present, its local snapshot is written from these bytes instead of a
             re-fetch — closes truncated/empty archives on JS-rendered portals.
 
     Returns:
         list[ValidatedResult] — one per input record, with URL status + archive URL.
     """
-    document_texts = document_texts or {}
-    # NOTE: the Wayback latch (_wayback_disabled) intentionally persists across
-    # the whole process — validate_and_flag is called once PER DOCUMENT, so
-    # resetting here would re-probe the (blocked) endpoint for every act. Tests
-    # reset it via an autouse fixture in conftest; batch_run resets per economy
-    # by calling reset_wayback_latch().
+    document_blobs = document_blobs or {}
+    # The Wayback latch persists process-wide on purpose: this runs once per
+    # document, so resetting here would re-probe the blocked endpoint every act.
+    # batch_run/tests call reset_wayback_latch() between runs.
     results: list[ValidatedResult] = []
     now_iso = datetime.now(tz=timezone.utc).isoformat()
 
@@ -475,7 +465,6 @@ def validate_and_flag(
                 "indicator_id": record.indicator_id,
                 "economy": record.economy,
             })
-            # Append broken-URL note to record.notes
             broken_note = f"BROKEN URL (HTTP {http_code})"
             existing = record.notes or ""
             record.notes = (
@@ -487,17 +476,14 @@ def validate_and_flag(
         # confidence flagging (before archiving so note is in ValidatedResult)
         _flag_confidence(record)
 
-        # archiving — Wayback best-effort → local fallback, cached per unique URL
-        # so we don't re-archive the same act per provision. Normally gated on a
-        # live URL, but if we hold the extracted text in memory we archive it
-        # regardless: that content is proof the page was fetched and mapped, so a
-        # re-fetch-based "soft_404" (common on JS portals whose SSR shell trips the
-        # error-page heuristic) must not block its provenance snapshot.
-        src_content = document_texts.get(src)
+        # Archive once per unique URL. Normally gated on a live URL, but if we
+        # hold the exact bytes we archive regardless — those bytes prove the page
+        # was fetched, so a false soft_404 (JS SSR shell) can't block it.
+        src_blob = document_blobs.get(src)
         arch_url = ""
-        if archive and (url_status in ("ok", "redirected") or src_content):
+        if archive and (url_status in ("ok", "redirected") or src_blob):
             if src not in archive_cache:
-                archive_cache[src] = archive_source(src, content=src_content)
+                archive_cache[src] = archive_source(src, blob=src_blob)
                 _sleep(wayback_rate_limit_s)
             arch_url = archive_cache[src]
 

@@ -341,15 +341,15 @@ def run_pipeline(
             p.step(f"{prefix} Validating output")
             _t = time.monotonic()
             try:
-                # Archive the exact text we extracted for HTML docs — a plain
-                # re-fetch of a JS-rendered portal returns the SSR shell (truncated)
-                # or is bot-blocked (empty). PDFs keep the re-fetch (static binary).
-                doc_texts = (
-                    {translated.source_url: translated.raw_text}
-                    if doc.extraction_method == "beautifulsoup"
+                # Archive the exact fetched bytes for HTML docs — a plain re-fetch
+                # of a JS-rendered portal returns the SSR shell (truncated) or is
+                # bot-blocked (empty). PDFs keep the re-fetch (static binary).
+                doc_blobs = (
+                    {translated.source_url: (doc.archive_bytes, doc.archive_ext)}
+                    if getattr(doc, "archive_bytes", None)
                     else None
                 )
-                validated = validate_and_flag(results, document_texts=doc_texts)
+                validated = validate_and_flag(results, document_blobs=doc_blobs)
                 p.done(f"{prefix} Validation — {len(validated)} records")
             except Exception as exc:
                 p.warn(f"{prefix} Validation failed — {exc}")

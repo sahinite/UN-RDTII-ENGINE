@@ -195,6 +195,9 @@ def extract_html(raw_bytes: bytes, zone1_result: "Zone1Result", content_type: st
         section_hierarchy=section_hierarchy,
         location_reference_map=location_reference_map,
         cost_log_entry=cost_log,
+        # Preserve the exact (possibly JS-rendered) HTML for a faithful archive.
+        archive_bytes=raw_bytes,
+        archive_ext=".html",
     )
     doc.validate()
 
