@@ -1,5 +1,5 @@
 """
-Provision-level discovery tag resolution. [86ey13cyh Decision 2]
+Provision-level discovery tag resolution.
 
 resolve_provision_tag() — pure function for KNOWN/NEW at provision level.
 infer_article_anchor()  — heuristic: article string → URL anchor fragment.
