@@ -70,16 +70,16 @@ Two zones wired together in `main.py`:
 - `src/mapping/parser.py` — LLM response parser with verbatim assertion + provision tag resolution
 - `src/mapping/prompts.py` — system/user prompt builder with Rules 1–9
 - `src/output/writer.py` — CSV (13-col UTF-8-BOM) + JSON (document-level + `provisions[]` envelope)
-- `src/output/validator.py` — URL validation + Wayback/local archiving (deduped per URL)
+- `src/output/validator.py` — URL validation + archiving (Wayback → local snapshot, deduped per URL). JS-rendered HTML is archived from the exact in-memory bytes (`archive_bytes`/`archive_ext`) so a plain re-fetch of a SPA shell can't truncate/empty it; static PDFs are re-fetched. Shared `_write_snapshot` writer
 - `src/output/cost_logger.py` — per-component cost accumulation → `logs/cost_report.json`
 - `src/cli/progress.py` — single-line ANSI spinner with substep reporting
 
 ### Economy Configs
-`economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `api_base`, `api_collection`, `pdf_path_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference; Australia (`australia.yaml`) is the API-driven reference. 10 economy files exist (SG, AU, MY, TH, VN, PH, KH, MM, LA, BN) — SG/AU/MY/TH have configured portals; the other six are scaffolds.
+`economies/*.yaml` files declare per-economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals` list (unlimited), and optional `llm_override`, `translation_provider`, `ocr_engine_override`, `be_year_conversion`. Each `Portal` has strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `api_base`, `api_collection`, `pdf_path_suffix`, `transport_fallback`. Singapore (`singapore.yaml`) is the reference; Australia (`australia.yaml`) is the API-driven reference. 3 economy files exist (SG, AU, MY), all with configured portals.
 
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
-2. `openai` / `gpt-4o`
+2. `openai` / `gpt-4o` (gpt-5 / o-series also supported — the provider auto-switches to `max_completion_tokens` + `reasoning_effort` for those)
 3. `gemini` / `gemini-2.5-flash` (`GEMINI_API_KEY` or `GOOGLE_API_KEY`; OpenAI-compatible)
 4. `deepseek` / `deepseek-chat` V3 (`DEEPSEEK_API_KEY`; OpenAI-compatible)
 5. `groq` / `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`; free tier)

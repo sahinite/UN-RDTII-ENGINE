@@ -1,7 +1,7 @@
 # CONTEXT.md
 
 Domain glossary, architectural decisions, and implementation state for the RDTII Extraction Engine.
-Updated as stories are completed — future agents should read this before touching any module.
+Read before touching any module; update as work lands (remove deprecated details).
 
 ---
 
@@ -9,459 +9,137 @@ Updated as stories are completed — future agents should read this before touch
 
 | Term | Definition |
 |------|-----------|
-| **Economy** | A single Asia-Pacific jurisdiction (e.g. Singapore, Thailand). Described by one YAML file in `economies/`. |
-| **EconomyConfig** | Pydantic model — single source of truth for an economy: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals`, and optional overrides. `extra='forbid'` on all config models. |
-| **Portal** | A government web portal in an economy's YAML. Each portal declares strategy fields: `anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`. |
-| **script_type** | `"latin"` or `"asian"`. Determines default OCR engine via computed `@property` (`latin → tesseract`, `asian → paddleocr`). |
-| **ocr_engine_override** | Optional YAML field to force a specific OCR engine. Overrides the derived default. |
-| **be_year_conversion** | Boolean flag for Buddhist Era → Gregorian year conversion (Thailand, Cambodia). |
-| **KNOWN** | Discovery tag for an act/provision found in Round 1 ground-truth database. |
-| **NEW** | Discovery tag for an act independently discovered by the engine (worth 20/40 accuracy points). |
-| **Zone 1** | Evidence Discovery: `discover()` in `src/crawler/discover.py` — strategy-driven per-portal discovery. |
-| **Zone 2** | Intelligent Mapping: fetch/route → OCR → translate → chunk → embed → RAG → map → validate → write. |
-| **Pillar** | One of the RDTII regulatory dimensions (e.g. P6 Cross-border Data, P7 Domestic Data Protection). |
-| **PDPA** | Singapore Personal Data Protection Act — primary target for Phase 1 gate (Pillar 7). |
-| **8-tier LLM cascade** | Anthropic → OpenAI → Gemini → DeepSeek → Groq → Qwen → Ollama (qwen2.5:7b) → Ollama (granite3-8b). Pinned per run via `LLM_PROVIDER`. Llama 3.3 excluded (non-Apache 2.0). |
-| **CER** | Character Error Rate — OCR quality metric. Stage-2 OCR triggers at CER ≥ 5%. |
-| **RAG pipeline** | Hybrid BM25 + dense retrieval with cross-encoder reranking; top-5 chunks per indicator, each with `location_reference`. |
-| **location_reference** | `(act_name, part, article_number)` tuple for verifiable citations. |
-| **SeedData** | `known_urls`, `known_titles`, `known_provisions` (anchored URLs), `known_sections` (act title → prose section tokens) — loaded from Round 1 DB xlsx + Sample CSV. Compound titles split on `;`/newline. |
+| **Economy** | One Asia-Pacific jurisdiction, described by a YAML file in `economies/`. |
+| **EconomyConfig** | Pydantic single source of truth: `economy_name`, `iso_code`, `un_name`, `script_type`, `languages`, `portals`, overrides. `extra='forbid'`. |
+| **Portal** | A government portal in an economy YAML; declares strategy fields (`anti_bot`, `discovery`, `fetch`, `index_urls`, `pdf_view_suffix`, `transport_fallback`, …). |
+| **script_type** | `latin`→tesseract / `asian`→paddleocr (derived `@property`; `ocr_engine_override` forces one). |
+| **be_year_conversion** | Buddhist-Era→Gregorian flag (Thailand/Cambodia). |
+| **KNOWN / NEW** | Discovery tags: KNOWN = act/provision in the Round 1 DB; NEW = engine-discovered (top scoring differentiator). |
+| **Zone 1 / Zone 2** | Evidence discovery (`discover()`) / intelligent mapping (fetch→OCR→translate→chunk→embed→RAG→map→validate→write). |
+| **Pillar** | An RDTII dimension: P6 Cross-border Data, P7 Domestic Data Protection. |
+| **PDPA** | Singapore Personal Data Protection Act — Phase-1 build gate (P7). |
+| **8-tier LLM cascade** | Anthropic → OpenAI → Gemini → DeepSeek → Groq → Qwen → Ollama(qwen2.5) → Ollama(granite3). Pinned per run via `LLM_PROVIDER`; Llama 3.3 excluded (license). |
+| **CER** | OCR Character Error Rate; Stage-2 OCR triggers at CER ≥ 5%. |
+| **RAG** | Hybrid BM25 + dense + cross-encoder rerank; top-5 chunks/indicator, each with `location_reference`. |
+| **SeedData** | `known_urls/titles/provisions/sections` + `known_sections_by_indicator`, from Round 1 DB xlsx + Sample CSV. |
 
 ---
 
-## Architectural Decisions
+## Architectural Decisions (condensed)
 
-### ADR-062 — Run profiles bundle the NEW-act discovery cap
-`RUN_PROFILE` (`gate`/`submit`/`explore`) sets `discover._MAX_NEW_ACTS` (0/3/8); an explicit
-`ZONE2_MAX_NEW_ACTS` still overrides, and an unknown profile → 0 (fail-safe). Default `gate`
-preserves the KNOWN-only build gate, but that forfeits NEW acts (the top scoring differentiator),
-so `submit` (=3) is the intended submission setting and `main.py` prints the active profile at
-startup so a run can't be *accidentally* submitted under the safe gate settings.
+Each line is the decision + why. Numbers are stable references.
 
-### ADR-061 — Argos is the offline-primary translator, run in a persistent subprocess pool
-Translation cascade is **Argos (offline neural MT, free) → DeepL → Google**. Argos's
-`ctranslate2`/`onnxruntime` native runtime **segfaults when co-resident with the RAG torch/faiss
-stack**, so it runs in subprocess workers (`src/fetcher/argos_worker.py --serve`), never imported
-into the main process. A **single** persistent worker keeps the model loaded (no ~3.5s per-call
-reload) — multiple workers oversubscribe the CPU and thrash (measured slower), so parallelism is
-*not* used. Each pool read is bounded by `ARGOS_TIMEOUT` (a hung worker returns None → fallback,
-never freezes); dead workers respawn between batches. Malay uses MiniSBD sentence-splitting
-(stanza has no `ms` model). Models auto-install at startup (`ensure_argos_langs`), like the
-Tesseract `msa` pack (`ensure_tesseract_langs`).
+**Config & economy onboarding**
+- **ADR-001** `ocr_engine` derived from `script_type` (`_SCRIPT_TO_OCR`), not configured; `ocr_engine_override` wins.
+- **ADR-002** Validation pure (`model_validate`); `load_economy()` is thin I/O with fuzzy name match.
+- **ADR-003** `extra='forbid'` on all config models — unknown YAML keys raise immediately.
+- **ADR-004** Economy YAML filename = full lowercase name (`load_economy("Singapore")`→`singapore.yaml`).
+- **ADR-047** Config is a strict typed menu; new adapters extend the `discovery`/`fetch` `Literal`s (no free-form params).
+- **ADR-041** Unified portal strategy = stable interface + fixed adapter set; onboarding a new economy is config-only. New code only for a genuinely new portal *category*.
 
-### ADR-060 — Per-economy retrieval: English model for EN economies, multilingual + translate-less for non-EN
-English-only economies (SG, AU) use `all-MiniLM-L6-v2` + the English cross-encoder — swapping to a
-global multilingual embedder **regressed SG P7 (18→10 records, KNOWN 3→1)**, so the build gate keeps
-the English model. Non-English economies (MY) use `paraphrase-multilingual-MiniLM-L12-v2` +
-`mmarco-mMiniLMv2` reranker so RAG retrieves over the **original-language** text; only those
-economies skip full-document translation (`translate_document(..., translate_body=False)`) and the
-LLM reads the retrieved source-language passages directly (verbatim stays source-language per
-ADR-017). **Malaysia P7: ~50 min → ~7 min** (translation drops to ~1% of runtime — we no longer
-translate ~1.5M chars to use ~10 retrieved passages). Selected in `main.py` from
-`economy_config.languages`; both models **default to the English one** (`set_multilingual(False)`)
-so tests and other callers are build-gate-safe.
+**Zone 1 — discovery**
+- **ADR-037** Zone 1 is a single strategy-driven `discover()` (replaced probe→crawl→currency→rank; legacy modules importable but unused).
+- **ADR-042** Adapters (`index`/`api`/`sitemap`/`auto`/`seed_only`) only emit raw `(title,url)`; BM25 rank + taxonomy exclude + KNOWN/NEW tag + cap are a shared tail so adapters can't drift.
+- **ADR-046** `auto` is a best-effort safety net (SPA/SSR probe → Playwright → best-effort links), not a universal crawler; `Portal.discovery` default = `auto`, explicit `TBD` skips.
+- **ADR-051** `discovery: sitemap` for JS-SPA portals with no crawlable index (fetch `sitemap.xml`, slug→title).
+- **ADR-038** Transport ladder stops at first real 200; rung 1 skipped for `anti_bot!=none`, rung 3 (Playwright) only when `transport_fallback==playwright_stealth`.
+- **ADR-039** KNOWN seeds never truncated by `ZONE2_MAX_ACTS`; NEW fills remaining slots.
+- **ADR-056** Canonical act-identity key (legislation.gov.au keyed by registration id) so URL variants of one act don't each burn a discovery slot.
+- **ADR-062 (run profile)** `RUN_PROFILE` gate/submit/explore sets NEW-act cap 0/3/8; `submit`(=3) is the intended submission setting; profile printed at startup.
 
-### ADR-001 — `ocr_engine` is derived, not configured
-Computed `@property` on `EconomyConfig` from `script_type`. `_SCRIPT_TO_OCR` dict is single source of truth. Overrides use `ocr_engine_override`.
+**Zone 2 — fetch / extract / OCR**
+- **ADR-043** Fetch adapters resolve a document URL only; the `router.py` extractor stays universal.
+- **ADR-044** Extractor branch set closed at five {text-PDF, scanned→OCR, static-HTML, JS-HTML, docx}.
+- **ADR-045** One shared SPA-vs-SSR probe feeds both `auto` discovery and the static-vs-JS fetch branch.
+- **ADR-040** `pdf_endpoint` rewrites the URL (matched by registered domain) before `download()`.
+- **ADR-065/066** Singapore SSO: browser escalation for the anti-bot 202 gate + `html_wholedoc` (`?WholeDoc=1`) render for the operative text; complete Playwright `networkidle` render, chunker boundary fix for `26.—(1)` headings, and longest-body section selection so the operative provision (not the TOC stub) is retrieved.
+- **ADR-058** FRL `api_versioned_pdf` resolver walks compilations newest-first until a real `%PDF` exists (recovered AU acts that 404'd on the latest compilation).
+- **ADR-050** `fetch: html_js` renders every HTML page via Playwright unconditionally (for SPA shells that fool `classify_render`, e.g. pdpc.gov.sg).
+- **ADR-052** Zone-2 SPA render uses an isolated per-call crawler (`fetch_isolated`), not the shared singleton (loop-binding hang fix).
+- **ADR-024** Stage-2 OCR (Azure DI → Mistral) is credentials-gated; missing keys silently skip.
+- **ADR-014** `FetchedDocument` is the single Zone-2 contract; validation enforced at each extractor's end.
 
-### ADR-002 — I/O separated from validation at `load_economy` seam
-`EconomyConfig.model_validate(data)` is pure. `load_economy(name)` is thin I/O shell with fuzzy name matching (`difflib.get_close_matches`).
+**Translation & retrieval**
+- **ADR-061** Argos is offline-primary translator (Argos→DeepL→Google), run in a **single persistent subprocess** (native runtime segfaults co-resident with torch/faiss; multiple workers thrash).
+- **ADR-060** Per-economy retrieval: EN economies (SG/AU) use `all-MiniLM-L6-v2` + English reranker; non-EN (MY) use multilingual models and skip full-doc translation (RAG over original text). Both default to the English model. (MY P7 ~50→~7 min.)
+- **ADR-017** `verbatim_original` is always source-language `raw_text` (unmodified; BE conversion only affects text sent to translation).
+- **ADR-054** Seed-guided retrieval is *gentle* — injects the Round 1 section chunk only if entirely absent (reordering present chunks dropped records). Residual "drift" is an LLM-extraction limit, not retrieval.
 
-### ADR-003 — `extra='forbid'` on all config models
-Unknown YAML keys raise `InvalidEconomyConfigError` immediately.
+**Mapping, tagging & output**
+- **ADR-021** LLM cascade lives in `src/mapping/llm_client.py`.
+- **ADR-032** `extract_provisions` catches only `AllProvidersExhaustedError` (rate-limit is an internal cascade signal).
+- **ADR-034** `ALLOW_UNVERIFIED_SNIPPETS` default false → verbatim assertion failure = hard discard.
+- **ADR-049/063/064** KNOWN = act+provision identity, independent of portal/URL: match on anchor URL **or** `(act title, section)` against `known_sections`; `match_known_act` fuzzy-resolves titles (exact / acronym / distinctive-token) with over-match guards. Runs for every provision (no NEW short-circuit).
+- **ADR-068** Seed fixes: match on `(Act NNN)` designation; split multi-act cells only on `;`/blank lines; consistent engine-id indicator keys.
+- **ADR-035** Provision tag uses a URL-anchor heuristic (`Section 26`→`#pr26-`); unresolvable → doc-level fallback + `flag_for_review`.
+- **ADR-062 (citation/source)** `location_reference` is derived deterministically (`Art. {token} | Page {n}` from the chunk containing the snippet), never LLM-emitted; `secondary`-type portals flag every provision for primary-source verification.
+- **ADR-055** KNOWN cross-indicator prune uses `known_sections_by_indicator` as ground truth (keeps only Round 1's indicator(s), never drops a sole copy); out-of-set KNOWN rows logged as confirmed mis-maps.
+- **ADR-053** Cross-document provision dedup at output on `(law_name, indicator, article, snippet[:80])`, keeping the higher-quality copy.
+- **ADR-036** `evaluate.py` NEW score is provision-level: `min(count*4, 20)`.
+- **ADR-026** CSV is UTF-8-BOM (post-write BOM check). **ADR-029** Output filename includes timestamp.
+- **ADR-067** Ollama local models: send `think:false` for thinking models and size `num_ctx` (default 8192) to fit the prompt, else silent empty output.
 
-### ADR-004 — Economy YAML filenames use full lowercase name
-`load_economy("Singapore")` → `economies/singapore.yaml`. Case-insensitive, `.strip().title()` normalised.
+**Archiving (this session)**
+- Exact-file archiving: JS-rendered HTML is snapshotted from the in-memory `archive_bytes`/`archive_ext` (a plain re-fetch returns the truncated SSR shell or a false soft_404); static PDFs re-fetched. `validate_and_flag(document_blobs=…)` threads the bytes; `archive_content`/`archive_local` share `_write_snapshot`; the Wayback rate-limit sleep only fires when a live Wayback call was made.
 
-### ADR-005 — Economies never run in parallel *within one process*; `batch_run.py` auto-parallelises across isolated subprocesses
-The embedder/reranker/Argos state is process-global (per-economy singletons, ADR-060/061), so two
-economies must never share a process. `batch_run.py` therefore **defaults to one concurrent lane per
-economy**, each an isolated `python main.py` **subprocess** (its pillars run sequentially within the
-lane) — separate processes have separate model state, so cross-economy parallelism is safe. A single
-economy (or `--max-parallel 1`) runs in-process, sequentially. `--max-parallel N` caps the concurrent
-lanes (for many economies / LLM rate limits). Each subprocess isolates its logs/cost via
-`RDTII_LOG_DIR=logs/<economy>_P<pillar>` (the rotating log handler is not multiprocess-safe); CSV/JSON
-output is already per-economy-pillar-timestamped. Verified: SG P6+P7 in parallel completed in
-`max(104s, 482s)`, not the sum.
-
-### ADR-009 — taxonomy.json at project root
-All indicators with `probe_keywords`, `exclude_act_titles`, `exclude_keywords`, `in_scope`, `out_of_scope`, `negative_examples`, `rdtii_ref`, `category`, `scoring`. Validated at startup.
-
-### ADR-014 — `FetchedDocument` is the single Zone 2 contract
-All extractors return `FetchedDocument`. Validation enforced at end of every extractor.
-
-### ADR-017 — `verbatim_original` always source-language `raw_text`
-Unmodified even after BE year conversion. BE conversion applied only to text sent to translation provider.
-
-### ADR-021 — Mapping/LLM code lives in `src/mapping/`
-The LLM cascade is `src/mapping/llm_client.py`. (The old `src/llm/` re-export shim was
-removed once nothing imported it.)
-
-### ADR-024 — Stage 2 OCR providers are credentials-gated
-`AZURE_DI_KEY` / `MISTRAL_API_KEY` env vars. Missing → silently skipped.
-
-### ADR-026 — CSV uses UTF-8-BOM
-Excel-compatible. Post-write verification checks BOM bytes.
-
-### ADR-029 — Output filename includes timestamp
-`{Economy}_P{pillar}_{YYYY-MM-DDTHHMMSS}.csv/.json` — uniqueness across runs.
-
-### ADR-032 — `extract_provisions` only catches `AllProvidersExhaustedError`
-`ProviderRateLimitError` is internal cascade signal. Mapper sees boundary contract only.
-
-### ADR-034 — `ALLOW_UNVERIFIED_SNIPPETS` env var
-Default `false`. Verbatim assertion failure → hard discard. Set `true` only for scanned-PDF OCR edge cases.
-
-### ADR-035 — Provision-level discovery tag uses URL anchor heuristic
-`infer_article_anchor("Section 26")` → `"#pr26-"` (SSO scheme). Unresolvable → doc-level fallback + `flag_for_review`.
-
-### ADR-036 — evaluate.py NEW score is provision-level
-Rows with `discovery_tag=="NEW"` whose `(law_name, article)` not in kit. Score: `min(count * 4, 20)`.
-
-### ADR-037 — Zone 1 is a single `discover()` step
-Replaces old probe→crawl→currency→rank pipeline. Strategy-driven (YAML), budget-bounded, pillar-scoped. Legacy steps remain importable but unused by `main.py`.
-
-### ADR-038 — Transport ladder stops at first real 200
-Rung 1 (plain httpx) skipped for `anti_bot != "none"`. Rung 3 (Playwright) only when `transport_fallback == "playwright_stealth"`.
-
-### ADR-039 — KNOWN seeds never truncated by `ZONE2_MAX_ACTS`
-KNOWN always kept. NEW fills remaining slots up to cap.
-
-### ADR-040 — `pdf_endpoint` rewrites URL before download
-`_find_portal_for_url()` matches by registered domain. Rewrites in `route()` before `download()`.
-
-### ADR-041 — Unified portal strategy = stable interface + fixed adapter set
-Onboarding a new economy is config-only against already-implemented adapters; a "single literal strategy for all 11" is rejected as infeasible (SG=HTML, AU=JSON API, TH/KH/LA/MM=scanned OCR). New code only for a genuinely-new portal *category*. Spec: `docs/prd/unified-portal-strategy.md`. *(status: steps 1–7 complete — SG golden baseline, `.docx` branch, SPA/SSR probe, shared rank/tag tail, AU `api`+`api_versioned_pdf` live, `auto` best-effort adapter + `discovery` default→`auto`, AU validated end-to-end. Open: mapping-stage quality items from the AU run, tracked separately.)*
-
-### ADR-042 — Discovery adapter emits raw `(title, url)` only; rank/tag is shared
-`index`/`api`/`auto`/`seed_only` each only *list candidates*. BM25 rank, taxonomy exclude, KNOWN/NEW tag, indicator-aware cap are lifted out of `_discover_index` into the shared `discover()` tail so adapters cannot drift. NEW discovery is always-on; seeds are the KNOWN-tag reference + floor, not the discovery source.
-
-### ADR-043 — Fetch adapter resolves a document URL; extraction stays universal
-`pdf_endpoint`/`api_versioned_pdf`/`html*`/`pdf_link`/`auto` only produce `(title,url,portal) → document_url(s)`. The `router.py` extractor (sniff → PDF/OCR/HTML + segment + translate) is untouched. "Text only inside rendered HTML" is the existing `extract_html` branch, not a new seam.
-
-### ADR-044 — Extractor branch set closed at five; `.docx` added now
-{text-PDF, scanned-PDF→OCR, static-HTML, JS-HTML, `.docx`/`.doc`}. `.docx` built proactively (AU offers Word) as an additive `detect_type` case — cannot regress the existing four.
-
-### ADR-045 — One shared SPA-vs-SSR probe feeds discovery and fetch
-The only bit `detect_type` can't sniff is static-HTML vs JS-SPA (both return `200 text/html` — the AU `/latest/` trap). A single probe utility resolves it for both the `auto` crawler and the static-vs-JS fetch branch. Built once, shared.
-
-### ADR-046 — `auto` is a best-effort safety net, not a reliable universal crawler
-No declared strategy → `auto` probes SPA/SSR (shared spa_probe), renders SPAs with Playwright, and best-effort extracts candidate links, labelling the run "declare a strategy for production quality." Production quality comes from a ~30-min declared strategy (as for AU), not from perfecting a universal crawler. No scaffold/suggestion CLI is built. The `Portal.discovery` **default is `auto`** so an undeclared portal auto-crawls; explicit `TBD` deliberately skips. `fetch:auto` renders SPA document shells before extraction.
-
-### ADR-047 — Config stays a strict typed menu; new adapters extend the Literals
-New adapter names are one-word additions to the `discovery`/`fetch` `Literal`s; `extra="forbid"` (ADR-003) stays. No free-form params box — the strict menu catches typos and protects validated economies from silent breakage.
-
-### ADR-048 — Validated economies protected by golden-output snapshots
-"Don't change architecture" = freeze the pattern + freeze validated-economy output, not "move no code." Before editing any shared hot path, capture a golden snapshot of each validated economy (SG first); the refactor's acceptance test is "snapshots byte-identical" — automatic re-validation instead of manual re-testing.
-
-### ADR-058 — FRL versioned-PDF resolver walks compilations until a PDF exists
-`api_versioned_pdf` built one dated URL from the LATEST compilation date and 404'd whenever
-FRL hadn't generated that compilation's `text/original/pdf` yet (Telecom I&A C2004A02124,
-C2004A05145 — the newest ~4 compilations 404, older ones serve a real PDF). `_resolve_versioned_pdf_url`
-now walks `_inforce_version_dates` (registered compilations, newest first) and returns the
-first date whose URL passes `_url_serves_pdf` (streams the first chunk, checks `%PDF` magic —
-never downloads a full multi-MB file to probe). Recovered Telecom I&A (→2025-04-04), ASIO,
-DATA into AU P7 (act_missing 17→13); acts with no PDF at any compilation (C2004A05145)
-correctly return None. The recovered acts' Round 1 sections then surface as `provision_missing`
-in the recall audit — i.e. fetch is fixed, the remaining gap is LLM extraction (issue A).
-
-### ADR-059 — Diagnostics: per-economy-pillar mis-map + KNOWN-recall audit
-Both root-cause logs now write to `logs/diagnostics/{ISO}_P{pillar}_{mismaps,recall}.json`
-(per-run, no clobber). `main._audit_known_recall` is the under-recall counterpart to the
-over-fire mis-map log: for every Round 1 (act, section, indicator) it records found vs missing,
-classifying misses as `act_missing` (fetch/discovery) or `provision_missing` (act present but
-section not extracted → LLM-reject/retrieval-miss). Evidence across SG+AU × P6+P7 (2026-07-04):
-over-fire=2 (rare, auto-pruned), real under-recall≈2–3, but `act_missing`=25 dominates — so the
-biggest recall lever was fetch (ADR-058), not the LLM. Parks issue A with data.
-
-### ADR-068 — Seed fixes: act-number identity, multi-act split, consistent indicator keys
-Three seed/matching defects surfaced by the SG+AU+MY P6 validation run. (A) **Act-number identity**:
-an LLM often labels a statute by its number alone ("Act 709"), which `match_known_act` couldn't match
-(`act`=stopword, `709`=digit → no tokens) so Malaysia's real cross-border section (PDPA s.129) was
-tagged NEW instead of KNOWN. Added a tier that matches on the shared `(Act NNN)` designation — a
-unique, language-independent statutory key. (B) **Multi-act cell splitting**: Round 1 "act and/or
-practice" cells pack several acts separated by `;`/blank lines, but `split_act_titles` used to split on
-EVERY newline — shredding a wrapped title ("Personal Data Protection⏎(Amendment) Bill (Act A1727)")
-into phantom fragments ("personal data protection", "(amendment) bill (act a1727)") that could never
-match and inflated the recall-audit "missing" count. Now splits only on `;` or blank lines and
-collapses single-newline wraps to spaces (applied to both the DB and Sample-CSV loaders). (C)
-**Indicator-key consistency**: `known_titles_by_indicator` was keyed by raw refs ("6.2") while
-`known_sections_by_indicator` used engine ids ("P6-I2"); both now use engine ids, and
-`_emit_null_assessments` reads them directly (dropped the rdtii_ref→id bridge). Economy-agnostic.
-
-### ADR-067 — Ollama local models: disable thinking + size the context window
-Validating ADR-066 with a local model surfaced two Ollama-specific defects that silently returned
-zero extractions (every provision → `N/A` null-assessment). (A) **Thinking mode**: Qwen3-family and
-r1/qwq models emit chain-of-thought that newer Ollama routes to a SEPARATE `thinking` field, leaving
-`response` empty when thinking fills the budget → parser sees "" → parse_error. Fix: send
-`think: false` for detected thinking models (`_REASONING_MODEL_HINTS` now includes `qwen3`); the JSON
-answer lands in `response`, and it's ~15× faster (3s vs 47s+). Replaces the obsolete num_predict
-headroom (thinking no longer counts against the answer budget). (B) **Context window**: Ollama defaults
-`num_ctx` to 4096 and silently truncates longer prompts; the extraction prompt (~4.5k tokens, up to
-MAX_PROMPT_TOKENS≈6000) overflowed it, so the model stopped after ~1 token (`done_reason: length`,
-response `{`). Fix: set `num_ctx` (default 8192, `OLLAMA_NUM_CTX`) to fit prompt + answer — a cloud
-model's 128k ctx hides this, local models must be told. With both, `qwen3.5:9b` extracts PDPA s.26 →
-P6-I4 and Companies Act s.199 → P6-I2 as KNOWN. **End-to-end validation (SG P6, submit profile):
-recall 0→2 found — the two Round 1 sectioned KNOWN provisions now match; remaining misses are s.4
-(definitions, LLM-declined) and the PDP(A) act (redundant with the consolidated PDPA 2012 that was
-found), both expected.**
-
-### ADR-066 — SSO whole-doc: complete render + chunk the operative section, not the TOC
-Follow-on to ADR-065. SSO fetched but P6 KNOWN recall stayed 0 because the operative provisions never
-reached the LLM — three compounding defects between render and retrieval, all now fixed. (A) **Render
-completeness**: `fetch_isolated` (crawl4ai) renders with `wait_for=None`, returning before SSO's
-lazy-loaded provisions paint → a partial page (arrangement-of-provisions TOC only, ~27K chars, no
-operative bodies). New `_render_wholedoc()` drives Playwright directly with `wait_until="networkidle"`
-+ a short settle, reliably yielding the full act (~190K chars incl. s.26 body); the `html_wholedoc`
-path uses it first, falling back to crawl4ai. (B) **Chunker boundary**: SSO's whole-doc prints the
-operative section number alone on a line — `26.⏎—(1)…` — which `_ARTICLE_BOUNDARY` missed (its period
-style required a following capital letter), so s.26's body folded into s.25 while the TOC line `26
-Transfer…` (space style) became the labelled "26" chunk. Extended the period alternative's char class
-to `[A-Z(—–-]` so a subsection-led section starts a boundary. (C) **Section selection**:
-`_find_section_chunk` returned the FIRST `article_number` match — the short TOC stub — before the
-body-scoring fallback could find the operative provision. Now: among chunks labelled the section number
-it returns the LONGEST-body one (operative beats stub); only when none is labelled does it fall to the
-`N.`-heading body-scoring. Verified: the operative s.26 chunk (`must not transfer…`) is now the #1
-retrieved chunk for P6-I4. All generic — driven by text structure, no economy specifics. (NOTE: live
-end-to-end LLM validation was blocked by an exhausted OpenAI quota (429) with no valid fallback key —
-an environment issue that itself surfaces the single-provider limitation, not a code defect.)
-
-### ADR-065 — SSO fetch: browser escalation + html_wholedoc for the operative text
-Singapore SSO's `?ViewType=Pdf` endpoint now answers plain httpx with an empty HTTP 202 (async PDF
-generation behind anti-bot), so PDPA/Companies Act never fetched → 0 P6 KNOWN recall. Three generic,
-config-driven changes: (A) **browser escalation** — `download()` uses no transport ladder, so when a
-portal declares `transport_fallback: playwright_stealth` and httpx hits the gate (202/empty/UNKNOWN),
-`route()` retries the fetch through a real Playwright session (`_fetch_via_browser`: prime the gate by
-visiting the act URL, then fetch through the browser context). (B) **`html_wholedoc` fetch strategy** —
-the plain act page paginates (only early sections + the arrangement-of-sections TOC render), so the
-operative text was missing even when fetched; SSO's `?WholeDoc=1` view renders the full act with
-per-section `#pr<n>-` anchors. New strategy appends the suffix (declared in `pdf_view_suffix`) and
-force-JS-renders before HTML extraction. Singapore config switched `pdf_endpoint`/`?ViewType=Pdf` →
-`html_wholedoc`/`?WholeDoc=1`. (C) **render retry + backoff** — the JS render is flaky under anti-bot
-(a session is occasionally served an empty page); retry `_RENDER_RETRIES=3` with `_RENDER_BACKOFF_S`
-so the rate-limit window clears. Result: PDPA s.26 → P6-I4 now fetched, extracted, tagged KNOWN
-(recall 0→1). Remaining P6 misses are not fetch: PDP(A) Act s.26 is redundant (consolidated PDPA 2012
-already incorporates it) and Companies Act s.199/s.4 is a weak Round 1 mapping (accounting-records
-retention, not data localization) the LLM reasonably declines. The extracted `law_name` can carry a
-`" - Singapore Statutes Online"` `<title>` suffix, absorbed by the ADR-064 fuzzy matcher. All fetch
-code stays economy-agnostic; only the YAML strategy/suffix is SSO-specific.
-
-### ADR-064 — Fuzzy act-title identity match (KNOWN tag + seed-guided retrieval)
-ADR-063 made KNOWN an identity judgement, but identity hinged on `normalise_title` EXACT string
-equality (year-strip + lowercase only) — so an LLM/cover-page title differing in form from Round 1
-(`PDPA`, `Personal Data Protection Act, 2012`, `Data Protection Act 2012`) fell through to NEW even
-though the act is known. New `match_known_act(law_name, known_keys)` in `seed_loader.py` resolves a
-title to a Round 1 key tolerant of: (1) exact normalised equality (fast path); (2) acronym — the
-compacted law_name equals a known title's initials, with/without trailing "Act" (`PDPA`, `MHR`);
-(3) distinctive-token containment/overlap — identity tokens (generic legal stopwords, years, bare
-numbers removed) subset either way with ≥2 shared tokens, or Jaccard ≥ 0.6. Guards against
-over-match: a lone generic token (`Health Act` vs `My Health Records Act`) and a guidance-page
-heading (`DATA-PROTECTION-OBLIGATIONS` vs PDPA, Jaccard 0.5) both correctly stay NEW — the latter
-still caught by the ADR-062 secondary-source flag. Wired into `resolve_provision_tag` (the KNOWN/NEW
-tag) and `rag._retrieve_batch` seed-guided injection (recall). Also applied to the two downstream
-consumers that were still exact-matching, to keep them consistent with the tagger: `main
-._prune_known_cross_indicator` (so a fuzzy-titled KNOWN row groups with its Round 1 entry and its
-wrong-indicator duplicates are cleaned up instead of bypassing the prune) and `main
-._audit_known_recall` (so a KNOWN provision emitted as "PDPA" is counted as *found* against the
-Round 1 "personal data protection act" entry, not mis-logged `provision_missing`). The prune's
-safety guard is unchanged — a provision is dropped only when a correct-indicator copy survives, so
-no DB-known provision is ever lost. Fully economy-agnostic — driven only by the title strings.
-
-### ADR-063 — KNOWN is act+provision identity, independent of portal/URL
-Rule clarified: if an act/provision exists in the Round 1 database it is KNOWN regardless of
-which portal or URL the run fetched it from (one KNOWN act may carry several Round 1 reference
-URLs, and the engine may reach it via a different URL entirely). `resolve_provision_tag` used to
-short-circuit `if doc_discovery_tag == "NEW": return "NEW"` — force-tagging every provision NEW
-whenever the *document* was discovered from a non-seed URL, even when that exact (act, section)
-was in Round 1. Removed the short-circuit: the identity checks (anchor-URL match + the
-URL-independent act+section match against `known_sections`) now run for EVERY provision, and
-`doc_discovery_tag` is only a fallback when the provision is untestable (no anchor and no section
-token). A NEW-discovered document whose (act, section) matches Round 1 is now correctly KNOWN.
-Note: `known_sections` remains pillar-scoped (seed_loader filters by the run's pillar) — that is
-the run's comparison scope, not a URL constraint. See [[known-provision-matching-gap]].
-
-### ADR-062 — `location_reference` is derived, never LLM-emitted; source-authority flag
-Two source-mismatch fixes on P6 outputs. (A) The prompt's schema example carried a literal
-`location_reference` placeholder (`"Page 34 | https://url#anchor"`); the LLM echoed it verbatim,
-leaking `https://url#anchor` and a hallucinated `Page 34` into every row, and the parser then
-appended it to unreliable `top_chunks[0]` metadata — so the SAME provision cited a different
-page/section per indicator call (My Health s.77 → `Art.77|Page34` for I1 but `Art.109|Page4`
-for I2). Fix: dropped `location_reference` from the LLM schema; the parser now builds it
-deterministically as `Art. {infer_section_token(article)} | Page {n}`, where the section token
-comes from the LLM `article` field and the page comes from `_find_matching_chunk()` — the chunk
-that actually *contains* the verbatim snippet, not the top-ranked one — making citations
-identical across indicators. No anchor URL is emitted (anchor schemes like SSO `#pr8-` are
-portal-specific; the URL already lives in `source_url`). Non-consecutive split rows re-cite each
-row's own section. Supersedes the ADR-057 chunk-`Art. N` guard (article now sourced from the LLM
-field, so year/page-leak can't reach it). (B) Wrong-source: SG P6 extracted from the PDPC
-guidance page (`type: secondary`), citing its numbered obligation list ("8. Transfer Limitation
-Obligation") as a spurious "Article 8". `route()`'s matched `Portal.type` now flows via
-`extract_provisions(portal_type=…)` → `doc_metadata` → parser, which flags every provision from a
-`secondary` portal (`non_primary_source — verify against primary legislation`). Fully declarative
-from YAML `type:`, no per-economy code.
-
-### ADR-057 — Citation-label guards (C-safe)
-Compilation-PDF chunking leaks non-section values into the citation. Two deterministic
-guards: (1) `parser` drops a chunk-derived `Art. N` from `location_reference` when N is a
-4-digit YEAR (1800–2099, e.g. "Art. 2020") or equals the page number ("Art. 371 | Page 371")
-— the LLM `article` field stays authoritative; (2) `html_extractor` now mirrors `pdf_text`'s
-`derive_act_title(full_text, url)` fallback so URL-only seeds (e.g. AU `/details/` pages that
-fall back to HTML) no longer emit an empty `law_name` → schema-violation → dropped row. The
-uglier `article`-field garbles ("Section 8.1 and 8.2", Act-title leakage) are LLM output,
-deferred to the drift/prompt work (ADR-054/known-wrong-indicator-rootcause).
-
-### ADR-056 — Canonical act-identity key in discovery
-Discovery deduped and capped by `_normalise_url`, so variant URLs of ONE act each burned a
-slot: legislation.gov.au `/details/c…`, `/c…/latest/text` and bare `/C…` are the same act.
-AU P7 had 14 seed URLs → only 12 distinct acts, but the two `/latest/text` duplicates pushed
-real acts (ASIO C2004A02123, DATA C2022A00011) past the `ZONE2_MAX_KNOWN_ACTS=12` cap.
-`_canonical_act_key` keys legislation.gov.au URLs by registration id (C/F-number) and
-everything else by `_normalise_url` (SG/SSO unchanged — `/Act/CA2018` ≠ `/acts-supp/9-2018`,
-so SG's consolidated-vs-supplement duplicate is still handled at output by ADR-053). Result:
-all 5 Round-1 AU P7 acts now reach fetch; DATA Act appears in output. Remaining AU absences
-(ASIO, Telecom I&A) are the separate `api_versioned_pdf` 404/`/details/` resolver bug.
-
-### ADR-055 — KNOWN cross-indicator prune (ground-truth) + mis-map logging
-The same provision can legitimately serve multiple indicators (Round 1 files My Health s.77
-under BOTH 6.1 and 6.2), so blind "one provision → one indicator" dedup would delete valid
-findings. `main._prune_known_cross_indicator` uses `known_sections_by_indicator` as ground
-truth: for a **KNOWN** provision it keeps exactly the indicator(s) Round 1 assigns and drops
-out-of-set copies — but only when a correct-indicator copy survives (never loses a known
-provision outright; sole wrong-indicator copies are kept). **NEW** provisions are untouched
-(a NEW may also serve 2 indicators and there is no ground truth to prune it — dropping one
-risks a real 20-pt finding). Every out-of-set KNOWN row is a *confirmed* mis-map, logged to
-`logs/known_mismaps.json` with the source chunk's retrieval signal (`source_rerank_score` +
-`source_retrieval_method`, threaded ExtractionResult→OutputRecord). Runs after cross-doc
-dedup, before null assessments. Early evidence (SG s.26, AU s.77): mis-maps have HIGH
-confidence but strongly NEGATIVE rerank scores → **LLM over-fire**, not retrieval over-match.
-Root-cause fix is deferred (see memory known-wrong-indicator-rootcause).
-
-### ADR-054 — Seed-guided retrieval (gentle) + indicator drift is an LLM-extraction limit
-`seed_loader` builds `known_sections_by_indicator` (`P7-I3 → {act → sections}`, DB `7.3`→`P7-I3` via `_db_indicator_to_engine`). `retrieve_batch` uses it: per indicator, `_inject_seed_sections` locates the Round 1 section chunk for THIS act (`_find_section_chunk` — exact `article_number`, else the `N.` heading in text scored by body length so the operative provision beats the Contents/TOC listing; handles empty article_number on large acts like Employment s.95 / PDPA s.25) and, **only if entirely absent**, prepends it. **Gentle by decision:** an earlier promote-to-front variant that reordered already-retrieved sections displaced other chunks from the LLM token budget and drove total records *down* (24→19) without changing the LLM's verdict, so present sections are now left untouched. Investigation showed the "drift" is mostly an **LLM extraction** issue, not retrieval: the target sections ARE retrieved, but the LLM declines them — correctly for PDPA s.25 (a retention *limitation*, not a *minimum*; Round 1 scored it 0), over-strictly for Employment s.95 ("keep for the *prescribed* period" → delegated). True recovery of the Employment-style cases needs I3 prompt tuning (tracked as future work), not retrieval. KNOWN-only, additive, never removes NEW discoveries.
-
-### ADR-053 — Cross-document provision dedup at output
-The mapper's `_deduplicate` only folds duplicates WITHIN one document. The same act can be fetched under two URLs — consolidated `/Act/CA2018` (from SSO index title-match) and as-enacted `/acts-supp/9-2018` (from a Round 1 seed ref) — producing identical provisions in separate documents. `main._dedup_cross_document` folds `all_records` on `(law_name, indicator_id, article, snippet[:80])` (whitespace/case-folded), keeping the higher-quality copy: consolidated `/Act/` source > higher confidence > concrete (non-"unknown") location. Runs before null assessments + the PDPA gate. Root-cause act-identity dedup at discovery (mapping `9-2018`→`CA2018`) is deferred — output dedup fixes correctness and catches any cross-doc dupe.
-
-### ADR-052 — Zone-2 SPA render uses an isolated per-call crawler, not the shared one
-`_render_spa_sync` wraps each page in its own `asyncio.run()` (a fresh event loop per call). The module-level `_shared_crawler` is bound to whichever loop first `start()`ed it, so the *second* Zone-2 render reused a Playwright browser whose transport lived on the first, now-closed loop — every op then hung until the 2×(timeout+10) hard ceiling (~80s), failing exactly one PDPC page per run (the pattern: first render OK, next times out). `crawl4ai_runner.fetch_isolated()` creates and closes a dedicated crawler inside the caller's loop; `_render_spa_sync` uses it. The shared singleton stays for the BFS crawler / discovery, which run under a single `asyncio.run`. Verified: three PDPC pages render back-to-back in ~3s each.
-
-### ADR-051 — `discovery: sitemap` for JS-SPA portals with no crawlable index
-A JS SPA (pdpc.gov.sg) returns a content-less shell to httpx, so `index` (needs HTML anchor links) and `auto` (its `classify_render` probe mis-reads the shell as SSR) both fail to enumerate pages. Such portals commonly publish a standard `sitemap.xml` (advertised in robots.txt). `_discover_sitemap` fetches it directly (own httpx call — the transport ladder's `_is_real_response` rejects bodyless XML), extracts every `<loc>` page URL, derives a BM25 title from the URL slug, and hands `(title, url)` candidates to the shared `_rank_exclude_tag` tail like any other adapter. Nested sitemap-index `.xml` locs are skipped (flat sitemaps are the gov norm). With `ZONE2_MAX_NEW_ACTS=0` (build-gate default) the sitemap adds nothing — its candidates are all NEW and dropped, and known pages still arrive via seed injection; its value is realized when NEW discovery is enabled. Offline golden harness mocks `_fetch_sitemap_xml` to a pinned `tests/fixtures/pdpc_sitemap.xml`.
-
-### ADR-050 — `fetch: html_js` renders JS-only portals unconditionally
-`fetch: auto` gates its Playwright render on `classify_render(...).is_spa`. That probe measures `body.get_text()` **without** stripping nav/footer chrome, so a content-less SPA shell wrapped in a large menu (pdpc.gov.sg: 42–95 chars of real content but a big nav) reads as SSR and the render is skipped — then `extract_html` (which DOES strip chrome) sees <200 chars and raises "JS-rendered". Rather than retune the shared heuristic (risk to validated AU/SG paths), the declared-but-unimplemented `html_js` Literal is now wired in `router.py` to render every HTML page via Playwright with no probe gate. Portals whose pages always require JS declare `fetch: html_js`; PDFs on the same domain are unaffected (they take the PDF branch). Verified end-to-end on the two PDPC pages that failed the 2026-07-02 SG P7 run (95 → 4250 chars).
-
-### ADR-049 — Provision KNOWN matching uses Round 1 prose sections, not just anchor URLs
-Round 1 identifies most known provisions by prose section number in the act/comment columns ("Section 199", "Section 11(3)"), NOT by `#`-anchored URLs. Anchor-only matching (`known_provisions`) therefore left Pillar 7 with an empty match set and tagged every provision NEW — false-NEWs that graders reclassify. `seed_loader` now also builds `known_sections` (act title → section tokens), and `resolve_provision_tag()` tags KNOWN when `(normalised law_name, section)` is present, **indicator-agnostic** (KNOWN = the provision is in Round 1 and the run found it, regardless of which indicator surfaced it). Anchor-URL matching is retained as a second KNOWN path.
+**Process / snapshots**
+- **ADR-005** Economies never run in parallel within one process (process-global model state); `batch_run.py` parallelises across isolated `python main.py` subprocesses.
+- **ADR-048** Validated economies protected by golden-output snapshots — refactor acceptance test is "snapshots byte-identical".
+- **ADR-009** `taxonomy.json` at project root; validated at startup.
+- **ADR-059** Per-economy-pillar diagnostics: mis-map + KNOWN-recall audit → `logs/diagnostics/`.
 
 ---
 
 ## Implementation State
 
-All stories Z1-1 through Z2-6 are complete. Below is the current module-level summary.
+Stories Z1-1 … Z2-6 complete. Module summary:
 
-### Zone 1 — Evidence Discovery
+**Zone 1** — `config/economy_config.py` (`EconomyConfig`/`Portal`, `load_economy`), `crawler/discover.py` (active entry: `index`/`api`/`sitemap`/`auto`/`seed_only`/`TBD` + shared rank/exclude/tag tail), `crawler/transport.py` (ladder + `_is_real_response`), `crawler/seed_loader.py` (`SeedData`, prose-section harvesting, `_db_indicator_to_engine`), `crawler/crawl4ai_runner.py` (stealth singleton), `crawler/{probe,crawler}.py` (legacy: taxonomy loader + shared `_normalise_url`).
 
-| Module | Purpose |
-|--------|---------|
-| `src/config/economy_config.py` | `EconomyConfig` + `Portal` Pydantic models; `load_economy(name)` with fuzzy matching; `load_economy_by_iso()`; `iso_code`/`un_name` fields |
-| `src/crawler/discover.py` | **Active Zone 1 entry point.** `discover()` routes per-portal strategy (`index`/`api`/`sitemap`/`auto`/`seed_only`/`TBD`). `build_pillar_keywords()` filters by `P{pillar}-`. `build_pillar_excludes()` gathers exclude lists. `_discover_index()` fetches browse indexes; `_discover_sitemap()` fetches `sitemap.xml` for JS-SPA portals (slug→title, skips nested `.xml`); both BM25-rank + exclude + tag via the shared `_rank_exclude_tag` tail. |
-| `src/crawler/transport.py` | Transport ladder: plain httpx → httpx+browser headers → Playwright stealth. `_is_real_response()` detects 403/JS-shell. |
-| `src/crawler/seed_loader.py` | `SeedData` with `known_urls`, `known_titles`, `known_provisions`, `known_sections`, `known_sections_by_indicator`. Splits compound titles on `;`/newline. `_extract_section_tokens()` harvests prose section numbers from the act/comment/coverage columns; `_db_indicator_to_engine()` maps `7.3`→`P7-I3`. Generic `_pillar_matches()` for any Pn. |
-| `src/crawler/crawl4ai_runner.py` | Stealth Crawl4AI/Playwright. Shared browser singleton. Two-attempt fetch (with/without selector). |
-| `src/crawler/probe.py` | Legacy probe — `load_taxonomy()` / `validate_taxonomy()` still used at startup. |
-| `src/crawler/crawler.py` | Legacy BFS crawler — shared `_normalise_url()` imported by other modules. |
-| `src/crawler/currency.py` | Legacy currency check. |
-| `src/crawler/ranker.py` | Legacy ranker with LLM gate. |
+**Zone 2** — `fetcher/router.py` (`route()` dispatch; `pdf_endpoint`/`html_wholedoc`/`html_js`/`auto`/`pdf_link`), extractors (`pdf_text`, `ocr_stage1` CER gate, `html_extractor`, `llm_ocr`, `legislation_meta`), `fetcher/segmenter.py` (volume split), `fetcher/translator.py` (3-layer, Argos→DeepL→Google), `fetcher/models.py` (`FetchedDocument` incl. `archive_bytes`/`archive_ext`, `TranslatedDocument`), `ocr/processor.py` (Stage-2 Azure→Mistral), `retrieval/` (chunker, per-economy embedder/reranker, BM25, RRF fusion, `rag.py`), `mapping/` (mapper + PDPA gate, `llm_client.py` cascade, `parser.py` verbatim assertion, `prompts.py` Rules 1–9, `provision_tag.py`), `output/` (writer 13-col CSV + JSON envelope, validator, cost_logger, models), `cli/progress.py`.
 
-### Zone 2 — Intelligent Mapping
+**LLM providers** (`src/mapping/providers/`): `AnthropicProvider`, `OpenAIProvider` (gpt-4o default; gpt-5/o-series auto-switch to `max_completion_tokens` + `reasoning_effort`), `GeminiProvider` (gemini-2.5-flash, OpenAI-compatible, `GEMINI_API_KEY`/`GOOGLE_API_KEY`), `DeepSeekProvider`, `GroqProvider` (+ fallback model), `QwenProvider` (DashScope), `OllamaProvider` (qwen2.5:7b / granite3-8b).
 
-| Module | Purpose |
-|--------|---------|
-| `src/fetcher/router.py` | Zone 2 entry: `route()` dispatches TEXT_PDF/SCANNED_PDF/HTML. `pdf_endpoint` URL rewrite. `single_act_fetch` skips volume detection. `fetch: auto` renders SPA shells only when `classify_render.is_spa`; `fetch: html_js` renders **every** HTML page via Playwright unconditionally (for portals whose SPA shell fools `classify_render`, e.g. pdpc.gov.sg). |
-| `src/fetcher/extractors/pdf_text.py` | pdfplumber extraction + `legislation_meta.py` (law_number_ref/last_amended). Section hierarchy parser. |
-| `src/fetcher/extractors/ocr_stage1.py` | Tesseract/PaddleOCR with CER gate. Raises `OCRQualityError` at ≥5% for Stage 2. |
-| `src/fetcher/extractors/html_extractor.py` | BeautifulSoup + `location_reference_map` from URL anchors. |
-| `src/fetcher/extractors/llm_ocr.py` | LLM vision OCR fallback. |
-| `src/fetcher/extractors/legislation_meta.py` | Parses "Act N of YYYY", revised-edition year, `?DocDate=` from URL. |
-| `src/fetcher/segmenter.py` | Consolidated volume splitter (PyMuPDF). Short-segment merge. |
-| `src/fetcher/translator.py` | 3-layer translation (keyword/title/document). Argos primary → DeepL → Google fallback. Non-English pipeline can skip full-document body translation and preserve raw source text for verbatim extraction; BE conversion is not applied to skipped-body RAG text. |
-| `src/fetcher/models.py` | `Zone1Result`, `FetchedDocument`, `TranslatedDocument` (8 proxy accessors), `ArticleReference`, `CostLogEntry`. |
-| `src/ocr/processor.py` | Stage 2 OCR: Azure DI → Mistral OCR. CER fix for whitespace-only pages. `stage2_failed` flag. |
-| `src/retrieval/` | `chunker.py` (3-strategy article splitter), `embedder.py` (per-economy: `all-MiniLM-L6-v2` for EN / `paraphrase-multilingual-MiniLM-L12-v2` for non-EN + FAISS; `set_multilingual()`, ADR-060), `bm25_index.py` (keyword boosting), `fusion.py` (RRF k=60), `reranker.py` (per-economy English / mMARCO cross-encoder top-20→top-5), `rag.py` (orchestrator), `config.py` (`get_valid_indicator_ids()`). |
-| `src/mapping/mapper.py` | `extract_provisions()` orchestrator. `check_pdpa_gate()` → `PDPAGateError`. Lazy `_get_economy_names()` from YAMLs. |
-| `src/mapping/llm_client.py` | `PROVIDER_CASCADE`, `pin_active_provider()`, `call_llm_with_cascade()`, `get_active_model_version(ocr_engine=)`. |
-| `src/mapping/parser.py` | `parse_llm_response()` with verbatim assertion (hard discard), provision-level `resolve_provision_tag()`, law-name abbreviation check, cross-reference auto-flagging. |
-| `src/mapping/prompts.py` | `SYSTEM_PROMPT` with Rules 1–9 (incl. law name expansion, rationale format, leave-blank-if-uncertain). |
-| `src/mapping/provision_tag.py` | `resolve_provision_tag()` (KNOWN/NEW per provision — matches on anchor URL OR `(act title, section)` against `known_sections`, indicator-agnostic), `infer_article_anchor()` / `infer_section_token()` heuristics. |
-| `src/mapping/providers/` | `AnthropicProvider`, `OpenAIProvider`, `DeepSeekProvider` (deepseek-chat, DEEPSEEK_API_KEY), `GroqProvider` (qwen/qwen3-32b + qwen/qwen3.6-27b fallback), `QwenProvider` (qwen-plus via DashScope, DASHSCOPE_API_KEY), `OllamaProvider` (qwen2.5:7b P6, granite3-8b P7). |
-| `src/output/writer.py` | `write_csv()` (13-col UTF-8-BOM), `write_json()` (document-level + `provisions[]` envelope per UN slide 18). `pdf_is_scanned`, `retrieval_method`, per-provision `discovery_tag`. `validate_record()` with portal domain allowlist. |
-| `src/output/validator.py` | URL validation + Wayback/local archiving (deduped per URL). Confidence flagging (<0.80 → review note). |
-| `src/output/cost_logger.py` | `CostLogger` — per-component accumulation → `logs/cost_report.json`. |
-| `src/output/models.py` | `OutputRecord` (13 CSV cols + JSON extended fields). `processing_time: int`. `as_provision_dict()`. |
-| `src/cli/progress.py` | Single-line ANSI spinner. Global singleton `set_progress(p)` / `substep(text)`. Substeps wired in OCR, RAG, mapper, crawler. |
+**Pipeline** — `main.py` (`run_pipeline`, `_run_zone1`, PDPA gate), `batch_run.py` (`--parallel`), `evaluate.py` (KNOWN 40pts + NEW 4pts/max20), `tools/cost_logger.py`.
 
-### Pipeline Integration
+### Economy Configs (3 in `economies/`)
 
-| Module | Purpose |
-|--------|---------|
-| `main.py` | `run_pipeline()` — full end-to-end. `_run_zone1()` calls `discover()`. PDPA gate for SG P7. |
-| `batch_run.py` | Multi-economy wrapper. Default `--parallel 1` calls `run_pipeline()` sequentially in-process; `--parallel N>1` runs isolated `python main.py` subprocesses with per-job `RDTII_LOG_DIR`. |
-| `evaluate.py` | Accuracy scoring: KNOWN match rate (40pts) + provision-level NEW (4pts each, max 20pts). |
-| `tools/cost_logger.py` | Standalone CLI cost benchmarking. |
+| Economy | ISO | Strategy | Status |
+|---------|-----|----------|--------|
+| Singapore | SG | SSO: `index` + `html_wholedoc` + `header_spoof`; PDPC: `sitemap` + `html_js`; Gazette `TBD` | Reference / Phase-1 gate |
+| Australia | AU | legislation.gov.au `api` + `api_versioned_pdf`; OAIC | Ready |
+| Malaysia | MY | Multiple portals (website + PDF) | Ready |
 
-### Economy Configs (3 files in `economies/`)
-
-All declare `iso_code` and `un_name`. Adding a new economy requires only creating a YAML file — no Python changes.
-
-| Economy | ISO | Portal Strategy | Status |
-|---------|-----|----------------|--------|
-| Singapore | SG | SSO: `index` + `pdf_endpoint` + `header_spoof`; PDPC: `sitemap` discovery + `html_js` fetch (JS SPA regulator guidance, discovered via sitemap.xml); Gazette: `TBD` | Reference / Phase 1 gate |
-| Australia | AU | legislation.gov.au + OAIC | Minimal config |
-| Malaysia | MY | — | Minimal config |
+Adding an economy = a new YAML only (no Python changes).
 
 ### Key Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `LLM_PROVIDER` | (cascade) | Pin LLM provider for run |
-| `LLM_MODEL` | (provider default) | Override model within provider |
-| `ZONE2_MAX_ACTS` | 5 | Max acts sent to Zone 2 |
-| `DISCOVER_BUDGET_S` | 120.0 | Wall-clock budget for discover() |
-| `NEW_SCORE_THRESHOLD` | 0.2 | Min BM25 score for NEW acts |
-| `ALLOW_UNVERIFIED_SNIPPETS` | false | Skip verbatim assertion (OCR edge cases) |
-| `WAYBACK_BEST_EFFORT` | true | Wayback archiving is non-blocking |
-| `LOCAL_ARCHIVE_FALLBACK` | true | Save local PDF snapshot if Wayback fails |
-| `WAYBACK_RETRY_WAIT_S` | 2 | Wayback 429 retry wait |
+| `LLM_PROVIDER` / `LLM_MODEL` | cascade / provider default | Pin provider / override model |
+| `RUN_PROFILE` | gate | gate/submit/explore → NEW-act cap 0/3/8 |
+| `ZONE2_MAX_ACTS` | 5 | Max acts to Zone 2 |
+| `ALLOW_UNVERIFIED_SNIPPETS` | false | Skip verbatim assertion (OCR edge) |
+| `WAYBACK_BEST_EFFORT` / `LOCAL_ARCHIVE_FALLBACK` | true / true | Wayback non-blocking; local snapshot fallback |
+| `OLLAMA_NUM_CTX` | 8192 | Local-model context window (must fit the prompt) |
 
-### Taxonomy (taxonomy.json)
+### Taxonomy (`taxonomy.json`)
 
-Rebuilt against `docs/RDTII_methodology_and_scoring_criteria.csv`:
-- **P6 (Cross-border Data Policies):** 6.1 ban/local-processing, 6.2 local storage, 6.3 infrastructure, 6.4 conditional flow regimes, 6.5 binding data-transfer agreements.
-- **P7 (Domestic Data Protection & Privacy):** 7.1 comprehensive framework, 7.2 dedicated cybersecurity framework, 7.3 minimum data retention, 7.4 DPIA/DPO, 7.5 government access to personal data.
-
-Each indicator has `rdtii_ref`, `category`, `scoring` (0/0.5/1 bands), `probe_keywords`, `exclude_act_titles`, `exclude_keywords`, `in_scope`, `out_of_scope`, `negative_examples`.
+- **P6 Cross-border Data:** 6.1 ban/local-processing, 6.2 local storage, 6.3 infrastructure, 6.4 conditional flow, 6.5 binding data-transfer commitments.
+- **P7 Domestic Data Protection:** 7.1 comprehensive framework, 7.2 cybersecurity framework, 7.3 minimum retention, 7.4 DPIA/DPO, 7.5 government access.
+- Each indicator: `rdtii_ref`, `category`, `scoring`, `probe_keywords`, `exclude_*`, `in_scope`, `out_of_scope`, `negative_examples`.
 
 ### Output Format
 
-- **CSV:** 13 columns in `OUTPUT_TEMPLATE_31MAY.xlsx` order, UTF-8-BOM.
-- **JSON:** Document-level envelope (`economy`, `law_name`, `source_url`, `source_pdf_path`, `ocr_quality_cer`, `processing_time`, `model_version`, `discovery_tag`, `pdf_is_scanned`, `retrieval_method`) + `provisions[]` array (per UN slide 18). Each provision includes `discovery_tag`.
-- **`mapping_rationale`:** Rule 8 format. Rule 9: leave blank if uncertain. 300-char cap.
-- **`processing_time`:** integer seconds (slide 18 naming).
+- **CSV** — 13 columns (`OUTPUT_TEMPLATE_31MAY.xlsx` order), UTF-8-BOM.
+- **JSON** — document envelope + `provisions[]` (per UN slide 18); `mapping_rationale` 300-char cap, blank if uncertain; `processing_time` integer seconds.
 
 ### Test Suite
 
-757 tests passing, with 7 warnings in the current local suite.
+643 tests passing.
 
-### Critical Discovery Fix (latest)
+### Known accuracy notes
 
-Compound seed titles (e.g. "PDPA; Guide; Advisory...") split on `;`/newline in `seed_loader.py`. Exclude filter in `discover.py` runs BEFORE KNOWN check — Round 1 negative-example acts (banking/tax/companies) no longer bypass exclusion as KNOWN.
-
-### Retrieval recall — text quality + tuning
-
-- **pdfplumber `x_tolerance=1.5`** (`pdf_text.py`, env `PDF_X_TOLERANCE`). The default `x_tolerance=3` merged words on tightly-kerned gov PDFs (SSO) — ~339 run-together blobs per act (`"responsibleforensuring…"`) that corrupted chunk embeddings and tanked retrieval recall. 1.5 → 0 blobs. **Highest-leverage accuracy fix** — helps every indicator/economy and the verbatim output.
-- **RAG hyper-params env-overridable** (`retrieval/config.py`): `BM25_TOP_K`/`DENSE_TOP_K`=30, `FUSION_TOP_K`=30, `RERANK_TOP_N`=12. Raise `RERANK_TOP_N` toward 20 for more recall at higher LLM token cost.
-- **Taxonomy keywords/in_scope** for P7-I4 (DPO) and P7-I5 (gov access) rewritten to match real statutory wording (e.g. PDPA "designate an individual responsible for compliance" = DPO).
-- **AU compilation chunking** (`chunker.py`). legislation.gov.au compilation PDFs use `6A Heading` section titles (space, no period) and repeat running page-headers (`Part I Preliminary`, `Section 6A`) + footers (`Privacy Act 1988 3`) on every page. pdfplumber's hierarchy parses those running headers as Part/Division entries, so the hierarchy path dropped ~97% of a 472-page act (Privacy Act 1988 collapsed to 34 chunks, cover/TOC only → the LLM "cited" the act title). Three guards: (1) a **coverage guard** rejects a hierarchy chunk set that retains <`CHUNK_HIERARCHY_MIN_COVERAGE` (0.5) of the text and falls back to raw-text regex splitting; (2) the article-boundary regex now matches the space-separated `6A`/`26WK` heading form; (3) `_strip_page_furniture()` removes TOC leader lines, running `Section N` headers, and `<page> <Act Title>` footers on the regex path. Result: Privacy Act → 876 chunks, 91.9% coverage, real APP/NDB sections retrieved.
-
-**Known limitation (documented):** specific provisions buried deep in large/topically-diverse acts are not reliably extracted — e.g. PDPA DPO clause ranks ~18th of 54 chunks; CPC s.39-40 access powers sit in a 1M-char code. Even when forced into LLM context, `trim_chunks_to_budget` + LLM conservatism can drop them. Reliable fix needs token-budget tuning / section-aware retrieval — tracked as future work, not a single bug.
+- **pdfplumber `x_tolerance=1.5`** (`PDF_X_TOLERANCE`) — the highest-leverage retrieval fix (default 3 merged words on kerned gov PDFs).
+- **AU compilation chunking** — coverage guard + space-separated `6A` boundary regex + `_strip_page_furniture()` recover legislation.gov.au compilations (Privacy Act 1988: 34→876 chunks, 91.9% coverage).
+- **Limitation:** provisions buried deep in large/diverse acts aren't reliably extracted (rank low, or LLM declines even when in-context); needs section-aware retrieval / token-budget tuning — future work. See [[known-provision-matching-gap]], [[indicator-drift]].
