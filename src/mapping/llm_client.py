@@ -4,14 +4,15 @@
 PROVIDER_CASCADE order (DO NOT reorder):
   1. AnthropicProvider  — claude-sonnet-4-20250514 (pinned primary)
   2. OpenAIProvider     — gpt-4o
-  3. DeepSeekProvider   — deepseek-chat (V3, OpenAI-compatible; DEEPSEEK_API_KEY)
-  4. GroqProvider       — qwen/qwen3-32b (free tier; fallback qwen/qwen3.6-27b)
-  5. QwenProvider       — qwen-plus via DashScope (DASHSCOPE_API_KEY)
-  6. OllamaProvider(6) — qwen2.5:7b (Apache 2.0, offline)
-  7. OllamaProvider(7) — granite3-dense:8b (Apache 2.0, offline)
+  3. GeminiProvider     — gemini-2.5-flash (OpenAI-compatible; GEMINI_API_KEY)
+  4. DeepSeekProvider   — deepseek-chat (V3, OpenAI-compatible; DEEPSEEK_API_KEY)
+  5. GroqProvider       — qwen/qwen3-32b (free tier; fallback qwen/qwen3.6-27b)
+  6. QwenProvider       — qwen-plus via DashScope (DASHSCOPE_API_KEY)
+  7. OllamaProvider(6) — qwen2.5:7b (Apache 2.0, offline)
+  8. OllamaProvider(7) — granite3-dense:8b (Apache 2.0, offline)
 
 Llama 3.3 is NOT in cascade — non-Apache 2.0 license.
-Pin a provider with LLM_PROVIDER env var: anthropic | openai | deepseek | groq | qwen | ollama
+Pin a provider with LLM_PROVIDER env var: anthropic | openai | gemini | deepseek | groq | qwen | ollama
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from src.mapping.exceptions import (
 from src.mapping.models import LLMResponse
 from src.mapping.providers.anthropic_provider import AnthropicProvider
 from src.mapping.providers.deepseek_provider import DeepSeekProvider
+from src.mapping.providers.gemini_provider import GeminiProvider
 from src.mapping.providers.groq_provider import GroqProvider
 from src.mapping.providers.ollama_provider import OllamaProvider
 from src.mapping.providers.openai_provider import OpenAIProvider
@@ -42,11 +44,12 @@ logger = logging.getLogger("mapping.llm_client")
 PROVIDER_CASCADE: list[BaseLLMProvider] = [
     AnthropicProvider(),   # 1 — claude-sonnet-4-20250514 (pinned)
     OpenAIProvider(),      # 2 — gpt-4o
-    DeepSeekProvider(),    # 3 — deepseek-chat V3 (DEEPSEEK_API_KEY)
-    GroqProvider(),        # 4 — qwen/qwen3-32b via Groq (qwen/qwen3.6-27b fallback)
-    QwenProvider(),        # 5 — qwen-plus via DashScope (DASHSCOPE_API_KEY)
-    OllamaProvider(6),     # 6 — qwen2.5:7b (Apache 2.0, offline)
-    OllamaProvider(7),     # 7 — granite3-dense:8b (Apache 2.0, offline)
+    GeminiProvider(),      # 3 — gemini-2.5-flash (GEMINI_API_KEY)
+    DeepSeekProvider(),    # 4 — deepseek-chat V3 (DEEPSEEK_API_KEY)
+    GroqProvider(),        # 5 — qwen/qwen3-32b via Groq (qwen/qwen3.6-27b fallback)
+    QwenProvider(),        # 6 — qwen-plus via DashScope (DASHSCOPE_API_KEY)
+    OllamaProvider(6),     # 7 — qwen2.5:7b (Apache 2.0, offline)
+    OllamaProvider(7),     # 8 — granite3-dense:8b (Apache 2.0, offline)
 ]
 
 _SESSION_PROVIDER: BaseLLMProvider | None = None
@@ -99,7 +102,7 @@ def pin_active_provider() -> BaseLLMProvider:
             "No LLM provider is available. Set LLM_PROVIDER + a single LLM_API_KEY:\n"
             "  LLM_PROVIDER=anthropic   (Priority 1 — recommended)\n"
             "  LLM_API_KEY=<your key>   (used by whichever provider is pinned)\n"
-            "Provider priority: anthropic > openai > deepseek > groq > qwen(DashScope) > ollama.\n"
+            "Provider priority: anthropic > openai > gemini > deepseek > groq > qwen(DashScope) > ollama.\n"
             "Provider-specific vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...) still work and\n"
             "override LLM_API_KEY. Offline: run 'ollama serve' + 'ollama pull qwen2.5:7b'."
         )

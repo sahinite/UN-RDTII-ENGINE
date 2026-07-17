@@ -125,6 +125,56 @@ def test_openai_not_available_when_key_missing():
         assert OpenAIProvider().is_available() is False
 
 
+def test_gemini_is_available_when_key_set():
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-test"}):
+        from src.mapping.providers.gemini_provider import GeminiProvider
+        assert GeminiProvider().is_available() is True
+
+
+def test_gemini_available_via_google_api_key_alias():
+    missing = {"GEMINI_API_KEY", "LLM_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k not in missing}
+    env["GOOGLE_API_KEY"] = "AIza-test"
+    with patch.dict(os.environ, env, clear=True):
+        from src.mapping.providers.gemini_provider import GeminiProvider
+        assert GeminiProvider().is_available() is True
+
+
+def test_gemini_not_available_when_key_missing():
+    missing = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k not in missing}
+    with patch.dict(os.environ, env, clear=True):
+        from src.mapping.providers.gemini_provider import GeminiProvider
+        assert GeminiProvider().is_available() is False
+
+
+def test_gemini_complete_returns_llm_response():
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock()]
+    mock_resp.choices[0].message.content = '{"found": false, "provisions": []}'
+    mock_resp.usage.prompt_tokens = 100
+    mock_resp.usage.completion_tokens = 10
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_resp
+
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-test", "LLM_MODEL": ""}):
+        import src.mapping.providers.gemini_provider as gp
+        from src.mapping.providers.gemini_provider import GeminiProvider, GEMINI_MODEL_DEFAULT
+        with patch.object(gp.openai, "OpenAI", return_value=mock_client):
+            resp = GeminiProvider().complete("system", "user")
+    assert resp.provider == "gemini"
+    assert resp.model == GEMINI_MODEL_DEFAULT
+    assert resp.input_tokens == 100
+    assert resp.output_tokens == 10
+    assert resp.cost_usd > 0
+
+
+def test_gemini_in_cascade():
+    from src.mapping.llm_client import PROVIDER_CASCADE
+    assert any(p.provider_name == "gemini" for p in PROVIDER_CASCADE)
+
+
 def test_groq_is_available_when_key_set():
     with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}):
         from src.mapping.providers.groq_provider import GroqProvider

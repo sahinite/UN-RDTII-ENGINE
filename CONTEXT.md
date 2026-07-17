@@ -21,7 +21,7 @@ Updated as stories are completed — future agents should read this before touch
 | **Zone 2** | Intelligent Mapping: fetch/route → OCR → translate → chunk → embed → RAG → map → validate → write. |
 | **Pillar** | One of the RDTII regulatory dimensions (e.g. P6 Cross-border Data, P7 Domestic Data Protection). |
 | **PDPA** | Singapore Personal Data Protection Act — primary target for Phase 1 gate (Pillar 7). |
-| **7-tier LLM cascade** | Anthropic → OpenAI → DeepSeek → Groq → Qwen → Ollama (qwen2.5:7b) → Ollama (granite3-8b). Pinned per run via `LLM_PROVIDER`. Llama 3.3 excluded (non-Apache 2.0). |
+| **8-tier LLM cascade** | Anthropic → OpenAI → Gemini → DeepSeek → Groq → Qwen → Ollama (qwen2.5:7b) → Ollama (granite3-8b). Pinned per run via `LLM_PROVIDER`. Llama 3.3 excluded (non-Apache 2.0). |
 | **CER** | Character Error Rate — OCR quality metric. Stage-2 OCR triggers at CER ≥ 5%. |
 | **RAG pipeline** | Hybrid BM25 + dense retrieval with cross-encoder reranking; top-5 chunks per indicator, each with `location_reference`. |
 | **location_reference** | `(act_name, part, article_number)` tuple for verifiable citations. |

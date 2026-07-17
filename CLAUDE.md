@@ -66,7 +66,7 @@ Two zones wired together in `main.py`:
 - `src/ocr/processor.py` — two-stage OCR cascade (Stage 1 local → Stage 2 Azure DI/Mistral on CER≥5%)
 - `src/retrieval/chunker.py`, `embedder.py`, `rag.py` — chunk → embed → BM25+dense hybrid RAG with cross-encoder rerank. Chunker has a hierarchy-coverage guard + raw-text furniture stripping that handles AU legislation.gov.au compilation PDFs (space-separated `6A` headings, per-page running headers/footers, multi-page Contents TOC)
 - `src/mapping/mapper.py` — maps retrieved passages to RDTII indicators; provision-level KNOWN/NEW tagging
-- `src/mapping/llm_client.py` — 7-tier provider cascade; one provider pinned per run via `LLM_PROVIDER` env var
+- `src/mapping/llm_client.py` — 8-tier provider cascade; one provider pinned per run via `LLM_PROVIDER` env var
 - `src/mapping/parser.py` — LLM response parser with verbatim assertion + provision tag resolution
 - `src/mapping/prompts.py` — system/user prompt builder with Rules 1–9
 - `src/output/writer.py` — CSV (13-col UTF-8-BOM) + JSON (document-level + `provisions[]` envelope)
@@ -80,11 +80,12 @@ Two zones wired together in `main.py`:
 ### LLM Cascade (pinned order, no mid-run switching)
 1. `anthropic` / `claude-sonnet-4-20250514` (primary)
 2. `openai` / `gpt-4o`
-3. `deepseek` / `deepseek-chat` V3 (`DEEPSEEK_API_KEY`; OpenAI-compatible)
-4. `groq` / `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`; free tier)
-5. `qwen` / `qwen-plus` via DashScope intl (`DASHSCOPE_API_KEY`)
-6. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
-7. `ollama` / `granite3-8b` (offline, Apache 2.0)
+3. `gemini` / `gemini-2.5-flash` (`GEMINI_API_KEY` or `GOOGLE_API_KEY`; OpenAI-compatible)
+4. `deepseek` / `deepseek-chat` V3 (`DEEPSEEK_API_KEY`; OpenAI-compatible)
+5. `groq` / `qwen/qwen3-32b` (fallback: `qwen/qwen3.6-27b`; free tier)
+6. `qwen` / `qwen-plus` via DashScope intl (`DASHSCOPE_API_KEY`)
+7. `ollama` / `qwen2.5:7b` (offline, Apache 2.0)
+8. `ollama` / `granite3-8b` (offline, Apache 2.0)
 
 > Llama 3.3 is explicitly excluded — non-Apache 2.0 license.
 
