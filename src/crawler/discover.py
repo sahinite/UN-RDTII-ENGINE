@@ -43,8 +43,8 @@ _MAX_KNOWN_ACTS = int(os.getenv("ZONE2_MAX_KNOWN_ACTS", "12"))
 #   gate    → 0  (KNOWN-only; the Singapore build gate — reproduces Round 1 exactly)
 #   submit  → 3  (KNOWN + a few high-confidence NEW discoveries — the SUBMISSION default)
 #   explore → 8  (aggressive NEW discovery for research)
-# NEW acts are the top scoring differentiator, so submitting under "gate" forfeits
-# them — hence the explicit profile. An explicit ZONE2_MAX_NEW_ACTS overrides it.
+# NEW acts are the top scoring differentiator, so "gate" forfeits them — hence the
+# explicit profile. An explicit ZONE2_MAX_NEW_ACTS overrides it.
 RUN_PROFILE = os.getenv("RUN_PROFILE", "gate").strip().lower()
 _PROFILE_MAX_NEW_ACTS = {"gate": 0, "submit": 3, "explore": 8}
 _MAX_NEW_ACTS = int(os.getenv("ZONE2_MAX_NEW_ACTS", str(_PROFILE_MAX_NEW_ACTS.get(RUN_PROFILE, 0))))
@@ -215,10 +215,7 @@ async def _discover_index(
 ) -> list[tuple[str, str]] | None:
     """
     Index discovery adapter — fetch portal index_urls and emit raw (title, url)
-    candidates. That is the adapter's ONLY job (D3): ranking, taxonomy exclusion,
-    and KNOWN/NEW tagging are done once, for every adapter, by the shared
-    `_rank_exclude_tag` tail in `discover()`.
-
+    candidates. Ranking/exclusion/tagging is the shared `_rank_exclude_tag` tail (D3).
     Returns None on empty/failure → caller falls back to seed KNOWN URLs.
     """
     index_urls: list[str] = getattr(portal, "index_urls", [])
@@ -286,12 +283,9 @@ async def _discover_sitemap(
     budget_deadline: float,
 ) -> list[tuple[str, str]] | None:
     """
-    Sitemap discovery adapter — for JS-rendered portals (SPAs) that expose a
-    standard sitemap.xml but have no crawlable HTML browse index (e.g. pdpc.gov.sg).
-    Fetches the sitemap, extracts every <loc> page URL, and derives a title from
-    each URL slug. Ranking / exclusion / KNOWN-NEW tagging are done by the shared
-    `_rank_exclude_tag` tail, exactly like every other adapter (D3).
-
+    Sitemap discovery adapter — for SPA portals that expose a sitemap.xml but have
+    no crawlable HTML browse index (e.g. pdpc.gov.sg). Extracts every <loc> URL and
+    derives a title from its slug; the shared `_rank_exclude_tag` tail ranks/tags (D3).
     Returns None on empty/failure → caller falls back to seed KNOWN URLs.
     """
     sitemap_url = getattr(portal, "sitemap_url", None)
@@ -425,13 +419,12 @@ async def _discover_api(
 ) -> list[tuple[str, str]] | None:
     """
     API discovery adapter — query a JSON/OData legislation API for pillar-relevant
-    titles and emit raw (name, url) candidates. Like every adapter (D3), it only
-    lists candidates; the shared `_rank_exclude_tag` tail ranks + tags them.
+    titles and emit raw (name, url) candidates; the shared `_rank_exclude_tag` tail
+    ranks/tags them (D3).
 
-    Queries `contains(name, term)` for each significant pillar keyword term and
-    unions the results (deduped by title id). Emits the canonical act URL
-    `{portal.url}/{titleId}`, which `_normalise_url` lowercases to match the
-    Round 1 seed form (`.../c2004a03712`). Returns None on empty/no-config.
+    Queries `contains(name, term)` per significant pillar keyword and unions the
+    results (deduped by title id). Emits `{portal.url}/{titleId}`, which
+    `_normalise_url` lowercases to the Round 1 seed form. Returns None on empty/no-config.
     """
     api_base = getattr(portal, "api_base", None)
     if not api_base:
@@ -529,13 +522,10 @@ async def _discover_auto(
 # ── Seed-only fallback ─────────────────────────────────────────────────────────
 
 def audit_seed_domains(known_urls, economy_config) -> list[tuple[str, int, str | None, str | None, str | None]]:
-    """Map each seed URL's registered domain to the portal config that governs its
-    fetch, so gaps are visible at run start.
-
-    Every seed URL is fetched in Zone 2; its fetch strategy comes from the portal
-    whose domain matches (via router._find_portal_for_url). A seed domain with no
-    portal entry falls back to blind `auto` download — surfacing that here lets the
-    strategy/discovery be fixed in config, per economy, before the run spends time.
+    """Map each seed URL's registered domain to the portal config governing its
+    fetch, so config gaps are visible at run start: a seed domain with no portal
+    entry falls back to blind `auto` download, and surfacing that here lets the
+    strategy be fixed per economy before the run spends time.
 
     Returns rows of (domain, url_count, portal_name|None, discovery|None, fetch|None),
     most-cited domain first.
@@ -585,14 +575,11 @@ def _indicator_aware_select(
     cap: int,
 ) -> list[tuple[str, str, str]]:
     """
-    Pick up to `cap` known acts, spreading slots across indicators.
-
-    Round-robin: each pass takes the next-highest-ranked unselected act for every
-    indicator in turn, so one indicator's many seed acts (P7-I3 has 5: PDPA,
-    Telecom, Companies, Income Tax, Employment) don't crowd the others out. Acts
-    with no indicator mapping fill any leftover slots. Discovery rank order is
-    preserved within each indicator. Falls back to plain rank order when no
-    mapping is available.
+    Pick up to `cap` known acts, spreading slots across indicators via round-robin
+    (each pass takes the next-highest-ranked unselected act per indicator), so one
+    indicator's many seed acts (P7-I3 has 5) don't crowd the others out. Unmapped
+    acts fill leftover slots; rank order is preserved within each indicator. Falls
+    back to plain rank order when no mapping is available.
     """
     if not titles_by_indicator or len(known_results) <= cap:
         return known_results[:cap]

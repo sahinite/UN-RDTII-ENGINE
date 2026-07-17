@@ -5,16 +5,10 @@ One primitive, two consumers:
   - the `auto` discovery adapter — SSR → crawl static links; SPA → render-then-scrape
   - fetch routing — SSR → static-HTML branch; SPA → JS-render (html_js) branch
 
-`detect_type` can already sniff PDF/scanned/HTML from bytes; the ONE thing it
-cannot decide is whether an HTML page's substantive content is present in the
-static markup (SSR) or only appears after JavaScript runs (SPA) — both return a
-`200 text/html` shell (the Australia `/latest/` trap).
-
-Calibrated against real ground truth (2026-07-01):
-  - AU FRL (Angular SPA): static body text ≈ 1770 chars — ABOVE a naive length
-    threshold — but all nav chrome; the reliable tell is the `ng-version` marker.
-  - SG SSO browse (SSR): ≈ 7309 chars of real content, no framework markers.
-So length alone is insufficient: markers are the primary signal, length secondary.
+Decides the one thing detect_type can't: whether an HTML page's content is in the
+static markup (SSR) or only appears after JS runs (SPA) — both serve a 200 shell.
+Framework markers (e.g. `ng-version`) are the primary signal, body length secondary:
+an Angular SPA (AU FRL) has ~1770 chars of nav chrome, above a naive length gate.
 """
 
 from __future__ import annotations

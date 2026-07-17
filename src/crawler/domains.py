@@ -1,16 +1,11 @@
 """
-Shared registered-domain utility.
+Shared registered-domain utility — the single source of truth for domain
+extraction (crawler and fetcher both import from here).
 
-Uses tldextract with the Public Suffix List snapshot bundled in the package:
-  - suffix_list_urls=()  → never fetch the PSL over HTTP
-  - cache_dir=None       → never write a disk cache
-
-By default tldextract fetches publicsuffix.org on first use and writes to
-~/.cache, which adds a network dependency, a startup cost, and a warning in
-sandboxed/CI environments (it still works there via the snapshot, but noisily).
-The bundled snapshot is sufficient for gov/domain matching, so we pin it —
-deterministic and offline. This is the single source of truth for domain
-extraction; crawler and fetcher both import from here (no duplication).
+Uses tldextract pinned to the PSL snapshot bundled in the package
+(suffix_list_urls=() → no HTTP fetch; cache_dir=None → no disk cache). By default
+tldextract fetches publicsuffix.org on first use, adding a network dependency,
+startup cost, and CI warnings; the bundled snapshot is deterministic and offline.
 """
 
 from __future__ import annotations

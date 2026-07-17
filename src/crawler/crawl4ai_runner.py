@@ -1,16 +1,13 @@
 """
 Crawl4AI integration (Playwright-based, MIT license).
 
-Dedicated wrapper around Crawl4AI/Playwright for JS-rendered government portals.
-Extracted from crawler.py so it can be imported, swapped, or mocked independently.
+Dedicated wrapper around Crawl4AI/Playwright for JS-rendered government portals,
+chosen over Scrapy for its JS-rendering support (tech plan §6).
 
-Chosen over Scrapy/custom crawler for JS-rendering support — see
-RDTII_Engine_Technical_Plan_v2.docx §6 Technology Stack.
-
-Anti-blocking: government portals (notably Singapore SSO) fingerprint headless
-browsers and return 403 / serve an empty shell. We counter with Crawl4AI's
-stealth + "magic" mode (patches navigator.webdriver, simulates a real user,
-realistic UA + headers). See _stealth_browser_config / _build_run_config.
+Anti-blocking: gov portals (notably SSO) fingerprint headless browsers and return
+403 / an empty shell. We counter with Crawl4AI's stealth + "magic" mode (patches
+navigator.webdriver, realistic UA/headers). See _stealth_browser_config /
+_build_run_config.
 """
 
 from __future__ import annotations
@@ -107,16 +104,13 @@ async def _get_shared_crawler():
 
 async def fetch_isolated(url: str, timeout_ms: int) -> tuple[str, int]:
     """
-    Render one URL with a DEDICATED crawler created and closed within the caller's
-    current event loop. Returns ``(html, status)`` (200 ok / 503 crawl failure /
-    0 timeout-or-error).
+    Render one URL with a DEDICATED crawler created and closed in the caller's
+    event loop. Returns ``(html, status)`` (200 ok / 503 crawl failure / 0 error).
 
-    Why not the shared crawler: the module-level ``_shared_crawler`` is bound to
-    whichever event loop first ``start()``ed it. Zone-2 fetch wraps each page in
-    its own ``asyncio.run()`` (a fresh loop per call), so the SECOND render would
-    reuse a browser whose transport lives on the first, now-closed loop — every
-    Playwright op then hangs until the hard ceiling (~80s). A per-call crawler,
-    born and closed in the same loop, avoids that cross-loop reuse entirely.
+    Not the shared crawler: ``_shared_crawler`` is bound to the loop that first
+    started it, but Zone-2 fetch wraps each page in its own ``asyncio.run()`` (fresh
+    loop per call), so reusing it would hang every Playwright op until the ~80s
+    ceiling. A per-call crawler born and closed in the same loop avoids that.
     """
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 
@@ -157,15 +151,12 @@ async def fetch_with_playwright(
     timeout_ms: int,
 ) -> tuple[str, int]:
     """
-    Fetch a JS-rendered URL via Crawl4AI + Playwright, in stealth/magic mode,
-    reusing the shared browser instance.
+    Fetch a JS-rendered URL via Crawl4AI + Playwright (stealth/magic mode), reusing
+    the shared browser. Returns ``(html, status)`` — 200 ok / 503 Crawl4AI failure /
+    0 exception-or-timeout.
 
-    Returns ``(html_content, http_status)``.
-    Status codes: 200 = success, 503 = Crawl4AI reported failure, 0 = exception/timeout.
-
-    Single attempt with the ``wait_for`` selector; on timeout/failure we retry
-    once WITHOUT the selector so a blocked/empty page returns fast and the caller
-    can still inspect whatever rendered.
+    Attempts once with the ``wait_for`` selector, then retries once WITHOUT it so a
+    blocked/empty page returns fast with whatever rendered.
     """
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 

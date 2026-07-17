@@ -50,12 +50,10 @@ def normalise_title(title: str) -> str:
     return re.sub(r"\s+", " ", title.lower().strip())
 
 
-# Round 1 "act and/or practice" cells pack several acts into one string. Acts are
-# separated by ';' or a BLANK line; a single newline is a line-wrap WITHIN one
-# title ("Personal Data Protection\n(Amendment) Bill (Act A1727)"). Splitting on
-# every newline shreds a wrapped title into garbage fragments ("personal data
-# protection", "(amendment) bill (act a1727)") that can never match — so we split
-# only on ';' or blank lines and collapse single newlines to spaces.
+# Round 1 "act and/or practice" cells pack several acts into one string, separated
+# by ';' or a BLANK line. A single newline is a line-wrap WITHIN one title, so we
+# split only on ';'/blank lines (splitting every newline would shred wrapped titles
+# into unmatchable fragments) and collapse single newlines to spaces.
 _ACT_TITLE_SEPARATOR = re.compile(r";|\n\s*\n")
 
 
@@ -114,21 +112,14 @@ def _act_numbers(title: str) -> set[str]:
 
 def match_known_act(law_name: str, known_keys) -> "str | None":
     """
-    Resolve ``law_name`` to a Round 1 act key, tolerant of the ways an LLM/cover
-    page renders the same title differently from Round 1. Returns the matching key
-    from ``known_keys`` (already-normalised Round 1 act titles) or None.
-
-    Matches, in order of confidence:
-      1. exact normalised equality (fast path — the common case),
-      2. act-number identity: a shared "(Act NNN)" designation ("Act 709" ↔
-         "Personal Data Protection Act (Act 709)") — a unique statutory key,
-      3. acronym: the whole law_name compacted equals a known title's acronym
-         ("PDPA" → Personal Data Protection Act),
-      4. distinctive-token containment/overlap: one title's identity tokens are a
-         subset of the other's (needs ≥2 shared tokens, to avoid a lone generic
-         word matching everything), or Jaccard ≥ 0.6.
-
-    Fully economy-agnostic — driven only by the title strings themselves.
+    Resolve ``law_name`` to a matching Round 1 key (already-normalised titles), or
+    None — tolerant of how an LLM/cover page renders the same title differently.
+    Economy-agnostic; matched in order of confidence:
+      1. exact normalised equality (fast path),
+      2. act-number identity: shared "(Act NNN)" designation ("Act 709" ↔ "…(Act 709)"),
+      3. acronym: compacted law_name equals a known title's acronym ("PDPA"),
+      4. token overlap: one title's identity tokens subset the other's (≥2 shared,
+         so a lone generic word can't match everything), or Jaccard ≥ 0.6.
     """
     if not law_name:
         return None
