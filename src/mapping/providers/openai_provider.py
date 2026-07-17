@@ -28,6 +28,12 @@ def _resolve_model() -> str:
     return os.environ.get("LLM_MODEL", "").strip() or OPENAI_MODEL_DEFAULT
 
 
+def _is_reasoning_model(model: str) -> bool:
+    """gpt-5 and o-series reasoning models drop `max_tokens`/custom `temperature`."""
+    m = model.lower()
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+
+
 class OpenAIProvider(BaseLLMProvider):
     @property
     def provider_name(self) -> str:
@@ -52,16 +58,27 @@ class OpenAIProvider(BaseLLMProvider):
 
         model = _resolve_model()
         client = openai.OpenAI(api_key=resolve_api_key("OPENAI_API_KEY"))
+        # gpt-5 / o-series: token cap uses `max_completion_tokens` and only the
+        # default temperature (1.0) is accepted, so we omit `temperature`.
+        if _is_reasoning_model(model):
+            # Reasoning tokens count against the completion budget, so give a
+            # floor to leave room for actual output; keep reasoning minimal since
+            # this is structured extraction, not a reasoning task.
+            params = {
+                "max_completion_tokens": max(max_tokens, 4000),
+                "reasoning_effort": "minimal",
+            }
+        else:
+            params = {"max_tokens": max_tokens, "temperature": temperature}
         t0 = time.time()
         try:
             resp = client.chat.completions.create(
                 model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                **params,
             )
         except openai.RateLimitError as e:
             raise ProviderRateLimitError("openai", str(e))
