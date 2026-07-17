@@ -127,12 +127,12 @@ def _url_serves_pdf(url: str, timeout: int = 30) -> bool:
 
 
 def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
-    """Best-effort JS render of a SPA document page via Crawl4AI/Playwright.
-    Returns '' on failure. Used by fetch: auto/html_js when the page is a JS shell.
+    """Best-effort JS render of a SPA page via Crawl4AI/Playwright ('' on failure).
+    Used by fetch: auto/html_js for JS shells.
 
-    Uses fetch_isolated (a dedicated per-call crawler), NOT the shared singleton:
-    this runs under its own asyncio.run() loop, and the shared crawler bound to an
-    earlier loop would hang until the ceiling on reuse (~80s). See fetch_isolated.
+    Uses fetch_isolated (per-call crawler), NOT the shared singleton: this runs in
+    its own asyncio.run() loop, and the shared crawler bound to an earlier loop
+    would hang on reuse (~80s). See fetch_isolated.
     """
     import asyncio
     try:
@@ -147,15 +147,13 @@ def _render_spa_sync(url: str, timeout_ms: int = 30000) -> str:
 def _fetch_via_browser(
     url: str, session_url: str = "", timeout_ms: int = 45000
 ) -> tuple[bytes, str, str]:
-    """Fetch ``url`` through a real (stealth) browser session — the escalation for
-    anti-bot gates that answer plain httpx with 202/empty or a challenge shell
-    (e.g. Singapore SSO's ``?ViewType=Pdf``). We first navigate ``session_url`` so
-    the browser clears the gate and holds its cookies, then request the target
-    through the same browser context (which shares those cookies and the browser's
-    TLS/JS fingerprint). Returns (raw_bytes, content_type, resolved_url).
+    """Fetch ``url`` through a real stealth browser — the escalation for anti-bot
+    gates that answer plain httpx with 202/empty or a challenge shell (e.g. SSO's
+    ``?ViewType=Pdf``). Navigates ``session_url`` first to clear the gate and hold
+    its cookies, then requests the target through the same browser context.
+    Returns (raw_bytes, content_type, resolved_url).
 
-    Generic: invoked only when a portal declares ``transport_fallback:
-    playwright_stealth``, so no economy-specific logic lives here.
+    Invoked only when a portal declares ``transport_fallback: playwright_stealth``.
     """
     import asyncio
 
@@ -184,14 +182,12 @@ def _fetch_via_browser(
 
 
 def _render_wholedoc(url: str, timeout_ms: int = 45000) -> str:
-    """Fully render a JS "whole document" page and return its HTML.
+    """Fully render a JS "whole document" page and return its HTML ('' on failure).
 
-    Unlike the crawl4ai path (``_render_spa_sync``), this drives Playwright
-    directly and waits for ``networkidle`` — the portal's provisions lazy-load
-    after the initial DOM, so a load/domcontentloaded wait (crawl4ai's default)
-    returns a partial page (arrangement-of-sections TOC, no operative bodies).
-    Waiting for the network to settle is what reliably yields the complete act
-    text. Returns '' on failure (caller retries). Generic — no portal specifics.
+    Drives Playwright directly and waits for ``networkidle`` (not crawl4ai's
+    load/domcontentloaded): provisions lazy-load after the initial DOM, so an
+    earlier wait yields only the arrangement-of-sections TOC, not the operative
+    bodies. Waiting for the network to settle yields the complete act text.
     """
     import asyncio
 
@@ -244,17 +240,13 @@ def _pdf_candidate(raw: str | None, base_url: str) -> str | None:
 
 
 def _resolve_pdf_link(html_bytes: bytes, base_url: str, portal) -> str | None:
-    """Standard HTML→PDF resolver for `fetch: pdf_link`.
-
-    Many government portals publish an act as an HTML landing page that *embeds or
-    links* the PDF (rather than serving it at a rewritable URL). They all share one
-    shape, so a single resolver handles every such portal — new ones need no code,
-    only `fetch: pdf_link`. Resolution cascade (first hit wins):
+    """Standard HTML→PDF resolver for `fetch: pdf_link` — one resolver for every
+    portal that embeds/links a PDF on an HTML landing page (new ones need no code).
+    Cascade, first hit wins:
 
       1. portal.pdf_link_selector (CSS) — declarative hint for stubborn pages.
-      2. <embed>/<object>/<iframe> whose src is a PDF or a pdf.js viewer —
-         covers JPDP <embed> and AGC LOM pdf.js (?file=).
-      3. First <a href> ending in .pdf — covers "Download PDF" links (LHDN).
+      2. <embed>/<object>/<iframe> src that is a PDF or pdf.js viewer (JPDP, AGC LOM).
+      3. First <a href> ending in .pdf ("Download PDF" links, LHDN).
 
     Returns an absolute PDF URL, or None if the page embeds/links no PDF.
     """
@@ -476,10 +468,9 @@ def detect_type(raw_bytes: bytes, content_type: str) -> DocType:
     ct = content_type.lower().split(";")[0].strip()
     method: str = "header"
 
-    # Priority 0: .docx is a ZIP with word/document.xml — structurally unambiguous,
-    # so trust the bytes over the header (covers proper CT, octet-stream local
-    # files, and mislabeled downloads). Legacy .doc (OLE) is NOT matched here and
-    # falls through to UNKNOWN → UnsupportedDocTypeError.
+    # Priority 0: .docx is a ZIP with word/document.xml — unambiguous, so trust the
+    # bytes over the header (handles proper CT, octet-stream, and mislabeled files).
+    # Legacy .doc (OLE) is not matched → falls through to UNKNOWN.
     if ct in _DOCX_CONTENT_TYPES or _is_docx(raw_bytes):
         logger.info({"event": "doc_type_detected", "url": "", "doc_type": "DOCX", "method": method, "economy": ""})
         return "DOCX"
@@ -603,17 +594,14 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
             # branch below renders it with Playwright before extraction.
             auto_render = True
         elif fetch_strategy == "html_js":
-            # Portal whose HTML pages ALWAYS require JS to populate content (e.g.
-            # pdpc.gov.sg). Unlike `auto`, this does not consult classify_render —
-            # that probe measures body text WITHOUT stripping nav/footer chrome, so
-            # a content-less SPA shell wrapped in a large menu reads as SSR and the
-            # render is skipped. html_js renders unconditionally before extraction.
+            # Portal whose pages ALWAYS need JS (e.g. pdpc.gov.sg). Renders
+            # unconditionally — unlike `auto`, it skips classify_render, whose probe
+            # mis-reads a menu-wrapped SPA shell as SSR.
             force_render = True
         elif fetch_strategy == "html_wholedoc":
-            # Portal serves the full act as a JS-rendered whole-document HTML view via
-            # a URL suffix (e.g. Singapore SSO ?WholeDoc=1), since the default page
-            # paginates. Append the per-portal `pdf_view_suffix`, then force a JS render
-            # (provisions lazy-load) before HTML extraction.
+            # Portal serves the full act as a JS-rendered whole-doc view via a URL
+            # suffix (e.g. SSO ?WholeDoc=1), since the default page paginates. Append
+            # pdf_view_suffix, then force a JS render (provisions lazy-load).
             single_act_fetch = True
             force_render = True
             wholedoc_render = True
@@ -628,18 +616,15 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
                 })
                 fetch_url = rewritten
         elif fetch_strategy == "pdf_link":
-            # Portal whose act page embeds/links a PDF (JPDP <embed>, AGC pdf.js,
-            # LHDN .pdf anchor). We download the HTML, resolve the PDF URL from it
-            # (see HTML branch below), then fetch that PDF. The resolved PDF is a
-            # single act, not a consolidated volume — skip segmentation.
+            # Portal whose act page embeds/links a PDF (JPDP, AGC pdf.js, LHDN).
+            # Download the HTML, resolve the PDF URL (HTML branch below), fetch it.
+            # A single act, not a volume — skip segmentation.
             single_act_fetch = True
             resolve_pdf_link = True
 
-    # force_render strategies (html_js, html_wholedoc) KNOW the content is populated
-    # by JS, so render up front — this also sidesteps anti-bot gates that would 202
-    # a plain httpx GET (e.g. SSO). The render is flaky under anti-bot (a session is
-    # occasionally served an empty/challenge page), so retry a few times before
-    # falling through to the download path.
+    # Render up front for JS-populated strategies (html_js, html_wholedoc); this also
+    # sidesteps anti-bot gates that 202 a plain httpx GET (e.g. SSO). The render is
+    # flaky under anti-bot, so retry a few times before falling through to download.
     if force_render:
         rendered = ""
         for _attempt in range(1, _RENDER_RETRIES + 1):
@@ -673,10 +658,9 @@ def route(zone1_result: Zone1Result, economy_config: "EconomyConfig") -> Fetched
         logger.warning({"event": "forced_js_render_failed", "url": fetch_url,
                         "economy": zone1_result.economy})
 
-    # A portal may gate content behind anti-bot that answers plain httpx with an
-    # empty/202 body or a non-document challenge shell (Singapore SSO's PDF view).
-    # When it declares transport_fallback: playwright_stealth, escalate the fetch
-    # to a real browser session that clears the gate. Declarative + generic.
+    # When a portal declares transport_fallback: playwright_stealth, escalate to a
+    # real browser session for anti-bot gates that answer plain httpx with an
+    # empty/202 body or a challenge shell (e.g. SSO's PDF view).
     browser_fallback = (
         portal is not None
         and getattr(portal, "transport_fallback", None) == "playwright_stealth"

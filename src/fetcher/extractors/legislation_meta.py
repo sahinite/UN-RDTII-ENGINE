@@ -2,13 +2,10 @@
 Legislation citation metadata extractor. [PRD: 86ey22k30 — fix #2]
 
 Parses `law_number_ref` (act number / revised edition) and `last_amended`
-(version date / revised-edition year) from a statute's cover-page text and its
-source URL. Designed against Singapore Statutes Online (SSO) conventions but
-written defensively so it returns None rather than guessing on other portals.
-
-SSO conventions used:
-  - Acts carry "Act <n> of <year>" and a revised edition "<year> Ed." on the cover.
-  - Document URLs carry the version date as ?DocDate=YYYYMMDD (or ?ValidDate=...).
+(version date / revised-edition year) from a statute's cover-page text and URL.
+Tuned to Singapore SSO conventions but returns None rather than guessing elsewhere:
+  - Cover carries "Act <n> of <year>" and a revised edition "<year> Ed.".
+  - URLs carry the version date as ?DocDate=YYYYMMDD (or ?ValidDate=...).
 """
 
 from __future__ import annotations

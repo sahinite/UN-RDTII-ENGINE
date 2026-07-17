@@ -1,14 +1,10 @@
 """
 DOCX (.docx) extraction via python-docx. [ADR-044]
 
-The fifth (and final) extractor branch in the closed set — for portals that serve
-legislation as Word documents (e.g. Australia's FRL offers a .docx alongside the
-PDF, and some older gov portals serve Word only). Additive: it does not touch the
-PDF / OCR / HTML branches.
-
-Legacy `.doc` (OLE binary, pre-2007) is a different format that python-docx cannot
-read; `detect_type` classifies it as UNKNOWN so the router raises a clear
-UnsupportedDocTypeError rather than silently mis-extracting.
+For portals that serve legislation as Word documents (e.g. Australia's FRL offers
+a .docx alongside the PDF). Legacy `.doc` (OLE binary) is unreadable by
+python-docx, so detect_type classifies it UNKNOWN → the router raises a clear
+UnsupportedDocTypeError rather than mis-extracting.
 """
 
 from __future__ import annotations

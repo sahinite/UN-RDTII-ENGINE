@@ -34,10 +34,8 @@ _DEEPL_CHAR_RATE_USD: float = 20.0 / 1_000_000
 # Buddhist Era years fall in the 2400–2599 range (CE 1857–2056)
 _BE_YEAR_RE = re.compile(r"\b(2[45]\d{2})\b")
 
-# Max chars per translation call. Kept well below the old 100 K: on Argos (CPU
-# neural MT ~1-2 ms/char) a 100 K chunk took ~180 s and hit the worker timeout;
-# ~25 K chunks finish in ~30-50 s and are translated in parallel across the pool.
-# Still far under DeepL's 128 KB hard limit.
+# Max chars per translation call. ~25 K chunks finish in ~30-50 s on Argos and
+# parallelise across the pool; well under DeepL's 128 KB hard limit.
 _CHUNK_SIZE = 25_000
 
 
@@ -89,21 +87,15 @@ def _lang_root(lang: str) -> str:
     return lang.lower().strip().replace("_", "-").split("-")[0]
 
 
-# Argos Translate — offline neural MT, no API key or quota. Primary translator.
-# Runs in SUBPROCESS workers (src.fetcher.argos_worker): Argos's ctranslate2/
-# onnxruntime native runtime segfaults when co-resident with the RAG torch/faiss
-# stack, so it must never be imported into the main pipeline process.
-#
-# A pool of PERSISTENT workers keeps the model loaded (no ~3.5s reload per call)
-# and translates chunks in parallel (measured ~1.7-2x on multi-core). Pool size
-# defaults to a fraction of the cores — each argos call already uses several
-# cores, so a handful of workers saturates the machine.
+# Argos Translate — offline neural MT, no API key. Primary translator. Runs in
+# SUBPROCESS workers (src.fetcher.argos_worker) because its ctranslate2/onnxruntime
+# native runtime segfaults when co-resident with the RAG torch/faiss stack, so it
+# must never be imported into the main process. Persistent workers keep the model
+# loaded (no ~3.5s reload per call).
 _ARGOS_TIMEOUT = int(os.environ.get("ARGOS_TIMEOUT", "300"))
-# ctranslate2 already uses all cores for a single translation, so running several
-# workers in parallel oversubscribes the CPU and thrashes (measured 4x slower than
-# one worker). Default to ONE persistent worker: model loaded once (no per-call
-# reload), all cores per translation. Override with ARGOS_POOL_SIZE if a future
-# GPU/host changes the tradeoff.
+# Default to ONE worker: ctranslate2 already uses all cores per translation, so
+# parallel workers oversubscribe the CPU and thrash (~4x slower). Override with
+# ARGOS_POOL_SIZE on a GPU/host where the tradeoff differs.
 _ARGOS_POOL_SIZE = int(os.environ.get("ARGOS_POOL_SIZE", "0")) or 1
 
 
@@ -125,13 +117,12 @@ class _ArgosPool:
         )
 
     def translate_many(self, texts: list[str], src: str) -> list[Optional[str]]:
-        """Translate texts src→en across the worker pool in parallel. Each result is
-        the English text, or None if that item failed (caller falls back per item).
+        """Translate texts src→en across the pool in parallel; each result is the
+        English text or None on failure (caller falls back per item).
 
-        A hung worker must never freeze the pipeline: each read is bounded by
-        _ARGOS_TIMEOUT. On timeout/EOF the worker is killed and its remaining items
-        flow to other workers or to the DeepL/Google fallback. Dead workers are
-        respawned at the start of the next batch."""
+        Each read is bounded by _ARGOS_TIMEOUT so a hung worker can't freeze the
+        pipeline: on timeout/EOF the worker is killed (its items flow to other
+        workers or the DeepL/Google fallback) and respawned on the next batch."""
         import json
         import queue
         import select
@@ -404,22 +395,14 @@ def translate_document(
     translate_body: bool = True,
 ) -> TranslatedDocument:
     """
-    Run the full Z2-2 translation pipeline on *doc*.
+    Run the full Z2-2 translation pipeline on *doc*: detect source language →
+    Layer 1 keywords → Layer 2 act title → Buddhist-Era conversion → Layer 3 full
+    text (chunked) → TranslatedDocument with verbatim_original preserved. English
+    economies skip all translation calls.
 
-    Execution order:
-      1. Detect source language from economy_config.languages
-      2. Layer 1 — translate taxonomy keywords (optional, for probe use)
-      3. Layer 2 — translate act title + normalise
-      4. Buddhist Era conversion (if economy_config.be_year_conversion)
-      5. Layer 3 — translate full document text (chunked)
-      6. Build TranslatedDocument with verbatim_original preserved
-
-    English economies (e.g. Singapore) skip all translation calls.
-
-    translate_body=False skips Layer 3 (the expensive full-document translation):
-    the body stays in the source language. Used when RAG runs on the original text
-    via a multilingual embedder and only retrieved passages need the source LLM —
-    avoids translating ~1.5M chars to use ~10 retrieved passages.
+    translate_body=False skips the expensive Layer 3: the body stays in the source
+    language for multilingual RAG, so only retrieved passages reach the LLM (avoids
+    translating ~1.5M chars to use ~10 passages).
     """
     # Derive the primary non-English language for this economy
     source_lang = next(
@@ -471,11 +454,9 @@ def translate_document(
     verbatim_original = doc.raw_text  # always preserve the source-language text
 
     if not translate_body:
-        # RAG runs on the original text (multilingual retrieval) — skip the expensive
-        # full-document translation. Use doc.raw_text (the EXACT source), NOT
-        # text_for_l3: for a Buddhist-Era economy text_for_l3 has years converted
-        # (2567→2024), which would corrupt verbatim snippets extracted from these
-        # chunks. BE conversions are still recorded for metadata below.
+        # Multilingual RAG runs on the original text. Use doc.raw_text (EXACT
+        # source), NOT text_for_l3 — its BE-converted years (2567→2024) would
+        # corrupt verbatim snippets. BE conversions are still recorded below.
         translated_text = doc.raw_text
     elif not _is_english(source_lang) and text_for_l3.strip():
         chars_translated += len(text_for_l3)  # body IS translated here
@@ -484,9 +465,8 @@ def translate_document(
                 text_for_l3[i: i + _CHUNK_SIZE]
                 for i in range(0, len(text_for_l3), _CHUNK_SIZE)
             ]
-            # Translate all chunks through the Argos pool in parallel (one round-trip
-            # for the whole document); fall back per-chunk to DeepL/Google only for
-            # the chunks Argos couldn't handle.
+            # One Argos round-trip for the whole doc; per-chunk DeepL/Google
+            # fallback only for chunks Argos couldn't handle.
             argos_parts = _argos_translate_many(chunks, source_lang)
             translated_parts: list[str] = []
             argos_used = False

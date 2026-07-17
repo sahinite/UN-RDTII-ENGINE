@@ -77,11 +77,9 @@ def extract_article_hierarchy(soup: BeautifulSoup, base_url: str) -> list[dict]:
     headings = [h for h in soup.find_all(re.compile(r"^h[1-4]$")) if isinstance(h, Tag)]
 
     # Resolve every heading's anchor up front. A missing anchor is only worth
-    # flagging when the document ACTUALLY uses anchored headings — i.e. some other
-    # heading resolved one. When none do (e.g. Singapore SSO's whole-doc view keys
-    # provisions off <a name="pr..-"> anchors and its only h-tags are page chrome
-    # like "Help"/"Search within Legislation"), the heading-anchor model simply
-    # does not apply, so warning per heading is just noise.
+    # flagging when the doc actually uses anchored headings (some other heading
+    # resolved one); otherwise (e.g. SSO's whole-doc view, whose h-tags are just
+    # page chrome) the heading-anchor model doesn't apply and warnings are noise.
     anchor_ids = [_find_anchor_id(h, soup) for h in headings]
     doc_uses_heading_anchors = any(anchor_ids)
 
