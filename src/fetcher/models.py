@@ -94,9 +94,9 @@ class FetchedDocument:
         if self.discovery_tag not in ("KNOWN", "NEW"):
             raise ValueError(f"discovery_tag must be KNOWN or NEW, got: {self.discovery_tag!r}")
         if self.doc_type == "UNKNOWN":
-            raise ValueError(f"doc_type UNKNOWN should have raised UnsupportedDocTypeError before reaching FetchedDocument")
+            raise ValueError("doc_type UNKNOWN should have raised UnsupportedDocTypeError before reaching FetchedDocument")
         if self.cost_log_entry is None:
-            raise ValueError(f"cost_log_entry is required for hackathon cost tracking")
+            raise ValueError("cost_log_entry is required for hackathon cost tracking")
 
 
 # ── Segmenter output ───────────────────────────────────────────────────────────

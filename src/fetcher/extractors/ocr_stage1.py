@@ -235,7 +235,6 @@ def run_tesseract(image_bytes: bytes, lang: str = "eng") -> tuple[str, float]:
 # ── PaddleOCR path ─────────────────────────────────────────────────────────────
 
 def run_paddleocr(image_bytes: bytes, lang: str) -> tuple[str, float]:
-    global _paddle_instance
     if lang not in _paddle_instance:
         try:
             from paddleocr import PaddleOCR
