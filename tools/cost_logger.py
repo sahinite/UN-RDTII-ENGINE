@@ -200,7 +200,7 @@ def _run_llm_stage(
     rag_results = retrieve_batch(indicator_ids, stub_doc)
     results, llm_cost_entry = extract_provisions(rag_results, stub_doc)
 
-    for ind_id, call_data in llm_cost_entry.per_indicator.items():
+    for call_data in llm_cost_entry.per_indicator.values():
         cost_logger.record_llm_call(
             provider=call_data.get("provider", "unknown"),
             model=call_data.get("model", "unknown"),
@@ -245,9 +245,9 @@ def main() -> None:
 
     # ── OCR Stage ──────────────────────────────────────────────────────────────
     print("  [1/3] OCR ...")
-    text, cer = "", None
+    text = ""
     try:
-        text, cer = _run_ocr_stage(pdf_path, args.economy, cost_logger)
+        text, _ = _run_ocr_stage(pdf_path, args.economy, cost_logger)
     except Exception as exc:
         print(f"  OCR stage failed: {exc}", file=sys.stderr)
         print("  Continuing with empty text for cost baseline.")

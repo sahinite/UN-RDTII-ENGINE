@@ -136,7 +136,7 @@ Adding an economy = a new YAML only (no Python changes).
 
 ### Test Suite
 
-643 tests passing.
+Tests live under `tests/`. Run `pytest` for the full suite or a focused file such as `pytest tests/test_economy_config.py`; keep golden discovery fixtures in `tests/golden/` byte-stable unless intentionally updating expected behavior.
 
 ### Known accuracy notes
 

@@ -14,12 +14,9 @@ an Angular SPA (AU FRL) has ~1770 chars of nav chrome, above a naive length gate
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from bs4 import BeautifulSoup
-
-if TYPE_CHECKING:
-    from src.config.economy_config import Portal
 
 RenderMode = Literal["ssr", "spa"]
 
@@ -107,22 +104,3 @@ def classify_render(html: str, *, min_text_chars: int = DEFAULT_MIN_TEXT_CHARS) 
         body_text_len=body_text_len,
         reason=f"content present in static markup ({body_text_len} chars, no CSR markers)",
     )
-
-
-async def probe_render(url: str, portal: "Portal | None" = None) -> RenderProbe:
-    """
-    Fetch a URL's STATIC HTML (no JS execution) and classify it.
-
-    Uses the transport ladder's httpx rungs but deliberately never escalates to
-    Playwright — the whole point is to observe what the server returns WITHOUT a
-    browser, so a JS app appears as its shell. Returns an SPA verdict on fetch
-    failure (safest for the caller: it will try the render path).
-    """
-    from src.crawler.transport import _fetch_plain, _fetch_with_headers
-
-    html, status = await _fetch_with_headers(url)
-    if not html:
-        html, status = await _fetch_plain(url)
-    if not html:
-        return RenderProbe(mode="spa", body_text_len=0, reason=f"fetch failed (status={status})")
-    return classify_render(html)

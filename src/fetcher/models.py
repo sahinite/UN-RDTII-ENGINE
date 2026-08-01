@@ -9,7 +9,6 @@ TranslatedDocument wraps FetchedDocument with 3-layer translation output.
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from dataclasses import dataclass, field
 from typing import Literal, Optional
@@ -185,12 +184,3 @@ class TranslatedDocument:
     @property
     def source_pdf_path(self) -> None:
         return None
-
-
-# ── Serialisation helper ────────────────────────────────────────────────────────
-
-def to_dict(doc: FetchedDocument) -> dict:
-    """JSON-serialisable dict of FetchedDocument, raw_text excluded (too large)."""
-    d = dataclasses.asdict(doc)
-    d.pop("raw_text", None)
-    return d

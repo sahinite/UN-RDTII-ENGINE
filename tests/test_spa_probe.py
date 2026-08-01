@@ -10,11 +10,7 @@ these tests pin the marker-primary / length-secondary logic and its edge cases.
 
 from __future__ import annotations
 
-import asyncio
-
-import pytest
-
-from src.crawler.spa_probe import classify_render, probe_render
+from src.crawler.spa_probe import classify_render
 
 _LONG = "Section 1. " + ("The Act provides for the protection of personal data. " * 40)
 
@@ -66,32 +62,3 @@ class TestClassifyRender:
         html = "<html><body><main>" + ("word " * 30) + "</main></body></html>"  # ~150 chars
         assert classify_render(html, min_text_chars=1000).mode == "spa"
         assert classify_render(html, min_text_chars=50).mode == "ssr"
-
-
-class TestProbeRender:
-    def test_probe_uses_static_html_and_classifies_ssr(self):
-        from src.crawler import spa_probe
-
-        async def fake_headers(url):
-            return f"<html><body><main>{_LONG}</main></body></html>", 200
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(spa_probe, "_fetch_with_headers", fake_headers, raising=False)
-            # patch the imported names inside the function scope via transport module
-            import src.crawler.transport as transport
-            mp.setattr(transport, "_fetch_with_headers", fake_headers)
-            r = asyncio.run(probe_render("https://example.gov"))
-        assert r.mode == "ssr"
-
-    def test_probe_returns_spa_on_fetch_failure(self):
-        import src.crawler.transport as transport
-
-        async def fail(url):
-            return "", 403
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(transport, "_fetch_with_headers", fail)
-            mp.setattr(transport, "_fetch_plain", fail)
-            r = asyncio.run(probe_render("https://example.gov"))
-        assert r.mode == "spa"
-        assert "fetch failed" in r.reason

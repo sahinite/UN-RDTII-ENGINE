@@ -115,7 +115,7 @@ async def fetch_isolated(url: str, timeout_ms: int) -> tuple[str, int]:
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 
     try:
-        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
+        from crawl4ai import AsyncWebCrawler  # type: ignore[import]
     except ImportError as exc:
         raise CrawlerError(
             "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"
@@ -161,7 +161,7 @@ async def fetch_with_playwright(
     from src.crawler.exceptions import CrawlerError  # noqa: PLC0415
 
     try:
-        from crawl4ai import AsyncWebCrawler  # type: ignore[import]  # noqa: F401
+        __import__("crawl4ai")
     except ImportError as exc:
         raise CrawlerError(
             "crawl4ai not installed — run: pip install crawl4ai && playwright install chromium"

@@ -1037,27 +1037,7 @@ class TestSegmenterInternals:
         assert not _matches_act_header("Section 26. Interpretation")
 
 
-class TestModelsToDict:
-    def test_to_dict_excludes_raw_text(self):
-        from src.fetcher.models import CostLogEntry, FetchedDocument, to_dict
-        doc = FetchedDocument(
-            source_url="https://example.com",
-            resolved_url="https://example.com",
-            economy="SG",
-            act_title="Test Act",
-            discovery_tag="KNOWN",
-            archive_url="https://web.archive.org/",
-            doc_type="TEXT_PDF",
-            extraction_method="pdfplumber",
-            page_count=1,
-            raw_text="Very long text that should be excluded from cost log.",
-            section_hierarchy=[],
-            cost_log_entry=CostLogEntry(engine="pdfplumber", pages=1, cost_usd=0.0, processing_time_ms=50.0),
-        )
-        d = to_dict(doc)
-        assert "raw_text" not in d
-        assert d["doc_type"] == "TEXT_PDF"
-
+class TestModels:
     def test_zone1_result_fields(self):
         from src.fetcher.models import Zone1Result
         z = Zone1Result(
