@@ -92,18 +92,18 @@ CASES = [
 
 
 def _is_target(chunk, case: Case) -> bool:
-    art = (chunk.location_reference.article_number or "").lower()
-    if art == case.target_section.lower():
+    article_number = (chunk.location_reference.article_number or "").lower()
+    if article_number == case.target_section.lower():
         return True
-    text = chunk.text.lower()
-    return any(p.lower() in text for p in case.phrases)
+    chunk_text = chunk.text.lower()
+    return any(phrase.lower() in chunk_text for phrase in case.phrases)
 
 
-def _rank_in(idx: int, ranked_indices: list[int]) -> int | None:
-    """1-based rank of idx in the list, or None if absent."""
-    for r, j in enumerate(ranked_indices, start=1):
-        if j == idx:
-            return r
+def _rank_in(target_index: int, ranked_indices: list[int]) -> int | None:
+    """1-based rank of target_index in the list, or None if absent."""
+    for rank, index in enumerate(ranked_indices, start=1):
+        if index == target_index:
+            return rank
     return None
 
 
@@ -112,9 +112,11 @@ def run_case(case: Case, economy_config) -> dict:
     if not pdf_path.exists():
         return {"name": case.name, "error": f"cached PDF missing: {pdf_path}"}
 
-    z1 = Zone1Result(url=case.source_url, economy="SG", act_title=case.act_title,
-                     discovery_tag="KNOWN", archive_url="")
-    doc = extract_text_pdf(pdf_path.read_bytes(), z1, economy_config)
+    zone1_result = Zone1Result(
+        url=case.source_url, economy="SG", act_title=case.act_title,
+        discovery_tag="KNOWN", archive_url="",
+    )
+    doc = extract_text_pdf(pdf_path.read_bytes(), zone1_result, economy_config)
     chunks = chunk_document(doc)
 
     target_idxs = [i for i, c in enumerate(chunks) if _is_target(c, case)]
@@ -122,9 +124,9 @@ def run_case(case: Case, economy_config) -> dict:
     indicator = get_indicator(case.indicator_id)
     query = indicator.legal_question + " " + " ".join(indicator.probe_keywords[:3])
 
-    emb = build_index(chunks)
+    embedding_index = build_index(chunks)
     bm25 = build_bm25(chunks)
-    dense_results = emb.dense_search(query, top_k=DENSE_TOP_K)
+    dense_results = embedding_index.dense_search(query, top_k=DENSE_TOP_K)
     bm25_results = bm25.search(query, indicator, top_k=BM25_TOP_K)
     fused = rrf_fusion(bm25_results, dense_results, top_k=FUSION_TOP_K)
     fused_idxs = [idx for idx, _ in fused]
@@ -174,7 +176,7 @@ def probe_llm(case: Case, economy_config) -> None:
     retrieved = retrieve(case.indicator_id, doc, top_n=RERANK_TOP_N)
 
     print(f"\n=== LLM PROBE: {case.name} [{case.indicator_id}] — {case.act_title} ===")
-    print(f"\nChunks sent to LLM (article# | target? | text):")
+    print("\nChunks sent to LLM (article# | target? | text):")
     for i, rc in enumerate(retrieved, 1):
         art = rc.chunk.location_reference.article_number or "?"
         tgt = "TARGET" if _is_target(rc.chunk, case) else "      "
@@ -197,8 +199,11 @@ def probe_llm(case: Case, economy_config) -> None:
     provisions = parse_llm_response(response, case.indicator_id, retrieved,
                                     doc_metadata, known_provisions=set())
     print(f"\nPARSED PROVISIONS ({len(provisions)} survived):")
-    for p in provisions:
-        print(f"  - {p.article} | law_name={p.law_name!r} | {(p.verbatim_snippet or '')[:60]}")
+    for provision in provisions:
+        print(
+            f"  - {provision.article} | law_name={provision.law_name!r} | "
+            f"{(provision.verbatim_snippet or '')[:60]}"
+        )
     if not provisions:
         print("  (none — LLM declined OR parser discarded all)")
     print()
@@ -217,11 +222,11 @@ def _verdict(r: dict) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--case", help="run a single case by name")
-    ap.add_argument("--llm", action="store_true",
+    argument_parser = argparse.ArgumentParser()
+    argument_parser.add_argument("--case", help="run a single case by name")
+    argument_parser.add_argument("--llm", action="store_true",
                     help="run the real LLM extraction path (one call/case) instead of retrieval-only")
-    args = ap.parse_args()
+    args = argument_parser.parse_args()
 
     economy_config = load_economy("Singapore")
     cases = [c for c in CASES if not args.case or c.name == args.case]
@@ -234,16 +239,16 @@ def main() -> None:
     print(f"\nRetrieval harness — BM25={BM25_TOP_K} DENSE={DENSE_TOP_K} "
           f"FUSION={FUSION_TOP_K} RERANK_TOP_N={RERANK_TOP_N}\n")
     for case in cases:
-        r = run_case(case, economy_config)
-        if r.get("error"):
-            print(f"● {r['name']:22} {r['error']}")
+        result = run_case(case, economy_config)
+        if result.get("error"):
+            print(f"● {result['name']:22} {result['error']}")
             continue
-        print(f"● {r['name']:22} [{r['indicator']}]  chunks={r['chunks']} "
-              f"target_chunks={r['target_chunks']} fused={r['fused_size']}")
-        print(f"    rank@fusion={r['rank_fusion']}  rank@rerank={r['rank_rerank']}  "
-              f"in_top_{RERANK_TOP_N}={r['in_top_n']}")
-        print(f"    top-{RERANK_TOP_N} articles seen by LLM: {r['top_n_articles']}")
-        print(f"    VERDICT: {_verdict(r)}\n")
+        print(f"● {result['name']:22} [{result['indicator']}]  chunks={result['chunks']} "
+              f"target_chunks={result['target_chunks']} fused={result['fused_size']}")
+        print(f"    rank@fusion={result['rank_fusion']}  rank@rerank={result['rank_rerank']}  "
+              f"in_top_{RERANK_TOP_N}={result['in_top_n']}")
+        print(f"    top-{RERANK_TOP_N} articles seen by LLM: {result['top_n_articles']}")
+        print(f"    VERDICT: {_verdict(result)}\n")
 
 
 if __name__ == "__main__":
