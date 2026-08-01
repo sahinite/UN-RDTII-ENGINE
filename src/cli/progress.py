@@ -56,7 +56,6 @@ class Progress:
         self._thread: threading.Thread | None = None
         self._running    = False
         self._tty        = sys.stdout.isatty()
-        self._drawn      = 0   # lines currently on screen from spinner
 
     # ── public API ─────────────────────────────────────────────────────────────
 
@@ -126,7 +125,6 @@ class Progress:
             sys.stdout.flush()
             return
         self._running = True
-        self._drawn   = 0
         self._thread  = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
 
@@ -140,7 +138,6 @@ class Progress:
             # lines can never accumulate).
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
-            self._drawn = 0
 
     def _spin(self) -> None:
         i = 0
