@@ -208,6 +208,9 @@ python main.py --economy Vietnam --pillar 7
   search the original text and skip full-document translation (Malaysia P7: ~50 min → ~7 min).
 - **Run profiles** (`RUN_PROFILE`): `gate` (KNOWN-only, default) · `submit` (KNOWN + 3 NEW,
   use for submissions) · `explore` (aggressive NEW). Printed at run start.
+- **Quality gate** (`QUALITY_GATE_MODE`): `off` (production default) · `warn` · `fail`;
+  optional generic economy/pillar validation. `QUALITY_GATE_MIN_CONFIDENCE`
+  controls the default `0.80` confidence threshold.
 
 More detail lives in `CLAUDE.md` and `CONTEXT.md`.
 

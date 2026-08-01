@@ -9,9 +9,9 @@ Public API:
         Main entry point. Accepts RAG results (dict or list) and a FetchedDocument /
         TranslatedDocument. Returns all extracted provisions + cost breakdown.
 
-    check_pdpa_gate(economy, results)
-        Raises PDPAGateError if Singapore Pillar 7 has no provision with
-        confidence >= 0.80 — enforces the PDPA-first build gate.
+    check_quality_gate(economy, pillar, results)
+        Raises QualityGateError when the configured economy/pillar quality
+        threshold is not met.
 
 LLM cascade (imported from llm_client):
     pin_active_provider()          — call once at startup
@@ -24,10 +24,10 @@ Models:
     LLMResponse        — raw provider response wrapper
 
 Exceptions:
-    AllProvidersExhaustedError, PDPAGateError, ConfigError, ParseError
+    AllProvidersExhaustedError, QualityGateError, ConfigError, ParseError
 """
 
-from src.mapping.mapper import check_pdpa_gate, extract_provisions
+from src.mapping.mapper import check_pdpa_gate, check_quality_gate, extract_provisions
 from src.mapping.llm_client import (
     call_llm_with_cascade,
     get_active_model_version,
@@ -40,6 +40,7 @@ from src.mapping.exceptions import (
     ConfigError,
     MappingError,
     PDPAGateError,
+    QualityGateError,
     ParseError,
     ProviderAPIError,
     ProviderRateLimitError,
@@ -49,6 +50,7 @@ from src.mapping.exceptions import (
 __all__ = [
     # Pipeline entry points
     "extract_provisions",
+    "check_quality_gate",
     "check_pdpa_gate",
     # LLM cascade
     "pin_active_provider",
@@ -63,6 +65,7 @@ __all__ = [
     "MappingError",
     "AllProvidersExhaustedError",
     "PDPAGateError",
+    "QualityGateError",
     "ParseError",
     "ConfigError",
     "ProviderAPIError",

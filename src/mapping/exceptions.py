@@ -33,8 +33,12 @@ class ParseError(MappingError):
     """LLM response could not be parsed as valid JSON."""
 
 
-class PDPAGateError(MappingError):
-    """Singapore PDPA-first gate failed — engine must not proceed."""
+class QualityGateError(MappingError):
+    """Configurable economy/pillar quality gate failed."""
+
+
+class PDPAGateError(QualityGateError):
+    """Deprecated compatibility exception for the former Singapore-only gate."""
 
 
 class ConfigError(MappingError):

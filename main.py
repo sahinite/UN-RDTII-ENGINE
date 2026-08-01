@@ -28,7 +28,7 @@ from src.cli.progress import Progress
 from src.config.economy_config import InvalidEconomyConfigError, UnknownEconomyError, load_economy
 from src.crawler.exceptions import ConfigError
 from src.crawler.probe import load_taxonomy, validate_taxonomy
-from src.mapping.exceptions import PDPAGateError
+from src.mapping.exceptions import QualityGateError
 
 logger = logging.getLogger("main")
 
@@ -95,7 +95,7 @@ def run_pipeline(
     from src.fetcher.router import route, _find_portal_for_url
     from src.fetcher.translator import translate_document
     from src.mapping.llm_client import pin_active_provider
-    from src.mapping.mapper import check_pdpa_gate, extract_provisions
+    from src.mapping.mapper import check_quality_gate, extract_provisions
     from src.output.cost_logger import CostLogger
     from src.output.models import OutputRecord
     from src.output.validator import validate_and_flag
@@ -440,18 +440,47 @@ def run_pipeline(
         all_records.extend(null_records)
         p.info(f"Null assessments — {len(null_records)} indicator(s) assessed as no barrier")
 
-    # ── PDPA gate (Singapore crawl only) ────────────────────────────────────────
-    # This is the Phase-1 build gate for the live Singapore P7 crawl. It must NOT
-    # apply to --pdf mode, which processes an arbitrary provided document (e.g. a
-    # foreign or non-PDPA law) and would otherwise always abort here.
-    if economy_iso == "SG" and pillar == 7 and not pdf_path:
-        p.step("PDPA compliance gate check")
+    # ── Optional generic quality gate ──────────────────────────────────────────
+    # Production defaults to off. CI/build validation can set QUALITY_GATE_MODE
+    # to warn or fail; the check is economy/pillar agnostic.
+    quality_gate_mode = os.environ.get("QUALITY_GATE_MODE", "off").strip().lower()
+    if quality_gate_mode not in {"off", "warn", "fail"}:
+        p.warn(
+            f"Invalid QUALITY_GATE_MODE={quality_gate_mode!r}; using off "
+            "(allowed: off, warn, fail)"
+        )
+        quality_gate_mode = "off"
+    try:
+        quality_gate_min_confidence = float(
+            os.environ.get("QUALITY_GATE_MIN_CONFIDENCE", "0.80")
+        )
+        if not 0.0 <= quality_gate_min_confidence <= 1.0:
+            raise ValueError
+    except ValueError:
+        p.warn(
+            "Invalid QUALITY_GATE_MIN_CONFIDENCE; using 0.80 "
+            "(expected a number from 0.0 to 1.0)"
+        )
+        quality_gate_min_confidence = 0.80
+
+    if quality_gate_mode != "off":
+        p.step(
+            f"Quality gate — {quality_gate_mode} "
+            f"(minimum confidence {quality_gate_min_confidence:.2f})"
+        )
         try:
-            check_pdpa_gate(economy_iso, all_records)
-            p.done("PDPA gate passed")
-        except PDPAGateError as exc:
-            p.fail(f"PDPA gate failed: {exc}")
-            sys.exit(1)
+            check_quality_gate(
+                economy_config.economy_name,
+                pillar,
+                all_records,
+                min_confidence=quality_gate_min_confidence,
+            )
+            p.done("Quality gate passed")
+        except QualityGateError as exc:
+            if quality_gate_mode == "fail":
+                p.fail(str(exc))
+                sys.exit(1)
+            p.warn(f"Quality gate warning — {exc}")
 
     # ── Write outputs ───────────────────────────────────────────────────────────
     p.step("Writing outputs")

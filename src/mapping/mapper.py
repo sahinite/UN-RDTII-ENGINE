@@ -3,7 +3,7 @@ Mapper orchestrator — ties LLM cascade + prompt builder + parser together.
 
 Public API:
   extract_provisions(rag_results, doc) -> (list[ExtractionResult], LLMCostEntry)
-  check_pdpa_gate(economy, results)
+  check_quality_gate(economy, pillar, results)
 """
 
 from __future__ import annotations
@@ -12,7 +12,12 @@ import logging
 import time
 
 from src.cli.progress import substep
-from src.mapping.exceptions import AllProvidersExhaustedError, ConfigError, PDPAGateError
+from src.mapping.exceptions import (
+    AllProvidersExhaustedError,
+    ConfigError,
+    PDPAGateError,
+    QualityGateError,
+)
 from src.mapping.llm_client import call_llm_with_cascade, get_active_model_version
 from src.mapping.models import ExtractionResult, LLMCostEntry
 from src.mapping.parser import expand_non_consecutive, parse_llm_response
@@ -220,36 +225,57 @@ def _deduplicate(results: list[ExtractionResult]) -> list[ExtractionResult]:
     return deduped
 
 
-def check_pdpa_gate(economy: str, results: list[ExtractionResult]) -> None:
+def check_quality_gate(
+    economy: str,
+    pillar: int,
+    results: list[ExtractionResult],
+    min_confidence: float = 0.80,
+) -> None:
     """
-    Quality guardrail: verifies at least one P7 provision with confidence >= 0.80
-    was extracted from Singapore PDPA before expanding to other economies.
-    Raises PDPAGateError if gate fails for Singapore.
-    """
-    if economy != "SG":
-        return
+    Generic quality guardrail for CI/build validation.
 
-    p7_results = [
+    A run passes when it produces at least one provision for the requested
+    pillar at or above ``min_confidence``. Production may disable this check or
+    run it in warning-only mode; the caller controls that policy.
+    """
+    pillar_results = [
         r for r in results
-        if r.indicator_id.startswith("P7") and (r.confidence or 0.0) >= 0.80
+        if r.indicator_id.startswith(f"P{pillar}-")
+        and r.confidence is not None
+        and r.confidence >= min_confidence
     ]
 
-    if not p7_results:
+    if not pillar_results:
         logger.error({
-            "event": "pdpa_gate_failed",
+            "event": "quality_gate_failed",
             "economy": economy,
-            "p7_results_count": 0,
+            "pillar": pillar,
+            "min_confidence": min_confidence,
+            "qualifying_results": 0,
         })
-        raise PDPAGateError(
-            "Singapore PDPA-first gate: no P7 provision extracted with confidence >= 0.80. "
-            "Verify PDPA text extraction before proceeding to other economies."
+        raise QualityGateError(
+            f"Quality gate failed for {economy} P{pillar}: no provision extracted "
+            f"with confidence >= {min_confidence:.2f}. Verify discovery, text "
+            "extraction, retrieval, and LLM mapping."
         )
 
     logger.info({
-        "event": "pdpa_gate_passed",
-        "p7_provisions_found": len(p7_results),
-        "highest_confidence": max(r.confidence for r in p7_results if r.confidence),
+        "event": "quality_gate_passed",
+        "economy": economy,
+        "pillar": pillar,
+        "qualifying_results": len(pillar_results),
+        "highest_confidence": max(r.confidence for r in pillar_results if r.confidence),
     })
+
+
+def check_pdpa_gate(economy: str, results: list[ExtractionResult]) -> None:
+    """Deprecated wrapper retained for existing Phase 1 regression tests."""
+    if economy != "SG":
+        return
+    try:
+        check_quality_gate(economy, 7, results)
+    except QualityGateError as exc:
+        raise PDPAGateError(str(exc)) from exc
 
 
 class _DictRAGResult:

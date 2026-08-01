@@ -17,7 +17,7 @@ Read before touching any module; update as work lands (remove deprecated details
 | **KNOWN / NEW** | Discovery tags: KNOWN = act/provision in the Round 1 DB; NEW = engine-discovered (top scoring differentiator). |
 | **Zone 1 / Zone 2** | Evidence discovery (`discover()`) / intelligent mapping (fetch→OCR→translate→chunk→embed→RAG→map→validate→write). |
 | **Pillar** | An RDTII dimension: P6 Cross-border Data, P7 Domestic Data Protection. |
-| **PDPA** | Singapore Personal Data Protection Act — Phase-1 build gate (P7). |
+| **Quality gate** | Optional generic economy/pillar output check; `off` in production, `warn` or `fail` for CI/build validation. |
 | **8-tier LLM cascade** | Anthropic → OpenAI → Gemini → DeepSeek → Groq → Qwen → Ollama(qwen2.5) → Ollama(granite3). Pinned per run via `LLM_PROVIDER`; Llama 3.3 excluded (license). |
 | **CER** | OCR Character Error Rate; Stage-2 OCR triggers at CER ≥ 5%. |
 | **RAG** | Hybrid BM25 + dense + cross-encoder rerank; top-5 chunks/indicator, each with `location_reference`. |
@@ -96,11 +96,11 @@ Stories Z1-1 … Z2-6 complete. Module summary:
 
 **Zone 1** — `config/economy_config.py` (`EconomyConfig`/`Portal`, `load_economy`), `crawler/discover.py` (active entry: `index`/`api`/`sitemap`/`auto`/`seed_only`/`TBD` + shared rank/exclude/tag tail), `crawler/transport.py` (ladder + `_is_real_response`), `crawler/seed_loader.py` (`SeedData`, prose-section harvesting, `_db_indicator_to_engine`), `crawler/crawl4ai_runner.py` (stealth singleton), `crawler/{probe,crawler}.py` (legacy: taxonomy loader + shared `_normalise_url`).
 
-**Zone 2** — `fetcher/router.py` (`route()` dispatch; `pdf_endpoint`/`html_wholedoc`/`html_js`/`auto`/`pdf_link`), extractors (`pdf_text`, `ocr_stage1` CER gate, `html_extractor`, `llm_ocr`, `legislation_meta`), `fetcher/segmenter.py` (volume split), `fetcher/translator.py` (3-layer, Argos→DeepL→Google), `fetcher/models.py` (`FetchedDocument` incl. `archive_bytes`/`archive_ext`, `TranslatedDocument`), `ocr/processor.py` (Stage-2 Azure→Mistral), `retrieval/` (chunker, per-economy embedder/reranker, BM25, RRF fusion, `rag.py`), `mapping/` (mapper + PDPA gate, `llm_client.py` cascade, `parser.py` verbatim assertion, `prompts.py` Rules 1–9, `provision_tag.py`), `output/` (writer 13-col CSV + JSON envelope, validator, cost_logger, models), `cli/progress.py`.
+**Zone 2** — `fetcher/router.py` (`route()` dispatch; `pdf_endpoint`/`html_wholedoc`/`html_js`/`auto`/`pdf_link`), extractors (`pdf_text`, `ocr_stage1` CER gate, `html_extractor`, `llm_ocr`, `legislation_meta`), `fetcher/segmenter.py` (volume split), `fetcher/translator.py` (3-layer, Argos→DeepL→Google), `fetcher/models.py` (`FetchedDocument` incl. `archive_bytes`/`archive_ext`, `TranslatedDocument`), `ocr/processor.py` (Stage-2 Azure→Mistral), `retrieval/` (chunker, per-economy embedder/reranker, BM25, RRF fusion, `rag.py`), `mapping/` (mapper + optional quality gate, `llm_client.py` cascade, `parser.py` verbatim assertion, `prompts.py` Rules 1–9, `provision_tag.py`), `output/` (writer 13-col CSV + JSON envelope, validator, cost_logger, models), `cli/progress.py`.
 
 **LLM providers** (`src/mapping/providers/`): `AnthropicProvider`, `OpenAIProvider` (gpt-4o default; gpt-5/o-series auto-switch to `max_completion_tokens` + `reasoning_effort`), `GeminiProvider` (gemini-2.5-flash, OpenAI-compatible, `GEMINI_API_KEY`/`GOOGLE_API_KEY`), `DeepSeekProvider`, `GroqProvider` (+ fallback model), `QwenProvider` (DashScope), `OllamaProvider` (qwen2.5:7b / granite3-8b).
 
-**Pipeline** — `main.py` (`run_pipeline`, `_run_zone1`, PDPA gate), `batch_run.py` (`--parallel`), `evaluate.py` (KNOWN 40pts + NEW 4pts/max20), `tools/cost_logger.py`.
+**Pipeline** — `main.py` (`run_pipeline`, `_run_zone1`, optional quality gate), `batch_run.py` (`--parallel`), `evaluate.py` (KNOWN 40pts + NEW 4pts/max20), `tools/cost_logger.py`.
 
 ### Economy Configs (3 in `economies/`)
 
@@ -122,6 +122,8 @@ Adding an economy = a new YAML only (no Python changes).
 | `ALLOW_UNVERIFIED_SNIPPETS` | false | Skip verbatim assertion (OCR edge) |
 | `WAYBACK_BEST_EFFORT` / `LOCAL_ARCHIVE_FALLBACK` | true / true | Wayback non-blocking; local snapshot fallback |
 | `OLLAMA_NUM_CTX` | 8192 | Local-model context window (must fit the prompt) |
+| `QUALITY_GATE_MODE` | off | `off` / `warn` / `fail`; generic economy/pillar output validation |
+| `QUALITY_GATE_MIN_CONFIDENCE` | 0.80 | Minimum provision confidence for the quality gate |
 
 ### Taxonomy (`taxonomy.json`)
 
