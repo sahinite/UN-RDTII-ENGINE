@@ -46,12 +46,12 @@ def _estimate_cer_from_text(text: str) -> float:
     """Heuristic CER from non-printable character ratio (no ground truth needed)."""
     if not text or not text.strip():
         return 1.0
-    garbage = sum(
+    control_character_count = sum(
         1 for ch in text
         if unicodedata.category(ch) in ("Cc", "Cs", "Co", "Cn")
         and ch not in ("\n", "\t", "\r")
     )
-    return min(garbage / len(text), 1.0)
+    return min(control_character_count / len(text), 1.0)
 
 
 # ── Azure Document Intelligence ──────────────────────────────────────────
@@ -70,7 +70,7 @@ def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
             "AZURE_DI_KEY and AZURE_DI_ENDPOINT must be set for Stage 2 Azure DI"
         )
 
-    b64 = base64.b64encode(image_bytes).decode()
+    encoded_image = base64.b64encode(image_bytes).decode()
     analyze_url = (
         f"{endpoint}/documentintelligence/documentModels/prebuilt-read:analyze"
         "?api-version=2024-11-30"
@@ -81,21 +81,21 @@ def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     }
 
     with httpx.Client(timeout=timeout) as client:
-        resp = client.post(analyze_url, headers=headers, json={"base64Source": b64})
-        if resp.status_code not in (200, 202):
+        response = client.post(analyze_url, headers=headers, json={"base64Source": encoded_image})
+        if response.status_code not in (200, 202):
             raise RuntimeError(
-                f"Azure DI analyze POST failed: HTTP {resp.status_code} — {resp.text[:200]}"
+                f"Azure DI analyze POST failed: HTTP {response.status_code} — {response.text[:200]}"
             )
 
         operation_url = (
-            resp.headers.get("Operation-Location")
-            or resp.headers.get("operation-location", "")
+            response.headers.get("Operation-Location")
+            or response.headers.get("operation-location", "")
         )
         if not operation_url:
             raise RuntimeError("Azure DI: no Operation-Location header in response")
 
         # Poll for completion (max 12 × 5 s = 60 s)
-        result: dict = {}
+        analysis_result: dict = {}
         for _ in range(12):
             _sleep(5)
             poll = client.get(
@@ -103,26 +103,26 @@ def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
             )
             if poll.status_code != 200:
                 raise RuntimeError(f"Azure DI polling failed: HTTP {poll.status_code}")
-            result = poll.json()
-            status = result.get("status", "")
+            analysis_result = poll.json()
+            status = analysis_result.get("status", "")
             if status == "succeeded":
                 break
             if status == "failed":
                 raise RuntimeError(
-                    f"Azure DI analysis failed: {result.get('error', {})}"
+                    f"Azure DI analysis failed: {analysis_result.get('error', {})}"
                 )
         else:
             raise RuntimeError("Azure DI: timed out waiting for analysis result")
 
-    pages = result.get("analyzeResult", {}).get("pages", [])
-    words_text: list[str] = []
+    pages = analysis_result.get("analyzeResult", {}).get("pages", [])
+    extracted_words: list[str] = []
     confidences: list[float] = []
     for page in pages:
         for word in page.get("words", []):
-            words_text.append(word.get("content", ""))
+            extracted_words.append(word.get("content", ""))
             confidences.append(float(word.get("confidence", 1.0)))
 
-    text = " ".join(words_text)
+    text = " ".join(extracted_words)
     cer = (
         1.0 - (sum(confidences) / len(confidences))
         if confidences
@@ -131,7 +131,7 @@ def run_azure_di(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
 
     logger.info({
         "event": "ocr_stage2_azure_di_completed",
-        "words_extracted": len(words_text),
+        "words_extracted": len(extracted_words),
         "cer": round(cer, 4),
         "url": "",
         "economy": "",
@@ -151,8 +151,8 @@ def run_mistral_ocr(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     if not api_key:
         raise RuntimeError("MISTRAL_API_KEY must be set for Stage 2 Mistral OCR")
 
-    b64 = base64.b64encode(image_bytes).decode()
-    data_url = f"data:image/png;base64,{b64}"
+    encoded_image = base64.b64encode(image_bytes).decode()
+    image_data_url = f"data:image/png;base64,{encoded_image}"
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -160,21 +160,21 @@ def run_mistral_ocr(image_bytes: bytes, timeout: int = 60) -> tuple[str, float]:
     }
     payload = {
         "model": "mistral-ocr-latest",
-        "document": {"type": "image_url", "image_url": data_url},
+        "document": {"type": "image_url", "image_url": image_data_url},
     }
 
     with httpx.Client(timeout=timeout) as client:
-        resp = client.post(
+        response = client.post(
             "https://api.mistral.ai/v1/ocr",
             headers=headers,
             json=payload,
         )
-        if resp.status_code != 200:
+        if response.status_code != 200:
             raise RuntimeError(
-                f"Mistral OCR failed: HTTP {resp.status_code} — {resp.text[:200]}"
+                f"Mistral OCR failed: HTTP {response.status_code} — {response.text[:200]}"
             )
 
-    result = resp.json()
+    result = response.json()
     pages_data = result.get("pages", [])
     text = (
         "\n\n".join(p.get("markdown", "") for p in pages_data)
@@ -215,29 +215,21 @@ def _route_stage2(image_bytes: bytes) -> tuple[str, float, str]:
     Per-page cloud cascade for a single image: Mistral → Azure (if configured).
     Returns (text, cer, engine_used). Raises RuntimeError if all providers fail.
     """
-    errors: list[str] = []
-
+    providers = []
     if os.getenv("MISTRAL_API_KEY"):
-        try:
-            text, cer = run_mistral_ocr(image_bytes)
-            return text, cer, "mistral_ocr"
-        except Exception as exc:
-            errors.append(f"mistral_ocr: {exc}")
-            logger.warning({
-                "event": "ocr_stage2_mistral_failed",
-                "error": str(exc),
-                "url": "",
-                "economy": "",
-            })
-
+        providers.append(("mistral_ocr", run_mistral_ocr))
     if _azure_configured():
+        providers.append(("azure_di", run_azure_di))
+
+    errors: list[str] = []
+    for engine_name, ocr_provider in providers:
         try:
-            text, cer = run_azure_di(image_bytes)
-            return text, cer, "azure_di"
+            text, cer = ocr_provider(image_bytes)
+            return text, cer, engine_name
         except Exception as exc:
-            errors.append(f"azure_di: {exc}")
+            errors.append(f"{engine_name}: {exc}")
             logger.warning({
-                "event": "ocr_stage2_azure_di_failed",
+                "event": f"ocr_stage2_{engine_name}_failed",
                 "error": str(exc),
                 "url": "",
                 "economy": "",
@@ -257,34 +249,37 @@ def _mistral_whole_pdf(pdf_bytes: bytes, timeout: int = 300) -> tuple[str, int]:
     api_key = os.environ["MISTRAL_API_KEY"]
     auth = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(timeout=timeout) as client:
-        up = client.post(
+        upload_response = client.post(
             "https://api.mistral.ai/v1/files",
             headers=auth,
             files={"file": ("document.pdf", pdf_bytes, "application/pdf")},
             data={"purpose": "ocr"},
         )
-        up.raise_for_status()
-        file_id = up.json()["id"]
+        upload_response.raise_for_status()
+        file_id = upload_response.json()["id"]
 
-        signed = client.get(
+        signed_url_response = client.get(
             f"https://api.mistral.ai/v1/files/{file_id}/url",
             headers=auth, params={"expiry": 1},
         )
-        signed.raise_for_status()
+        signed_url_response.raise_for_status()
 
-        resp = client.post(
+        ocr_response = client.post(
             "https://api.mistral.ai/v1/ocr",
             headers={**auth, "Content-Type": "application/json"},
             json={
                 "model": "mistral-ocr-latest",
-                "document": {"type": "document_url", "document_url": signed.json()["url"]},
+                "document": {
+                    "type": "document_url",
+                    "document_url": signed_url_response.json()["url"],
+                },
             },
         )
-        resp.raise_for_status()
+        ocr_response.raise_for_status()
 
-    pages = resp.json().get("pages", [])
-    text = "\n\n".join(p.get("markdown", "") for p in pages)
-    return text, len(pages)
+    ocr_pages = ocr_response.json().get("pages", [])
+    text = "\n\n".join(page.get("markdown", "") for page in ocr_pages)
+    return text, len(ocr_pages)
 
 
 def _build_cloud_doc(
@@ -326,55 +321,71 @@ def _build_cloud_doc(
     return doc
 
 
-def _cloud_perpage(raw_bytes: bytes, zone1_result: "Zone1Result", is_pdf: bool, is_segment: bool):
+def _run_cloud_ocr_per_page(
+    raw_bytes: bytes,
+    zone1_result: "Zone1Result",
+    is_pdf: bool,
+    is_segment: bool,
+):
     """Per-page Mistral → Azure cascade (whole-doc retry / image input). None if all fail."""
-    images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
-    texts: list[str] = []
-    engine = "mistral_ocr"
-    paid_pages = 0
-    for img in images:
+    page_images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
+    page_texts: list[str] = []
+    selected_engine = "mistral_ocr"
+    processed_pages = 0
+    for page_image in page_images:
         try:
-            text, _cer, engine = _route_stage2(img)
-            texts.append(text)
-            paid_pages += 1
+            text, _page_cer, selected_engine = _route_stage2(page_image)
+            page_texts.append(text)
+            processed_pages += 1
         except RuntimeError:
-            texts.append("")
-    if not any(t.strip() for t in texts):
+            page_texts.append("")
+    if not any(text.strip() for text in page_texts):
         return None
-    full = assemble_pages(texts)
-    rate = _MISTRAL_OCR_PRICE_PER_PAGE if engine == "mistral_ocr" else _AZURE_OCR_PRICE_PER_PAGE
+    full_text = assemble_pages(page_texts)
+    cost_per_page = (
+        _MISTRAL_OCR_PRICE_PER_PAGE
+        if selected_engine == "mistral_ocr"
+        else _AZURE_OCR_PRICE_PER_PAGE
+    )
     return _build_cloud_doc(
-        zone1_result, full, len(images), engine,
-        _estimate_cer_from_text(full), paid_pages * rate, is_pdf, is_segment,
+        zone1_result, full_text, len(page_images), selected_engine,
+        _estimate_cer_from_text(full_text), processed_pages * cost_per_page,
+        is_pdf, is_segment,
     )
 
 
-def _llm_vision_perpage(raw_bytes: bytes, zone1_result: "Zone1Result", is_pdf: bool, is_segment: bool):
+def _run_llm_vision_per_page(
+    raw_bytes: bytes,
+    zone1_result: "Zone1Result",
+    is_pdf: bool,
+    is_segment: bool,
+):
     """LLM-vision OCR on the configured provider, page by page. None if unavailable/empty."""
     from src.fetcher.extractors.llm_ocr import LLMOCRUnavailableError, run_llm_ocr
     from src.output.cost_logger import compute_llm_cost
 
     provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
-    images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
-    texts: list[str] = []
-    in_tok = out_tok = 0
-    for img in images:
+    page_images = pdf_to_images(raw_bytes) if is_pdf else [raw_bytes]
+    page_texts: list[str] = []
+    input_tokens = output_tokens = 0
+    for page_image in page_images:
         try:
-            text, _cer, i_tok, o_tok = run_llm_ocr(img)
-            texts.append(text)
-            in_tok += i_tok
-            out_tok += o_tok
+            text, _page_cer, page_input_tokens, page_output_tokens = run_llm_ocr(page_image)
+            page_texts.append(text)
+            input_tokens += page_input_tokens
+            output_tokens += page_output_tokens
         except LLMOCRUnavailableError:
             return None  # provider can't do vision at all → skip the whole tier
         except Exception as exc:
             logger.warning({"event": "ocr_llm_vision_page_failed", "error": str(exc)[:200]})
-            texts.append("")
-    if not any(t.strip() for t in texts):
+            page_texts.append("")
+    if not any(text.strip() for text in page_texts):
         return None
-    full = assemble_pages(texts)
+    full_text = assemble_pages(page_texts)
     return _build_cloud_doc(
-        zone1_result, full, len(images), "llm_ocr",
-        _estimate_cer_from_text(full), compute_llm_cost(provider, in_tok, out_tok),
+        zone1_result, full_text, len(page_images), "llm_ocr",
+        _estimate_cer_from_text(full_text),
+        compute_llm_cost(provider, input_tokens, output_tokens),
         is_pdf, is_segment,
         flag_for_review=True,  # LLMs can hallucinate — always verify verbatim
         flag_reason="LLM-vision OCR — verify verbatim (hallucination risk)",
@@ -389,39 +400,46 @@ def run_ocr_cloud(
 ) -> FetchedDocument | None:
     """Cloud-first OCR cascade. Returns a FetchedDocument, or None when no cloud
     tier is configured/succeeds (caller falls to the local Tesseract/Paddle floor)."""
-    is_pdf = b"%PDF" in raw_bytes[:512]
+    input_is_pdf = b"%PDF" in raw_bytes[:512]
 
     # Tier 1 — Mistral: whole-doc single call, then per-page retry.
     if os.getenv("MISTRAL_API_KEY"):
-        if is_pdf:
+        if input_is_pdf:
             try:
-                text, pages = _mistral_whole_pdf(raw_bytes)
+                text, page_count = _mistral_whole_pdf(raw_bytes)
                 if text.strip():
                     return _build_cloud_doc(
-                        zone1_result, text, pages, "mistral_ocr",
+                        zone1_result, text, page_count, "mistral_ocr",
                         _estimate_cer_from_text(text),
-                        pages * _MISTRAL_OCR_PRICE_PER_PAGE, is_pdf, is_segment,
+                        page_count * _MISTRAL_OCR_PRICE_PER_PAGE,
+                        input_is_pdf, is_segment,
                     )
             except Exception as exc:
                 logger.warning({
                     "event": "ocr_mistral_wholedoc_failed_retry_perpage",
                     "error": str(exc)[:200], "url": zone1_result.url,
                 })
-        doc = _cloud_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
-        if doc is not None:
-            return doc
+        cloud_document = _run_cloud_ocr_per_page(
+            raw_bytes, zone1_result, input_is_pdf, is_segment
+        )
+        if cloud_document is not None:
+            return cloud_document
 
     # Tier 2 — Azure DI (only if truly configured).
     if _azure_configured():
-        doc = _cloud_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
-        if doc is not None:
-            return doc
+        cloud_document = _run_cloud_ocr_per_page(
+            raw_bytes, zone1_result, input_is_pdf, is_segment
+        )
+        if cloud_document is not None:
+            return cloud_document
 
     # Tier 3 — LLM-vision on the configured provider.
     from src.fetcher.extractors.llm_ocr import llm_vision_available
     if llm_vision_available():
-        doc = _llm_vision_perpage(raw_bytes, zone1_result, is_pdf, is_segment)
-        if doc is not None:
-            return doc
+        cloud_document = _run_llm_vision_per_page(
+            raw_bytes, zone1_result, input_is_pdf, is_segment
+        )
+        if cloud_document is not None:
+            return cloud_document
 
     return None
