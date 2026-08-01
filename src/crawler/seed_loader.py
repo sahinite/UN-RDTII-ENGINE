@@ -152,7 +152,8 @@ def match_known_act(law_name: str, known_keys) -> "str | None":
 
 
 def _normalise_economy(raw: str) -> str:
-    return _ECONOMY_ALIASES.get(raw.lower().strip(), raw.strip().upper()[:2])
+    normalized = raw.strip()
+    return _ECONOMY_ALIASES.get(normalized.lower(), normalized.upper()[:2])
 
 
 def canonical_pillar(target) -> str:
@@ -163,27 +164,28 @@ def canonical_pillar(target) -> str:
     blank/unparseable value. This is what makes seed loading generic — a caller
     that passes "7" instead of "P7" must not silently get zero seeds.
     """
-    t = str(target or "").strip().lower()
-    if not t:
+    normalized_target = str(target or "").strip().lower()
+    if not normalized_target:
         return ""
-    if "+" in t:  # combined pillars, e.g. "p6+p7" / "6 + 7"
-        nums = re.findall(r"\d+", t)
-        if nums:
-            return "+".join(f"P{int(n)}" for n in nums)
-    m = re.search(r"\d+", t)
-    return f"P{int(m.group())}" if m else t.upper()
+    if "+" in normalized_target:  # combined pillars, e.g. "p6+p7" / "6 + 7"
+        numbers = re.findall(r"\d+", normalized_target)
+        if numbers:
+            return "+".join(f"P{int(number)}" for number in numbers)
+    match = re.search(r"\d+", normalized_target)
+    return f"P{int(match.group())}" if match else normalized_target.upper()
 
 
 def _pillar_matches(raw_pillar: str, target: str) -> bool:
-    canon = canonical_pillar(target)
-    if raw_pillar.lower().strip() in _PILLAR_MATCH.get(canon, frozenset()):
+    canonical_target = canonical_pillar(target)
+    normalized_pillar = raw_pillar.lower().strip()
+    if normalized_pillar in _PILLAR_MATCH.get(canonical_target, frozenset()):
         return True
     # Generic fallback for any single pillar not in the static map (e.g. P8, P9)
-    m = re.match(r"^P(\d+)$", canon)
-    if m:
-        n = m.group(1)
-        generic = {f"p{n}", n, f"pillar {n}", f"pillar{n}"}
-        return raw_pillar.lower().strip() in generic
+    match = re.match(r"^P(\d+)$", canonical_target)
+    if match:
+        number = match.group(1)
+        accepted_forms = {f"p{number}", number, f"pillar {number}", f"pillar{number}"}
+        return normalized_pillar in accepted_forms
     return False
 
 
@@ -347,17 +349,19 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
             # Engine indicator id ("6.2" → "P6-I2"), used as the consistent key for
             # BOTH known_titles_by_indicator and known_sections_by_indicator (was
             # raw refs vs engine ids — a mismatch downstream consumers had to bridge).
-            eng_indic = _db_indicator_to_engine(row_indic)
+            engine_indicator = _db_indicator_to_engine(row_indic)
             row_act_norms: list[str] = []
             if row_title:
                 # Split multi-act cells into individual matchable titles (';' / blank
                 # line separated; single-newline wraps preserved — see split_act_titles).
                 for part in split_act_titles(row_title):
-                    norm = normalise_title(part)
-                    row_act_norms.append(norm)
-                    seed.known_titles.add(norm)
-                    if eng_indic:
-                        seed.known_titles_by_indicator.setdefault(eng_indic, set()).add(norm)
+                    normalized_title = normalise_title(part)
+                    row_act_norms.append(normalized_title)
+                    seed.known_titles.add(normalized_title)
+                    if engine_indicator:
+                        seed.known_titles_by_indicator.setdefault(engine_indicator, set()).add(
+                            normalized_title
+                        )
                 if not has_url:
                     count += 1  # count title-only rows so we know seeds loaded
 
@@ -372,8 +376,8 @@ def _load_round1_db(path: str, economy_iso: str, pillar: str, seed: SeedData,
                     seed.known_sections.setdefault(act_norm, set()).update(row_sections)
                     # Partition by indicator too (skips pillar-level/blank rows), so
                     # seed-guided retrieval knows which indicator each section serves.
-                    if eng_indic:
-                        seed.known_sections_by_indicator.setdefault(eng_indic, {}).setdefault(
+                    if engine_indicator:
+                        seed.known_sections_by_indicator.setdefault(engine_indicator, {}).setdefault(
                             act_norm, set()).update(row_sections)
 
             # URLs from the References column: bare act URLs → known_urls (so the

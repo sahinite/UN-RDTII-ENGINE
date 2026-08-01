@@ -47,7 +47,7 @@ def extract_docx(
     economy_config: "EconomyConfig | None" = None,
 ) -> FetchedDocument:
     """Extract text + heading hierarchy from a .docx byte payload."""
-    start = time.monotonic()
+    started_at = time.monotonic()
 
     try:
         import docx  # python-docx
@@ -83,7 +83,7 @@ def extract_docx(
     if not full_text:
         raise ExtractionError(f"DOCX contained no extractable text: {zone1_result.url}")
 
-    elapsed_ms = (time.monotonic() - start) * 1000
+    elapsed_ms = (time.monotonic() - started_at) * 1000
 
     cost_log = CostLogEntry(
         engine="python_docx",

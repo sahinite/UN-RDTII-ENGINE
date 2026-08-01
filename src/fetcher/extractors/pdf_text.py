@@ -99,7 +99,7 @@ def extract_text_pdf(
     zone1_result: "Zone1Result",
     economy_config: "EconomyConfig",
 ) -> FetchedDocument:
-    start = time.monotonic()
+    started_at = time.monotonic()
     table_pages: list[int] = []
 
     try:
@@ -147,7 +147,7 @@ def extract_text_pdf(
         raise ReclassifyToScannedError(zone1_result.url, page_count - empty_count, page_count)
 
     full_text = "\n\n".join(p["text"] for p in pages_text)
-    elapsed_ms = (time.monotonic() - start) * 1000
+    elapsed_ms = (time.monotonic() - started_at) * 1000
 
     if full_text and len(full_text) < 100 and page_count > 1:
         logger.warning({

@@ -500,8 +500,8 @@ def detect_type(raw_bytes: bytes, content_type: str) -> DocType:
         logger.info({"event": "doc_type_detected", "url": "", "doc_type": result, "method": method, "economy": ""})
         return result
 
-    snip = first_512.lstrip()
-    if snip[:5].lower().startswith(b"<html") or snip[:9].lower().startswith(b"<!doctype"):
+    leading_bytes = first_512.lstrip()
+    if leading_bytes[:5].lower().startswith(b"<html") or leading_bytes[:9].lower().startswith(b"<!doctype"):
         logger.info({"event": "doc_type_detected", "url": "", "doc_type": "HTML", "method": method, "economy": ""})
         return "HTML"
 

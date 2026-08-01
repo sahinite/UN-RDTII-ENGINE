@@ -34,10 +34,12 @@ def detect_encoding(raw_bytes: bytes, content_type: str) -> str:
         return m.group(1).strip('"\'')
 
     # 2. <meta charset> or <meta http-equiv="Content-Type">
-    snip = raw_bytes[:4096].decode("ascii", errors="replace")
-    m2 = re.search(r'charset=["\']?([A-Za-z0-9_\-]+)', snip, re.IGNORECASE)
-    if m2:
-        return m2.group(1)
+    header_snippet = raw_bytes[:4096].decode("ascii", errors="replace")
+    meta_charset_match = re.search(
+        r'charset=["\']?([A-Za-z0-9_\-]+)', header_snippet, re.IGNORECASE
+    )
+    if meta_charset_match:
+        return meta_charset_match.group(1)
 
     # 3. chardet if available
     try:
@@ -103,8 +105,8 @@ def extract_article_hierarchy(soup: BeautifulSoup, base_url: str) -> list[dict]:
                 content_parts.append(str(sibling).strip())
                 continue
             if sibling.name and re.match(r"^h[1-4]$", sibling.name):
-                sib_level = int(sibling.name[1])
-                if sib_level <= level:
+                sibling_level = int(sibling.name[1])
+                if sibling_level <= level:
                     break
             content_parts.append(sibling.get_text(separator=" ", strip=True))
 
@@ -119,7 +121,7 @@ def extract_article_hierarchy(soup: BeautifulSoup, base_url: str) -> list[dict]:
 
 
 def extract_html(raw_bytes: bytes, zone1_result: "Zone1Result", content_type: str = "") -> FetchedDocument:
-    start = time.monotonic()
+    started_at = time.monotonic()
     encoding = detect_encoding(raw_bytes, content_type)
 
     try:
@@ -161,7 +163,7 @@ def extract_html(raw_bytes: bytes, zone1_result: "Zone1Result", content_type: st
     }
 
     full_text = soup.get_text(separator="\n", strip=True)
-    elapsed_ms = (time.monotonic() - start) * 1000
+    elapsed_ms = (time.monotonic() - started_at) * 1000
 
     # Check pagination hint
     if re.search(r"[?&]page=\d+", base_url):

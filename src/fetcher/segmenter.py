@@ -34,10 +34,17 @@ _FIXED_FALLBACK_SIZE = 50
 
 
 def _matches_act_header(text: str) -> bool:
-    for pattern in ACT_HEADER_PATTERNS:
-        if pattern.search(text.strip()):
-            return True
-    return False
+    return any(pattern.search(text.strip()) for pattern in ACT_HEADER_PATTERNS)
+
+
+def _load_pymupdf():
+    """Load PyMuPDF in one place and keep the project-level error message."""
+    try:
+        import fitz
+    except ImportError as exc:
+        from src.fetcher.extractors.ocr_stage1 import DependencyError
+        raise DependencyError("PyMuPDF not installed; run: pip install pymupdf") from exc
+    return fitz
 
 
 # ── Boundary detection ─────────────────────────────────────────────────────────
@@ -47,11 +54,7 @@ def find_act_boundaries(raw_bytes: bytes, extra_patterns: list[str] | None = Non
     Returns 0-based page indices where a new act starts.
     Always includes page 0 as the first boundary.
     """
-    try:
-        import fitz
-    except ImportError as exc:
-        from src.fetcher.extractors.ocr_stage1 import DependencyError
-        raise DependencyError("PyMuPDF not installed; run: pip install pymupdf") from exc
+    fitz = _load_pymupdf()
 
     extra_compiled: list[re.Pattern[str]] = []
     if extra_patterns:
@@ -100,11 +103,7 @@ def find_act_boundaries(raw_bytes: bytes, extra_patterns: list[str] | None = Non
 # ── PDF slicing ────────────────────────────────────────────────────────────────
 
 def slice_pdf(raw_bytes: bytes, boundaries: list[int]) -> list[bytes]:
-    try:
-        import fitz
-    except ImportError as exc:
-        from src.fetcher.extractors.ocr_stage1 import DependencyError
-        raise DependencyError("PyMuPDF not installed; run: pip install pymupdf") from exc
+    fitz = _load_pymupdf()
 
     doc = fitz.open(stream=raw_bytes, filetype="pdf")
     total = len(doc)
@@ -150,7 +149,7 @@ def extract_segment_title(segment_bytes: bytes, fallback: str = "Unknown Act") -
 
 def segment_volume(raw_bytes: bytes, economy_config: "EconomyConfig") -> list[ActSegment]:
     try:
-        import fitz
+        fitz = _load_pymupdf()
         doc = fitz.open(stream=raw_bytes, filetype="pdf")
         total_pages = len(doc)
     except Exception as exc:
@@ -178,7 +177,7 @@ def segment_volume(raw_bytes: bytes, economy_config: "EconomyConfig") -> list[Ac
 
     sliced = slice_pdf(raw_bytes, boundaries)
     segments: list[ActSegment] = []
-    seg_idx = 0
+    segment_index = 0
 
     for i, (start_page, seg_bytes) in enumerate(zip(boundaries, sliced)):
         end_page = (boundaries[i + 1] - 1) if i + 1 < len(boundaries) else (total_pages - 1)
@@ -213,12 +212,12 @@ def segment_volume(raw_bytes: bytes, economy_config: "EconomyConfig") -> list[Ac
                 pass
             continue
 
-        title = extract_segment_title(seg_bytes, fallback=f"Segment {seg_idx}")
+        title = extract_segment_title(seg_bytes, fallback=f"Segment {segment_index}")
         if boundary_fallback:
-            title = f"Segment {seg_idx}"
+            title = f"Segment {segment_index}"
 
         segments.append(ActSegment(
-            segment_index=seg_idx,
+            segment_index=segment_index,
             act_title=title,
             start_page=start_page,
             end_page=end_page,
@@ -226,12 +225,12 @@ def segment_volume(raw_bytes: bytes, economy_config: "EconomyConfig") -> list[Ac
             economy=economy_config.economy_name,
             source_url=source_url,
         ))
-        seg_idx += 1
+        segment_index += 1
 
         logger.info({
             "event": "segment_completed",
             "source_url": source_url,
-            "segment_index": seg_idx - 1,
+            "segment_index": segment_index - 1,
             "pages": seg_pages,
             "url": source_url,
             "economy": economy_config.economy_name,

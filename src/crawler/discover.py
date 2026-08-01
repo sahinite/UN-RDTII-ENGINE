@@ -76,6 +76,11 @@ def _canonical_act_key(url: str) -> str:
 
 # ── Pillar-scoped exclusion lists ──────────────────────────────────────────────
 
+def _pillar_indicators(taxonomy: list[dict], pillar: int) -> list[dict]:
+    prefix = f"P{pillar}-"
+    return [i for i in taxonomy if i.get("indicator_id", "").startswith(prefix)]
+
+
 def build_pillar_excludes(taxonomy: list[dict], pillar: int) -> tuple[set[str], set[str]]:
     """
     Gather exclude_act_titles and exclude_keywords for the pillar's indicators.
@@ -84,14 +89,19 @@ def build_pillar_excludes(taxonomy: list[dict], pillar: int) -> tuple[set[str], 
     to drop obviously-irrelevant acts (e.g. banking/tax acts) before they become
     NEW candidates. KNOWN seed acts are never excluded.
     """
-    prefix = f"P{pillar}-"
-    titles: set[str] = set()
-    keywords: set[str] = set()
-    for ind in taxonomy:
-        if not ind.get("indicator_id", "").startswith(prefix):
-            continue
-        titles.update(t.lower().strip() for t in ind.get("exclude_act_titles", []) if t.strip())
-        keywords.update(k.lower().strip() for k in ind.get("exclude_keywords", []) if k.strip())
+    indicators = _pillar_indicators(taxonomy, pillar)
+    titles = {
+        title.lower().strip()
+        for indicator in indicators
+        for title in indicator.get("exclude_act_titles", [])
+        if title.strip()
+    }
+    keywords = {
+        keyword.lower().strip()
+        for indicator in indicators
+        for keyword in indicator.get("exclude_keywords", [])
+        if keyword.strip()
+    }
     return titles, keywords
 
 
@@ -104,17 +114,12 @@ def build_pillar_keywords(taxonomy: list[dict], pillar: int) -> list[str]:
     Filters taxonomy by indicator_id prefix 'P{pillar}-' so that a pillar-7
     run only uses P7-* keywords and never touches P6 evidence.
     """
-    prefix = f"P{pillar}-"
-    keywords: list[str] = []
-    seen: set[str] = set()
-    for ind in taxonomy:
-        if not ind.get("indicator_id", "").startswith(prefix):
-            continue
-        for kw in ind.get("probe_keywords", []):
-            if kw not in seen:
-                seen.add(kw)
-                keywords.append(kw)
-    return keywords
+    indicators = _pillar_indicators(taxonomy, pillar)
+    return list(dict.fromkeys(
+        keyword
+        for indicator in indicators
+        for keyword in indicator.get("probe_keywords", [])
+    ))
 
 
 # ── Index page parsing ─────────────────────────────────────────────────────────
@@ -198,7 +203,7 @@ def _rank_by_keywords(
     query_tokens = " ".join(keywords).lower().split()
     raw_scores = bm25.get_scores(query_tokens)
 
-    max_score = max(raw_scores) if max(raw_scores) > 0 else 1.0
+    max_score = max(raw_scores, default=0.0) or 1.0
     scored = [
         (float(raw_scores[i]) / max_score, candidates[i][0], candidates[i][1])
         for i in range(len(candidates))
@@ -237,8 +242,11 @@ async def _discover_index(
             logger.warning("[DISCOVER] index fetch failed (%d) for %s", status, idx_url)
             continue
 
-        base = f"{urllib.parse.urlparse(idx_url).scheme}://{urllib.parse.urlparse(idx_url).netloc}"
-        links = _parse_index_links(html, base, getattr(portal, "index_link_pattern", None))
+        parsed_index_url = urllib.parse.urlparse(idx_url)
+        base_url = f"{parsed_index_url.scheme}://{parsed_index_url.netloc}"
+        links = _parse_index_links(
+            html, base_url, getattr(portal, "index_link_pattern", None)
+        )
         logger.info("[DISCOVER] parsed %d act links from %s", len(links), idx_url)
 
         for title, url in links:
@@ -335,28 +343,33 @@ def _rank_exclude_tag(
     KNOWN/NEW tag → NEW threshold drop. Runs per portal so each adapter's BM25
     corpus is unchanged from the pre-refactor behaviour.
     """
-    known_norm = {_normalise_url(u) for u in known_urls}
-    known_titles_norm = {normalise_title(t) for t in (known_titles or set())}
-    exclude_titles, exclude_keywords = build_pillar_excludes(taxonomy, pillar)
+    known_urls_normalized = {_normalise_url(url) for url in known_urls}
+    known_titles_normalized = {normalise_title(title) for title in (known_titles or set())}
+    excluded_titles, excluded_keywords = build_pillar_excludes(taxonomy, pillar)
     keywords = build_pillar_keywords(taxonomy, pillar)
 
     scored = _rank_by_keywords(candidates, keywords)
 
     results: list[tuple[str, str, str]] = []
     for score, title, url in scored:
-        norm = _normalise_url(url)
-        tl = title.lower()
+        normalized_url = _normalise_url(url)
+        title_lower = title.lower()
         # Exclusion wins over everything — the pillar's exclude_act_titles are the
         # curated "never relevant" list, and the Round 1 seed itself includes
         # negative-example acts (banking/tax/companies/etc.) for SG P7. Applying
         # the filter BEFORE the KNOWN check stops those from being mapped.
-        if any(x in tl for x in exclude_titles) or any(x in tl for x in exclude_keywords):
+        if any(item in title_lower for item in excluded_titles) or any(
+            item in title_lower for item in excluded_keywords
+        ):
             logger.debug("[DISCOVER] excluded by taxonomy filter: %s", title)
             continue
         # KNOWN if the URL OR the (normalised) title matches a Round 1 seed entry.
         # Round 1 DB rows often carry titles but no act-level URL, so URL-only
         # matching would mis-tag known acts (e.g. the PDPA) as NEW.
-        is_known = (norm in known_norm) or (normalise_title(title) in known_titles_norm)
+        is_known = (
+            normalized_url in known_urls_normalized
+            or normalise_title(title) in known_titles_normalized
+        )
         if is_known:
             results.append((title, url, "KNOWN"))
             continue
@@ -584,43 +597,76 @@ def _indicator_aware_select(
     if not titles_by_indicator or len(known_results) <= cap:
         return known_results[:cap]
 
-    title_to_inds: dict[str, list[str]] = {}
-    for ind, titles in titles_by_indicator.items():
+    title_to_indicators: dict[str, list[str]] = {}
+    for indicator, titles in titles_by_indicator.items():
         for t in titles:
-            title_to_inds.setdefault(t, []).append(ind)
+            title_to_indicators.setdefault(t, []).append(indicator)
 
     queues: dict[str, list[tuple[str, str, str]]] = {}
     unmapped: list[tuple[str, str, str]] = []
     for item in known_results:
-        inds = title_to_inds.get(normalise_title(item[0]))
-        if inds:
-            for ind in inds:
-                queues.setdefault(ind, []).append(item)
+        indicators = title_to_indicators.get(normalise_title(item[0]))
+        if indicators:
+            for indicator in indicators:
+                queues.setdefault(indicator, []).append(item)
         else:
             unmapped.append(item)
 
     selected: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     while len(selected) < cap and any(queues.values()):
-        for ind in sorted(queues.keys()):
+        for indicator in sorted(queues):
             if len(selected) >= cap:
                 break
-            q = queues[ind]
-            while q:
-                item = q.pop(0)
-                key = _normalise_url(item[1])
-                if key not in seen:
+            queue = queues[indicator]
+            while queue:
+                item = queue.pop(0)
+                normalized_url = _normalise_url(item[1])
+                if normalized_url not in seen:
                     selected.append(item)
-                    seen.add(key)
+                    seen.add(normalized_url)
                     break
     for item in unmapped:
         if len(selected) >= cap:
             break
-        key = _normalise_url(item[1])
-        if key not in seen:
+        normalized_url = _normalise_url(item[1])
+        if normalized_url not in seen:
             selected.append(item)
-            seen.add(key)
+            seen.add(normalized_url)
     return selected
+
+
+async def _discover_for_strategy(
+    strategy: str,
+    portal: "Portal",
+    economy_iso: str,
+    pillar: int,
+    taxonomy: list[dict],
+    known_urls: set[str],
+    known_titles: set[str] | None,
+    budget_deadline: float,
+) -> list[tuple[str, str, str]]:
+    """Run one configured strategy and apply its shared fallback/ranking rules."""
+    if strategy == "index":
+        candidates = await _discover_index(portal, budget_deadline)
+        failure_reason = "index discovery failed"
+    elif strategy == "api":
+        candidates = await _discover_api(portal, pillar, taxonomy, budget_deadline)
+        failure_reason = "api discovery failed"
+    elif strategy == "sitemap":
+        candidates = await _discover_sitemap(portal, budget_deadline)
+        failure_reason = "sitemap discovery failed"
+    elif strategy == "auto":
+        candidates = await _discover_auto(portal, budget_deadline)
+        failure_reason = "auto discovery found nothing"
+    elif strategy == "seed_only":
+        return _seed_fallback(portal, economy_iso, known_urls, "seed_only strategy")
+    else:
+        return _seed_fallback(portal, economy_iso, known_urls, f"strategy '{strategy}' not implemented")
+
+    if candidates is None:
+        return _seed_fallback(portal, economy_iso, known_urls, failure_reason)
+    return _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -674,38 +720,13 @@ async def discover(
 
         logger.info("[DISCOVER] portal=%s strategy=%s", portal_name, discovery_strategy)
 
-        if discovery_strategy == "index":
-            candidates = await _discover_index(portal, budget_deadline)
-            if candidates is None:
-                raw = _seed_fallback(portal, economy_iso, known_urls, "index discovery failed")
-            else:
-                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
-        elif discovery_strategy == "api":
-            candidates = await _discover_api(portal, pillar, taxonomy, budget_deadline)
-            if candidates is None:
-                raw = _seed_fallback(portal, economy_iso, known_urls, "api discovery failed")
-            else:
-                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
-        elif discovery_strategy == "sitemap":
-            candidates = await _discover_sitemap(portal, budget_deadline)
-            if candidates is None:
-                raw = _seed_fallback(portal, economy_iso, known_urls, "sitemap discovery failed")
-            else:
-                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
-        elif discovery_strategy == "auto":
-            candidates = await _discover_auto(portal, budget_deadline)
-            if candidates is None:
-                raw = _seed_fallback(portal, economy_iso, known_urls, "auto discovery found nothing")
-            else:
-                raw = _rank_exclude_tag(candidates, pillar, taxonomy, known_urls, known_titles)
-        elif discovery_strategy == "seed_only":
-            raw = _seed_fallback(portal, economy_iso, known_urls, "seed_only strategy")
-        elif discovery_strategy == "TBD":
+        if discovery_strategy == "TBD":
             logger.info("[DISCOVER] portal '%s' discovery=TBD — skipping (not yet implemented)", portal_name)
             continue
-        else:
-            # search / search_js / etc. not yet implemented → degrade
-            raw = _seed_fallback(portal, economy_iso, known_urls, f"strategy '{discovery_strategy}' not implemented")
+        raw = await _discover_for_strategy(
+            discovery_strategy, portal, economy_iso, pillar, taxonomy,
+            known_urls, known_titles, budget_deadline,
+        )
 
         for title, url, tag in raw:
             url = _remapped(url)

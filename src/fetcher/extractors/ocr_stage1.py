@@ -390,7 +390,7 @@ def extract_ocr_stage1(
     returned with flag_for_review set instead. The cloud-first cascade uses the
     latter, since this is now the offline last-resort floor, not the first tier.
     """
-    start = time.monotonic()
+    started_at = time.monotonic()
 
     engine = get_ocr_engine(economy_config)
     lang_codes = economy_config.languages  # e.g. ["en"] or ["th", "en"]
@@ -482,7 +482,7 @@ def extract_ocr_stage1(
     low_quality = mean_cer >= 0.05
 
     full_text = assemble_pages(page_texts)
-    elapsed_ms = (time.monotonic() - start) * 1000
+    elapsed_ms = (time.monotonic() - started_at) * 1000
 
     doc_type: Literal["SCANNED_PDF", "IMAGE"] = "SCANNED_PDF" if is_pdf else "IMAGE"
     cost_log = CostLogEntry(

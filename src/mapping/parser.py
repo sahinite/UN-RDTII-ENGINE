@@ -41,7 +41,7 @@ def _norm_text(text: str) -> str:
     for a, b in (
         ("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"'),
         ("–", "-"), ("—", "-"), ("…", "..."),
-        (" ", " "), ("­", ""),
+        ("­", ""),
     ):
         t = t.replace(a, b)
     return t.lower()
@@ -185,17 +185,8 @@ def _assert_verbatim_in_context(
     punctuation variants (normalised). Matches across the *joined* chunks so a
     snippet straddling a chunk boundary still verifies.
     """
-    joined = " ".join(rc.chunk.text for rc in top_chunks)
-    snip_collapse, hay_collapse = _collapse_ws(snippet), _collapse_ws(joined)
-    snip_strip, hay_strip = _strip_ws(snippet), _strip_ws(joined)
-
-    if snip_collapse and snip_collapse in hay_collapse:
-        return True, None
-    # Whitespace-insensitive — handles pdfplumber dropping inter-word spaces.
-    if snip_strip and snip_strip in hay_strip:
-        return True, None
-    # Long-snippet prefix fallback (snippet may run slightly past the chunk window).
-    if len(snip_strip) > 80 and snip_strip[:80] in hay_strip:
+    joined_chunks = " ".join(chunk.chunk.text for chunk in top_chunks)
+    if _snippet_in_text(snippet, joined_chunks):
         return True, None
 
     return False, f"verbatim_snippet not found in any of {len(top_chunks)} source chunks"

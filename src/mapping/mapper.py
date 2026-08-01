@@ -69,6 +69,9 @@ def extract_provisions(
     taxonomy = load_taxonomy_dict()
     all_results: list[ExtractionResult] = []
     cost_entry = LLMCostEntry()
+    doc_metadata = None
+    known_provisions = known_provisions or set()
+    known_sections = known_sections or {}
 
     # Support both list-of-RAGResult and dict from retrieve_batch
     if isinstance(rag_results, dict):
@@ -76,11 +79,11 @@ def extract_provisions(
     else:
         items = rag_results
 
-    total_items = len(items)
-    for idx, rag_result in enumerate(items, 1):
+    total_indicators = len(items)
+    for indicator_number, rag_result in enumerate(items, 1):
         indicator_id = rag_result.indicator_id
         top_chunks = rag_result.top_chunks
-        substep(f"LLM call {indicator_id} ({idx}/{total_items})")
+        substep(f"LLM call {indicator_id} ({indicator_number}/{total_indicators})")
 
         if not top_chunks:
             logger.warning({
@@ -94,8 +97,10 @@ def extract_provisions(
             logger.warning({"event": "unknown_indicator", "indicator_id": indicator_id})
             continue
 
-        doc_metadata = _build_doc_metadata(doc)
-        doc_metadata["portal_type"] = portal_type
+        if doc_metadata is None:
+            doc_metadata = _build_doc_metadata(doc)
+            doc_metadata["portal_type"] = portal_type
+
         chunks_for_prompt = trim_chunks_to_budget(top_chunks, SYSTEM_PROMPT)
 
         user_prompt = build_user_prompt(
@@ -129,8 +134,8 @@ def extract_provisions(
 
         provisions = parse_llm_response(
             response, indicator_id, top_chunks, doc_metadata,
-            known_provisions=known_provisions or set(),
-            known_sections=known_sections or {},
+            known_provisions=known_provisions,
+            known_sections=known_sections,
         )
         provisions = expand_non_consecutive(provisions)
         all_results.extend(provisions)
@@ -195,18 +200,18 @@ def _deduplicate(results: list[ExtractionResult]) -> list[ExtractionResult]:
     On collision, keeps higher confidence.
     """
     seen: dict[tuple, ExtractionResult] = {}
-    for r in results:
+    for result in results:
         key = (
-            r.indicator_id,
-            r.article.lower().strip(),
-            r.verbatim_snippet[:80].lower().strip(),
+            result.indicator_id,
+            result.article.lower().strip(),
+            result.verbatim_snippet[:80].lower().strip(),
         )
         if key not in seen:
-            seen[key] = r
+            seen[key] = result
         else:
             existing = seen[key]
-            if (r.confidence or 0.0) > (existing.confidence or 0.0):
-                seen[key] = r
+            if (result.confidence or 0.0) > (existing.confidence or 0.0):
+                seen[key] = result
 
     deduped = list(seen.values())
     removed = len(results) - len(deduped)

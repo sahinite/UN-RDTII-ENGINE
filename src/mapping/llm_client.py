@@ -201,15 +201,15 @@ def _call_with_retry(
     provider: BaseLLMProvider,
     system: str,
     user: str,
-    max_tok: int,
-    temp: float,
+    max_tokens: int,
+    temperature: float,
 ) -> LLMResponse:
     """One retry on ProviderTimeoutError only; no retry on rate limit or API error."""
     try:
-        return provider.complete(system, user, max_tok, temp)
+        return provider.complete(system, user, max_tokens, temperature)
     except ProviderTimeoutError:
         logger.warning({"event": "timeout_retry", "provider": provider.provider_name})
-        return provider.complete(system, user, max_tok, temp)
+        return provider.complete(system, user, max_tokens, temperature)
 
 
 def get_active_model_version(ocr_engine: str = "") -> str:
