@@ -91,6 +91,23 @@ class TestTranslatedDocumentProxies:
         tdoc = _make_translated_doc()
         assert tdoc.last_amended_year is None
 
+    def test_citation_metadata_is_enriched_on_shared_fetched_document(self):
+        fetched = _make_fetched_doc(
+            act_title="Service Tax Act 2018",
+            raw_text=(
+                "LAWS OF MALAYSIA\nAct 807\nSERVICE TAX ACT 2018\n"
+                "Latest amendment made by Act A1672 which came into operation "
+                "on 1 January 2023"
+            ),
+        )
+        assert fetched.law_number_ref == "Act 807"
+        assert fetched.last_amended == "2023"
+        assert fetched.last_amended_year == "2023"
+
+        tdoc = _make_translated_doc(fetched=fetched)
+        assert tdoc.law_number_ref == "Act 807"
+        assert tdoc.last_amended_year == "2023"
+
     def test_source_pdf_path_returns_none(self):
         tdoc = _make_translated_doc()
         assert tdoc.source_pdf_path is None

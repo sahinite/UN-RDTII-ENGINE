@@ -259,7 +259,7 @@ Columns are in this exact order. Do not rename or reorder — judges validate pr
 | :---- | :---- | :---- | :---- |
 | 1 | economy | Required | Official UN country name |
 | 2 | law\_name | Required | Full official statute name and year |
-| 3 | law\_number\_ref | Required | Official act/law number (e.g. Act 709, B.E. 2562\) |
+| 3 | law\_number\_ref | Optional | Official act/law number (e.g. Act 709, B.E. 2562\); blank when the source does not establish one |
 | 4 | last\_amended | Required | Year of most recent amendment; blank if never amended |
 | 5 | indicator\_id | Required | RDTII code (e.g. P6-I1, P7-I3) |
 | 6 | article | Required | Exact article and paragraph (e.g. Art. 26(2)) |

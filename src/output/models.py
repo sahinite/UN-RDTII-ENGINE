@@ -39,8 +39,8 @@ CSV_COLUMNS = [
     "notes",
 ]
 
-# Columns that must not be None/empty.
-# last_amended intentionally excluded — template says "blank if never amended".
+# Columns that must not be None/empty. The authoritative template marks
+# law_number_ref optional and says last_amended is blank when never amended.
 _REQUIRED_COLUMNS = {
     "economy",
     "law_name",

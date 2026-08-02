@@ -82,13 +82,38 @@ class FetchedDocument:
 
     # Legislation citation metadata (parsed from the cover page + source URL)
     law_number_ref: Optional[str] = None   # e.g. "Act 26 of 2012" / "2020 Rev. Ed."
-    last_amended: Optional[str] = None     # e.g. "2020" or "2026-05-29" (version date)
+    last_amended: Optional[str] = None     # four-digit amendment/compilation year
 
     # Exact source bytes + file extension for provenance archiving. Set for
     # JS-rendered HTML (the rendered DOM), which a plain re-fetch can't reproduce;
     # left None for static files (PDF/DOCX) that the archiver re-fetches verbatim.
     archive_bytes: Optional[bytes] = None
     archive_ext: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Populate citation metadata consistently for every extraction path.
+
+        Text PDF used to be the only extractor that called the metadata parser,
+        leaving HTML, OCR, image, and DOCX documents permanently blank.  Keeping
+        the deterministic enrichment on the shared Zone-2 contract makes future
+        extractors inherit the same behaviour automatically.
+        """
+        if not self.raw_text or (self.law_number_ref and self.last_amended):
+            return
+        from src.fetcher.extractors.legislation_meta import extract_legislation_meta
+
+        parsed_ref, parsed_amended = extract_legislation_meta(
+            self.raw_text, self.source_url, self.act_title
+        )
+        if not self.law_number_ref:
+            self.law_number_ref = parsed_ref
+        if not self.last_amended:
+            self.last_amended = parsed_amended
+
+    @property
+    def last_amended_year(self) -> Optional[str]:
+        """Mapper-facing alias retained by both base and translated documents."""
+        return self.last_amended
 
     def validate(self) -> None:
         if not self.raw_text:

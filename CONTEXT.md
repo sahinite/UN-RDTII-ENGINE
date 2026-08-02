@@ -57,7 +57,7 @@ Each line is the decision + why. Numbers are stable references.
 - **ADR-050** `fetch: html_js` renders every HTML page via Playwright unconditionally (for SPA shells that fool `classify_render`, e.g. pdpc.gov.sg).
 - **ADR-052** Zone-2 SPA render uses an isolated per-call crawler (`fetch_isolated`), not the shared singleton (loop-binding hang fix).
 - **ADR-024** Stage-2 OCR (Azure DI → Mistral) is credentials-gated; missing keys silently skip.
-- **ADR-014** `FetchedDocument` is the single Zone-2 contract; validation enforced at each extractor's end.
+- **ADR-014** `FetchedDocument` is the single Zone-2 contract; validation is enforced at each extractor's end, and its deterministic `__post_init__` metadata enrichment applies `law_number_ref`/`last_amended` uniformly to text-PDF, HTML, OCR/image, and DOCX paths. `last_amended` is an evidenced amendment/compilation year, not a generic page "current as at" year.
 
 **Translation & retrieval**
 - **ADR-061** Argos is offline-primary translator (Argos→DeepL→Google), run in a **single persistent subprocess** (native runtime segfaults co-resident with torch/faiss; multiple workers thrash).

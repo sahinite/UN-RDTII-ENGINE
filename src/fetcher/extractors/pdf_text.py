@@ -158,7 +158,9 @@ def extract_text_pdf(
         })
 
     section_hierarchy = extract_section_hierarchy(full_text)
-    law_number_ref, last_amended = extract_legislation_meta(full_text, zone1_result.url)
+    law_number_ref, last_amended = extract_legislation_meta(
+        full_text, zone1_result.url, zone1_result.act_title
+    )
     # Zone 1 may supply no title (URL-only seeds, NEW discoveries). Without a
     # law_name every provision from this act is dropped at validation, so derive
     # the title from the cover page when missing.
