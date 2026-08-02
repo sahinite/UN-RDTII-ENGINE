@@ -28,12 +28,12 @@ and `LLM_API_KEY` (its key). That's all — one key for whichever provider you p
 
 | Setting | What it's for | Example |
 |---------|---------------|---------|
-| `LLM_PROVIDER` | Which AI reads the law | `openai` **(recommended — gpt-4o)** |
-| `LLM_API_KEY` | Your key for that AI | get it from platform.openai.com |
+| `LLM_PROVIDER` | Which AI reads the law | `anthropic`, `openai`, `gemini`, `deepseek`, `groq`, `qwen`, or `ollama` |
+| `LLM_API_KEY` | Your key for the selected AI | provider's API console |
 | `LLM_MODEL` | *(Optional)* Pick a specific model — leave blank to use the provider's default | `gpt-4o` |
 | `MISTRAL_API_KEY` | Reading **scanned** PDFs cheaply (~$0.10 per 100 pages) | console.mistral.ai |
 
-> Prefer a different AI? Set `LLM_PROVIDER` to `anthropic`, `deepseek`, `groq`, `qwen`,
+> Prefer a different AI? Set `LLM_PROVIDER` to `anthropic`, `gemini`, `deepseek`, `groq`, `qwen`,
 > or `ollama` and put its key in `LLM_API_KEY`. (See [Switch the AI](#common-questions).)
 
 > No cloud keys at all? The engine still works fully offline using free local tools
@@ -48,7 +48,8 @@ and `LLM_API_KEY` (its key). That's all — one key for whichever provider you p
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Install the helper tools (Tesseract, models). Answer the prompts.
+# 2. Install the helper tools (Tesseract and Playwright Chromium). Answer the prompts
+#    if you want the optional embedding model or Ollama offline models pre-downloaded.
 python setup.py
 
 # 3. Add your keys
@@ -76,7 +77,7 @@ That's it — you're ready to run.
 python main.py --economy Malaysia --pillar 6 --pdf path/to/law.pdf
 ```
 
-**Or let it find the law online for an economy:**
+**Or let it find relevant laws online:**
 
 ```bash
 python main.py --economy Singapore --pillar 7
@@ -85,11 +86,13 @@ python main.py --economy Singapore --pillar 7
 - `--economy` — the country/economy (Singapore, Australia, Malaysia).
 - `--pillar` — which topic to check (6 = cross-border data, 7 = data protection).
 - `--pdf` — optional; point it at a PDF to skip the online search.
+- `--output-dir` — optional output directory (default: `outputs/`).
+- `--format` — `csv`, `json`, or `both` (default: `both`).
 
 While it runs you'll see a live checklist (finding → reading → understanding → writing).
 Scanned PDFs are read automatically — no extra steps.
 
-**When it finishes**, look in the `outputs/` folder for two files:
+**When it finishes**, look in the output directory for the requested file(s):
 
 ```
 outputs/Malaysia_P6_<timestamp>.csv    ← open in Excel / Google Sheets
@@ -107,7 +110,8 @@ quick human check.
 Fully offline, no accounts, no cost:
 
 ```bash
-ollama pull qwen2.5:7b        # download a free local AI (~5 GB, one time)
+ollama serve &                    # keep the local server running
+ollama pull qwen2.5:7b            # download a free local AI (~5 GB, one time)
 export LLM_PROVIDER=ollama    # tell the engine to use it
 python main.py --economy Singapore --pillar 7
 ```
@@ -135,17 +139,37 @@ and cheap: it uses **Mistral** in a single call for a whole PDF, falls back to A
 vision AI if needed, and finally to free local **Tesseract** if you have no keys. You don't
 choose — it picks the best available automatically.
 
-**How much does a run cost?** The AI does most of the work; OCR is tiny (~$0.10 for a
-100-page scan). Every run writes a real cost breakdown to `logs/cost_report.json`.
+**How much does a run cost?** The AI does most of the work; OCR is tiny (about $0.10 for a
+100-page scan, depending on provider). Every run writes a cost breakdown to
+`logs/cost_report.json` (or the directory selected by `RDTII_LOG_DIR`).
 
 **Switch the AI?** Change `LLM_PROVIDER` in `.env` (and put its key in `LLM_API_KEY`):
-`openai` (recommended, gpt-4o) · `anthropic` · `deepseek` · `groq` · `qwen` · `ollama` (offline).
+`anthropic` · `openai` · `gemini` · `deepseek` · `groq` · `qwen` · `ollama` (offline).
 Each provider uses its own default model; set `LLM_MODEL` only if you want a specific one.
+
+Provider-specific variables such as `OPENAI_API_KEY` still override the shared
+`LLM_API_KEY`. See `.env.example` for all supported settings.
 
 **Run the tests?**
 
 ```bash
 pytest
+```
+
+**Run multiple economies or pillars?** `batch_run.py` uses one isolated process lane per
+economy by default, which avoids cross-run model state collisions:
+
+```bash
+python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7
+python batch_run.py --economies Singapore Australia Malaysia --pillar 6 7 --max-parallel 2
+```
+
+**Compare output with the Round 1 reference data?** The evaluator accepts the sample-kit
+directory and can restrict the comparison to one pillar:
+
+```bash
+python evaluate.py --sample-kit data/sample_kit/ --economy Singapore
+python evaluate.py --sample-kit data/sample_kit/ --economy Singapore --pillar 7
 ```
 
 ---
@@ -156,22 +180,27 @@ pytest
 |--------|---------|
 | economy | Country/economy name |
 | law_name | Title of the act |
+| law_number_ref | Official act/law number, when available |
+| last_amended | Last amendment date, when available |
 | indicator_id | Which checkpoint it maps to (P6-I1 … P7-I5) |
 | article | Section number in the law |
 | discovery_tag | KNOWN (in the reference set) or NEW (newly found) |
+| location_reference | Page/section location in the source |
 | verbatim_snippet | The exact text from the law |
 | mapping_rationale | Why the AI mapped it there |
 | source_url | Where the law came from |
 | confidence | AI confidence, 0–1 |
 | notes | Flags for human review |
 
-(Full 13-column schema and the JSON structure: see `data/output_schema_sample.json`.)
+The CSV has exactly 13 columns and is validated before writing. The JSON output also
+contains document metadata, OCR quality, processing time, retrieval method, archive URL,
+and surrounding context. See `data/output_schema_sample.json` for the full structure.
 
 ---
 
 ## Add a new economy
 
-No coding — just one YAML file, then run:
+No Python changes are normally needed — add one schema-valid YAML file, then run:
 
 ```yaml
 # economies/vietnam.yaml
@@ -184,6 +213,9 @@ portals:
   - name: Ministry of Justice
     url: https://vbpl.vn
     type: primary
+    anti_bot: none
+    discovery: auto
+    fetch: auto
 ```
 
 ```bash
@@ -201,8 +233,10 @@ python main.py --economy Vietnam --pillar 7
   `src/output/` writes CSV/JSON and validates URLs.
 - **OCR cascade** (`src/ocr/processor.py`): Mistral (whole-doc → per-page) → Azure DI
   (if configured) → LLM-vision (the configured provider) → Tesseract/PaddleOCR floor.
-- **LLM cascade** (`src/mapping/llm_client.py`): one provider pinned per run via
-  `LLM_PROVIDER`; order is Anthropic → OpenAI → DeepSeek → Groq → Qwen → Ollama.
+- **LLM cascade** (`src/mapping/llm_client.py`): one provider is selected per run via
+  `LLM_PROVIDER` (or auto-detected); order is Anthropic → OpenAI → Gemini → DeepSeek →
+  Groq → Qwen → Ollama. A startup smoke check verifies that the selected path can return
+  parseable JSON before extraction begins.
   Model names are pinned (no `latest` tags). Llama 3.3 is excluded (license).
 - **Retrieval** picks English vs multilingual models per economy; non-English economies
   search the original text and skip full-document translation (Malaysia P7: ~50 min → ~7 min).
@@ -211,6 +245,9 @@ python main.py --economy Vietnam --pillar 7
 - **Quality gate** (`QUALITY_GATE_MODE`): `off` (production default) · `warn` · `fail`;
   optional generic economy/pillar validation. `QUALITY_GATE_MIN_CONFIDENCE`
   controls the default `0.80` confidence threshold.
+- **Output controls**: `--format csv|json|both` selects the written formats; `--output-dir`
+  changes their destination. `RDTII_LOG_DIR` separates logs and cost reports for batch
+  lanes.
 
 More detail lives in `CLAUDE.md` and `CONTEXT.md`.
 
@@ -222,7 +259,8 @@ More detail lives in `CLAUDE.md` and `CONTEXT.md`.
 - Anti-bot government sites can fail intermittently; the online search isn't 100%
   deterministic run-to-run (handing it a `--pdf` avoids this).
 - KNOWN vs NEW tagging matches on act title + section; a garbled title falls back to NEW.
-- One AI provider is pinned per run — a sustained outage aborts extraction (no mid-run switch).
+- One provider is selected at startup, with the cascade available for call-level failures;
+  a sustained outage can still abort extraction.
 - Without any OCR key, very poor scans fall to local Tesseract and may read less accurately.
 - **Offline mode (Ollama)** is noticeably slower (minutes → tens of minutes, worse without a
   GPU), a bit less accurate, and needs a one-time ~5 GB model download — use a cloud key when
@@ -233,4 +271,4 @@ More detail lives in `CLAUDE.md` and `CONTEXT.md`.
 ## License
 
 Apache License 2.0 — see `LICENSE`. The offline models in the cascade (`qwen2.5:7b`,
-`granite3-8b`) are Apache 2.0 licensed.
+`granite3-dense:8b`) are Apache 2.0 licensed.
