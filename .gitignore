@@ -12,7 +12,7 @@ data/benchmark/*.pdf
 .DS_Store
 cache/*
 !cache/.gitkeep
-
+/tmp/*
 # Coverage artifacts
 .coverage
 *,cover

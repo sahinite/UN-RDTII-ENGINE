@@ -1,0 +1,15 @@
+RDTII Extraction Engine - 2-minute live pitch narration
+
+Slide 1
+Regulatory evidence is abundant, but it is scattered across portals, PDFs, scans, and languages. The RDTII Extraction Engine makes that evidence computable without hiding the source. In our completed six-run set, the evaluator recovered 27 out of 27 known indicator checks, and the Singapore Pillar 7 run logged a model cost of just $0.43.
+
+Slide 2
+The architecture has two zones, but the experience is one traceable chain. First, the engine finds and ranks relevant official documents and labels candidates as known or new. Then it fetches the document, runs extraction and retrieval, maps provisions to RDTII indicators, validates the evidence, and writes CSV or JSON. Throughout that process, the official source, exact provision, indicator, confidence, and reviewer notes stay visible.
+
+Slide 3
+Here is the concrete output. From the official Singapore Statutes Online source, the run retained the source text and produced both a new provision candidate and a known indicator check. Those labels tell a reviewer whether the provision belongs to the reference set or needs policy review, while the confidence score and exact section remain attached to the result.
+
+Slide 4
+This is where the opportunity opens up. We can extend the same configurable engine across multiple RDTII pillars and more economies. Then we can connect the evidence layer to an HS code, an origin country, and a destination country, so a trader could eventually find the relevant official laws, regulations, permits, and steps for a route. That future product would remain grounded in the source evidence we have just demonstrated.
+
+Sources: internal project evidence in pitch_day/deck/RDTII_Live_Pitch_2026.pptx and internal architecture/run documentation in AGENTS.md; future extension direction supplied by the user.
