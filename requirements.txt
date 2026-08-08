@@ -55,3 +55,7 @@ argostranslate>=1.11.0  # offline neural MT — primary translator (en<->ms etc.
 
 # ── UI ──
 gradio>=5  # frontend (app.py)
+
+# ── Auth / Multi-Tenant (phase-2) ──
+google-auth>=2.30  # Google id_token verification (Wave 1D)
+cryptography>=42.0  # Fernet encryption for per-user API keys (Wave 1A)

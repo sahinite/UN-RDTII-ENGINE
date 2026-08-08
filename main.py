@@ -58,8 +58,8 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="RDTII pillar number (e.g. 6, 7, 8)"
     )
     p.add_argument(
-        "--output-dir", default="outputs",
-        help="Directory for CSV/JSON output (default: outputs/)"
+        "--output-dir", default=os.environ.get("RDTII_OUTPUT_DIR", "outputs"),
+        help="Directory for CSV/JSON output (default: outputs/ or $RDTII_OUTPUT_DIR)"
     )
     p.add_argument(
         "--format", choices=["csv", "json", "both"], default="both",
