@@ -71,6 +71,36 @@ That's it — you're ready to run.
 
 ## Run it
 
+### Option A — the web app (easiest)
+
+```bash
+python app.py
+```
+
+Open http://localhost:7860. From there you can:
+
+- **Run** — pick an economy and a pillar, hit Run, and watch each pipeline step light
+  up live. The Zone 2 steps sit inside a loop frame that shows which document
+  (1 of 5, 2 of 5, …) is being processed and how far each one got. When the run
+  finishes the steps collapse and a **run report** appears below (cost breakdown,
+  KNOWN vs NEW acts, documents fetched/used) — it's also saved as
+  `outputs/<economy>_P<pillar>_<datetime>_runReport.md`. A **View Results** button
+  jumps straight to that run's outputs.
+- **Results** — everything for one selected run, in sub-tabs: the generated CSV and
+  JSON; a **Compare vs Round 1** table that highlights mismatched indicators (rows
+  where the engine missed a Round 1 act, or found something Round 1 doesn't list);
+  the saved **Run report**; and the **Cost** breakdown (LLM / OCR / embedding /
+  crawling) — each run keeps its own cost file rather than overwriting the last.
+- **Configure** — add a new economy or a new pillar without editing files by hand.
+- **Environment** — edit every environment variable the pipeline reads (LLM provider,
+  model and API keys, OCR, translation, run control, archiving, plus advanced tuning)
+  and **Save** them straight to `.env`. Blank fields are left as-is, so secrets you
+  don't retype are kept.
+
+The header has a light/dark toggle; your choice is remembered in the browser.
+
+### Option B — the command line
+
 **Run on a law you already have (a PDF on your computer):**
 
 ```bash

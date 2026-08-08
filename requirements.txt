@@ -52,3 +52,6 @@ pytest-asyncio
 pytest-mock
 respx
 argostranslate>=1.11.0  # offline neural MT — primary translator (en<->ms etc.)
+
+# ── UI ──
+gradio>=5  # frontend (app.py)
