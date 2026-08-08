@@ -26,10 +26,11 @@ from .auth_modal import (
     js_clear_token_on_signout,
     js_persist_token_on_success,
     js_restore_token_on_load,
-    render_header_html,
+    render_full_header_html,
+    render_overlay_html,
 )
 from .configure_screen import build_configure_screen, save_economy, save_pillar
-from .header import APP_HEADER, RESTORE_THEME_JS
+from .header import RESTORE_THEME_JS
 from .reports import backfill_all_runs
 from .results_screen import (
     build_results_screen,
@@ -59,6 +60,26 @@ def _empty_results():
     return empty, {}, None, empty, empty, "Sign in to view your runs.", render_cost_report(None), "_Sign in to view your runs._"
 
 
+def _auth_required_update(message: str = "Sign in to continue."):
+    return gr.update(value=render_overlay_html(message), visible=True)
+
+
+def _open_auth_modal_if_needed(ctx):
+    if ctx is None:
+        return _auth_required_update()
+    return gr.update()
+
+
+def _run_pipeline_with_auth_modal(economy, pillar, ctx):
+    if ctx is None:
+        for payload in run_pipeline_streaming(economy, pillar, ctx):
+            yield (*payload, _auth_required_update("Sign in to run the pipeline."))
+        return
+
+    for payload in run_pipeline_streaming(economy, pillar, ctx):
+        yield (*payload, gr.update())
+
+
 def _save_economy_admin(*args):
     *payload, ctx = args
     if ctx is None or not getattr(ctx, "is_admin", False):
@@ -86,22 +107,23 @@ def build_app() -> gr.Blocks:
 
     with gr.Blocks(title="RDTII Extraction Engine") as app:
         auth_state = gr.State(None)
-        gr.HTML(APP_HEADER)
-        auth_header = gr.HTML(render_header_html(None))
+        auth_header = gr.HTML(render_full_header_html(None), elem_id="rdtii_app_header")
         auth = build_auth_modal()
 
-        run = build_run_screen()
-        results = build_results_screen()
-        settings = build_settings_screen(visible=False)
-        configure = build_configure_screen(visible=False)
+        with gr.Tabs() as main_tabs:
+            run = build_run_screen()
+            results = build_results_screen()
+            settings = build_settings_screen(visible=False)
+            configure = build_configure_screen(visible=False)
 
         # ── Run screen ───────────────────────────────────────────────────────
         run["run_button"].click(
-            run_pipeline_streaming,
+            _run_pipeline_with_auth_modal,
             inputs=[run["economy_dropdown"], run["pillar_dropdown"], auth_state],
             outputs=[run["pipeline_html"], run["logs_box"], run["run_cost_html"],
                      results["run_dropdown"], run["steps_accordion"],
-                     run["report_html"], run["view_results_button"]],
+                     run["report_html"], run["view_results_button"],
+                     auth["overlay_html"]],
         )
 
         # ── Results screen ───────────────────────────────────────────────────
@@ -192,6 +214,12 @@ def build_app() -> gr.Blocks:
 
         app.load(None, None, None, js=js_init_gis_button())
         app.load(None, None, None, js=js_restore_token_on_load())
+        main_tabs.select(
+            _open_auth_modal_if_needed,
+            inputs=auth_state,
+            outputs=auth["overlay_html"],
+            show_progress="hidden",
+        ).then(None, None, None, js=js_init_gis_button())
 
         # Restore the viewer's saved light/dark choice and sync the toggle label.
         app.load(None, None, None, js=RESTORE_THEME_JS)
@@ -200,7 +228,9 @@ def build_app() -> gr.Blocks:
 
 
 def launch() -> None:
-    bind = "127.0.0.1"
+    # Use localhost for GIS local development. Google documents localhost as
+    # the supported loopback origin for browser-based sign-in.
+    bind = "localhost"
     warning = dev_bypass.check_bypass_safety(bind)
     if warning:
         print(f"\033[91m{warning}\033[0m")

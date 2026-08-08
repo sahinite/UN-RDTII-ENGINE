@@ -31,7 +31,8 @@ def _theme_scope(root_class: str) -> str:
 # ── Page-level CSS (Gradio launch) ────────────────────────────────────────────
 
 APP_CSS = """
-.gradio-container{max-width:1320px !important;
+.gradio-container{width:100% !important;max-width:none !important;margin:0 !important;
+  padding:24px clamp(16px,3vw,56px) !important;box-sizing:border-box;
   /* Soft theme paints block labels in the primary hue — too loud next to the
      pipeline visual; make them quiet metadata instead. */
   --block-label-background-fill:transparent;
@@ -41,13 +42,18 @@ APP_CSS = """
   --block-title-text-color:var(--body-text-color-subdued);
   --block-title-border-color:transparent;}
 footer{display:none !important;}
-.rd-top{display:flex;align-items:center;gap:14px;padding:4px 2px 16px;flex-wrap:wrap;}
+.gradio-container > .main{width:100%;max-width:none;padding:0 !important;}
+.gradio-container .tabs,.gradio-container .tabitem{width:100%;max-width:none;min-width:0;}
+.rd-top{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;
+  gap:12px;padding:4px 2px 16px;}
+.rd-brand{min-width:0;display:flex;align-items:center;gap:14px;}
+.rd-brand-copy{min-width:0;}
 .rd-mark{width:38px;height:38px;border-radius:11px;flex:0 0 auto;display:flex;align-items:center;
   justify-content:center;font-size:15px;font-weight:800;letter-spacing:-.03em;color:#fff;
   background:linear-gradient(135deg,#3b82f6,#10b981);box-shadow:0 4px 14px rgba(59,130,246,.3);}
 .rd-top h1{margin:0;font-size:19px;font-weight:680;letter-spacing:-.02em;line-height:1.2;}
 .rd-top p{margin:2px 0 0;font-size:12.5px;color:var(--body-text-color-subdued,#6b7280);}
-.rd-tags{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;}
+.rd-tags{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;}
 .rd-tag{font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;
   padding:4px 10px;border-radius:999px;border:1px solid var(--border-color-primary,#e3e6ea);
   color:var(--body-text-color-subdued,#6b7280);}
@@ -58,6 +64,32 @@ footer{display:none !important;}
   border:1px solid var(--border-color-primary,#e3e6ea);
   color:var(--body-text-color-subdued,#6b7280);transition:border-color .2s,color .2s;}
 .rd-theme:hover{border-color:#3b82f6;color:#3b82f6;}
+#rdtii_app_header .prose{margin:0;}
+.rd-auth-header{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  min-height:34px;max-width:220px;padding:4px 8px;border-radius:999px;
+  border:1px solid var(--border-color-primary,#e3e6ea);
+  background:var(--background-fill-primary,#fff);box-shadow:0 1px 8px rgba(15,23,42,.08);}
+.rd-auth-anon{font-size:12px;color:var(--body-text-color-subdued,#6b7280);white-space:nowrap;}
+.rd-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:0 0 auto;}
+.rd-user-name{font-size:12px;font-weight:650;color:var(--body-text-color,#111827);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.rd-user-email{display:none;}
+@media (max-width: 1080px){
+  .rd-top{grid-template-columns:minmax(0,1fr) auto;padding-bottom:10px;}
+  .rd-tags{grid-column:1 / -1;grid-row:2;justify-content:flex-start;}
+  .rd-auth-header{max-width:100%;}
+}
+@media (max-width: 620px){
+  .gradio-container{padding:16px 12px !important;}
+  .rd-top{gap:10px;}
+  .rd-brand{gap:10px;}
+  .rd-top h1{font-size:17px;}
+  .rd-top p{font-size:11.5px;}
+  .rd-mark{width:34px;height:34px;border-radius:9px;}
+  .rd-auth-header{max-width:140px;}
+  .rd-tags{gap:5px;}
+  .rd-tag{padding:4px 8px;font-size:10px;}
+}
 """
 
 

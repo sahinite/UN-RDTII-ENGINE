@@ -57,6 +57,23 @@ def test_render_overlay_html_contains_client_id(modal_module):
     assert "test.apps.googleusercontent.com" in html
 
 
+def test_gis_button_uses_high_contrast_theme(modal_module):
+    html = modal_module.js_init_gis_button()
+    assert "theme: 'filled_blue'" in html
+
+
+def test_gis_init_surfaces_origin_configuration_error(modal_module):
+    html = modal_module.js_init_gis_button()
+    assert "origin is not allowed" in html
+    assert "Google sign-in is not configured" in html
+
+
+def test_gis_init_watches_for_a_modal_reopened_by_server_event(modal_module):
+    html = modal_module.js_init_gis_button()
+    assert "MutationObserver" in html
+    assert "__rdtiiGISMountWatcher" in html
+
+
 def test_render_overlay_html_has_no_script_tag(modal_module):
     html = modal_module.render_overlay_html()
     assert "<script" not in html
@@ -68,6 +85,13 @@ def test_render_overlay_html_error_slot(modal_module):
     assert "Boom happened" in html
     # Empty error should not render the div.
     assert 'class="auth-error"' not in modal_module.render_overlay_html()
+
+
+def test_build_auth_modal_starts_hidden(modal_module):
+    with gr.Blocks():
+        components = modal_module.build_auth_modal()
+
+    assert components["overlay_html"].visible is False
 
 
 # ── render_header_html ───────────────────────────────────────────────────────
@@ -91,6 +115,13 @@ def test_render_header_html_signed_in(modal_module):
     html = modal_module.render_header_html(ctx)
     assert "Alice" in html
     assert "a@x.com" in html
+
+
+def test_full_header_keeps_user_control_inside_brand_bar(modal_module):
+    html = modal_module.render_full_header_html(None)
+    assert 'class="rd-top"' in html
+    assert 'class="rd-auth-header"' in html
+    assert html.index('class="rd-auth-header"') < html.index("</header>")
 
 
 # ── handle_sign_in ───────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ from typing import Any
 import gradio as gr
 
 from src.auth import db, dev_bypass, session
+from .header import render_app_header
 
 TAGLINE = "Law/Regulations and Provisions Extraction engine on UN RDTII Framework"
 
@@ -60,13 +61,14 @@ def render_overlay_html(error_message: str = "") -> str:
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }}
   #rdtii-auth-card {{
-    width: 380px; max-width: 92vw; background: #fff; color: #222;
+    width: 380px; max-width: 92vw; background: #fff !important; color: #1f2937 !important;
     border-radius: 12px; padding: 28px 24px 24px; text-align: center;
     box-shadow: 0 20px 60px rgba(0,0,0,.35);
   }}
-  #rdtii-auth-card h2 {{ margin: 0 0 6px; font-size: 20px; }}
-  #rdtii-auth-card .tagline {{ margin: 0 0 20px; font-size: 13px; color: #666; }}
+  #rdtii-auth-card h2 {{ margin: 0 0 6px; font-size: 20px; color: #111827 !important; }}
+  #rdtii-auth-card .tagline {{ margin: 0 0 20px; font-size: 13px; color: #4b5563 !important; }}
   #rdtii-auth-card #g_id_signin {{ display: flex; justify-content: center; margin: 8px 0; }}
+  #rdtii-auth-card iframe {{ color-scheme: light; filter: none !important; opacity: 1 !important; }}
   #rdtii-auth-card .auth-error {{
     margin-top: 14px; padding: 8px 10px; border-radius: 6px;
     background: #fdecea; color: #b3261e; font-size: 13px;
@@ -93,6 +95,28 @@ def js_init_gis_button() -> str:
     # and clicking a hidden Button with the Python-side handler.
     return f"""
 () => {{
+  function showAuthError(message) {{
+    var card = document.getElementById('rdtii-auth-card');
+    if (!card) return;
+    var existing = card.querySelector('.auth-error');
+    if (!existing) {{
+      existing = document.createElement('div');
+      existing.className = 'auth-error';
+      card.appendChild(existing);
+    }}
+    existing.textContent = message;
+  }}
+  if (!window.__rdtiiConsoleWatched) {{
+    window.__rdtiiConsoleWatched = true;
+    var originalError = console.error.bind(console);
+    console.error = function() {{
+      var text = Array.prototype.slice.call(arguments).map(String).join(' ');
+      if (text.indexOf('origin is not allowed') !== -1 && text.indexOf('client ID') !== -1) {{
+        showAuthError('Google sign-in is not configured for ' + window.location.origin + '.');
+      }}
+      originalError.apply(console, arguments);
+    }};
+  }}
   window.__rdtiiHandleCredential = function(resp) {{
     try {{
       var token = resp && resp.credential;
@@ -117,8 +141,22 @@ def js_init_gis_button() -> str:
       client_id: '{_CLIENT_ID}',
       callback: window.__rdtiiHandleCredential,
     }});
-    google.accounts.id.renderButton(mount, {{ theme: 'outline', size: 'large' }});
+    google.accounts.id.renderButton(mount, {{
+      theme: 'filled_blue',
+      size: 'large',
+      type: 'standard',
+      text: 'signin_with',
+      shape: 'rectangular'
+    }});
     mount.dataset.rdtiiRendered = '1';
+  }}
+  // Gradio replaces the HTML inside the overlay whenever it is opened. Watch
+  // for that replacement so a freshly-created GIS mount is initialized even
+  // when a server event (such as Run Pipeline) opens the modal.
+  if (!window.__rdtiiGISMountWatcher) {{
+    window.__rdtiiGISMountWatcher = true;
+    var observer = new MutationObserver(function() {{ initGIS(); }});
+    observer.observe(document.body, {{ childList: true, subtree: true }});
   }}
   initGIS();
 }}
@@ -138,10 +176,17 @@ def render_header_html(ctx: Any) -> str:
     )
 
 
+def render_full_header_html(ctx: Any) -> str:
+    """Keep the user control within the same layout as the app brand bar."""
+    return render_app_header(render_header_html(ctx))
+
+
 def build_auth_modal() -> dict:
     # elem_id is what the browser JS uses to locate these components — do NOT
     # rename them here without updating render_overlay_html().
-    overlay_html = gr.HTML(render_overlay_html(), elem_id="rdtii_auth_overlay")
+    overlay_html = gr.HTML(
+        render_overlay_html(), elem_id="rdtii_auth_overlay", visible=False
+    )
     token_input = gr.Textbox(
         elem_id="rdtii_auth_token", visible=False, label="__rdtii_token"
     )
@@ -179,7 +224,7 @@ def handle_sign_in(token: str, current_ctx: Any):
         if google_user is None:
             return (
                 None,
-                render_header_html(None),
+                render_full_header_html(None),
                 gr.update(
                     value=render_overlay_html("Sign-in failed. Please try again."),
                     visible=True,
@@ -199,7 +244,7 @@ def handle_sign_in(token: str, current_ctx: Any):
     is_admin = bool(ctx and ctx.is_admin)
     return (
         ctx,
-        render_header_html(ctx),
+        render_full_header_html(ctx),
         gr.update(visible=False),
         gr.update(visible=True),
         gr.update(visible=is_admin),
@@ -209,7 +254,7 @@ def handle_sign_in(token: str, current_ctx: Any):
 def handle_sign_out(current_ctx: Any):
     return (
         None,
-        render_header_html(None),
+        render_full_header_html(None),
         gr.update(value=render_overlay_html(), visible=True),
         gr.update(visible=False),
         gr.update(visible=False),

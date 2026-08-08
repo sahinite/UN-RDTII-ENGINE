@@ -15,12 +15,16 @@ _THEME_TOGGLE_JS = (
     "this.textContent=d?'\\u2600 Light mode':'\\u263E Dark mode';"
 )
 
-APP_HEADER = f"""
-<div class="rd-top">
-  <div class="rd-mark">RD</div>
-  <div>
-    <h1>RDTII Extraction Engine</h1>
-    <p>Regulatory evidence discovery and indicator mapping for digital trade</p>
+def render_app_header(auth_html: str = "") -> str:
+    """Render the brand bar and its optional authenticated-user control."""
+    return f"""
+<header class="rd-top">
+  <div class="rd-brand">
+    <div class="rd-mark">RD</div>
+    <div class="rd-brand-copy">
+      <h1>RDTII Extraction Engine</h1>
+      <p>Regulatory evidence discovery and indicator mapping for digital trade</p>
+    </div>
   </div>
   <div class="rd-tags">
     <span class="rd-tag">Zone 1 · Discovery</span>
@@ -29,8 +33,14 @@ APP_HEADER = f"""
       &#9790; Dark mode
     </button>
   </div>
-</div>
+  {auth_html}
+</header>
 """
+
+
+# Kept as the anonymous default for callers that render the shell without an
+# auth component. The app replaces it with its live user-aware header.
+APP_HEADER = render_app_header()
 
 # Runs once on page load: restore the saved theme and sync the toggle label.
 RESTORE_THEME_JS = """

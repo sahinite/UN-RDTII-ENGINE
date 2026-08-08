@@ -100,6 +100,10 @@ SECRET_ENCRYPTION_KEY=<the value from openssl rand -base64 32>
 ADMIN_EMAILS=you@example.com          # optional; shows the Configure tab
 ```
 
+In Google Cloud Console, the OAuth client must be a **Web application** and its
+**Authorized JavaScript origins** must include the exact URL you open in the
+browser, for example `http://localhost` and `http://localhost:7860`.
+
 Then start the UI:
 
 ```bash
