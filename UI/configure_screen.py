@@ -139,9 +139,9 @@ def save_pillar(pillar_number, indicators_df: pd.DataFrame):
             gr.update(choices=list_pillars()))
 
 
-def build_configure_screen() -> dict:
+def build_configure_screen(visible: bool = True) -> dict:
     """Lay out the Configure tab; returns the components the app wires together."""
-    with gr.Tab("Configure"):
+    with gr.Tab("Configure", visible=visible) as tab:
         with gr.Tabs():
             with gr.Tab("New economy"):
                 gr.Markdown("Creates `economies/<name>.yaml`, validated with the same Pydantic "
@@ -202,6 +202,7 @@ def build_configure_screen() -> dict:
                 pillar_status = gr.Markdown("")
 
     return {
+        "tab": tab,
         "economy_inputs": [economy_name, iso_code, un_name, script_type, languages,
                            portal_name, portal_url, portal_type, discovery, fetch, anti_bot,
                            index_urls, index_link_pattern, pdf_view_suffix,

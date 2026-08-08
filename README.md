@@ -73,6 +73,35 @@ That's it — you're ready to run.
 
 ### Option A — the web app (easiest)
 
+The UI is protected by Google Sign-In. For local development, you can skip Google
+OAuth with the dev bypass:
+
+```bash
+# one time, if SECRET_ENCRYPTION_KEY is still blank
+openssl rand -base64 32
+```
+
+Put the generated value in `.env`, then use either normal Google sign-in or the
+local bypass.
+
+**Local development without Google OAuth:**
+
+```bash
+AUTH_DEV_BYPASS=1
+DEV_USER_EMAIL=you@example.com
+SECRET_ENCRYPTION_KEY=<the value from openssl rand -base64 32>
+```
+
+**Normal Google sign-in:**
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID=<your Google OAuth web client id>
+SECRET_ENCRYPTION_KEY=<the value from openssl rand -base64 32>
+ADMIN_EMAILS=you@example.com          # optional; shows the Configure tab
+```
+
+Then start the UI:
+
 ```bash
 python app.py
 ```
@@ -84,18 +113,19 @@ Open http://localhost:7860. From there you can:
   (1 of 5, 2 of 5, …) is being processed and how far each one got. When the run
   finishes the steps collapse and a **run report** appears below (cost breakdown,
   KNOWN vs NEW acts, documents fetched/used) — it's also saved as
-  `outputs/<economy>_P<pillar>_<datetime>_runReport.md`. A **View Results** button
-  jumps straight to that run's outputs.
+  `outputs/<user_hash>/<run_id>/<economy>_P<pillar>_<datetime>_runReport.md`. A
+  **View Results** button jumps straight to that run's outputs. Runs are queued
+  globally and use your saved provider/API key settings.
 - **Results** — everything for one selected run, in sub-tabs: the generated CSV and
   JSON; a **Compare vs Round 1** table that highlights mismatched indicators (rows
   where the engine missed a Round 1 act, or found something Round 1 doesn't list);
   the saved **Run report**; and the **Cost** breakdown (LLM / OCR / embedding /
-  crawling) — each run keeps its own cost file rather than overwriting the last.
+  crawling) — each signed-in user only sees their own runs. You can also cancel
+  your own queued or running jobs here.
+- **My Settings** — view your Google profile, save contact info, choose your LLM
+  provider, and store provider API keys. Keys are encrypted in `data/users.db`.
 - **Configure** — add a new economy or a new pillar without editing files by hand.
-- **Environment** — edit every environment variable the pipeline reads (LLM provider,
-  model and API keys, OCR, translation, run control, archiving, plus advanced tuning)
-  and **Save** them straight to `.env`. Blank fields are left as-is, so secrets you
-  don't retype are kept.
+  This tab is visible only when your email is listed in `ADMIN_EMAILS`.
 
 The header has a light/dark toggle; your choice is remembered in the browser.
 

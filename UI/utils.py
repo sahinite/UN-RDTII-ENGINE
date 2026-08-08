@@ -121,10 +121,40 @@ def pillar_choices() -> list[tuple[str, int]]:
 
 # ── Run outputs & per-run artifacts ───────────────────────────────────────────
 
-def list_runs() -> list[str]:
-    """Run output CSV filenames, newest first."""
-    files = sorted(OUTPUT_DIR.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+def user_output_dir(user_hash: str | None = None, run_id: str | None = None) -> Path:
+    """Output root for either legacy shared runs or one tenant/run."""
+    path = OUTPUT_DIR
+    if user_hash:
+        path = path / user_hash
+    if run_id:
+        path = path / run_id
+    return path
+
+
+def list_runs(user_hash: str | None = None) -> list[str]:
+    """Run output CSV filenames, newest first.
+
+    Pre-auth runs live directly under outputs/. Authenticated UI runs live under
+    outputs/{user_hash}/{run_id}/ and are only listed for that user.
+    """
+    root = user_output_dir(user_hash)
+    pattern = "*.csv" if user_hash is None else "*/*.csv"
+    files = sorted(root.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return [f.name for f in files]
+
+
+def find_run_csv(csv_name: str, user_hash: str | None = None) -> Path:
+    """Resolve a run CSV name to the matching legacy or tenant path."""
+    if user_hash:
+        matches = sorted(
+            user_output_dir(user_hash).glob(f"*/{csv_name}"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if matches:
+            return matches[0]
+        return user_output_dir(user_hash) / csv_name
+    return OUTPUT_DIR / csv_name
 
 
 def parse_run_name(csv_name: str) -> tuple[str | None, int | None]:
@@ -141,18 +171,20 @@ def run_basename(csv_name: str) -> str:
 
 # Per-run artifacts live next to the CSV so each run keeps its own cost + report
 # instead of overwriting a single shared file. Basename = "<economy>_P<pillar>_<ts>".
-def cost_report_path(csv_name: str) -> Path:
-    return OUTPUT_DIR / f"{run_basename(csv_name)}_cost.json"
+def cost_report_path(csv_name: str, user_hash: str | None = None) -> Path:
+    csv_path = find_run_csv(csv_name, user_hash)
+    return csv_path.with_name(f"{run_basename(csv_name)}_cost.json")
 
 
-def run_report_path(csv_name: str) -> Path:
-    return OUTPUT_DIR / f"{run_basename(csv_name)}_runReport.md"
+def run_report_path(csv_name: str, user_hash: str | None = None) -> Path:
+    csv_path = find_run_csv(csv_name, user_hash)
+    return csv_path.with_name(f"{run_basename(csv_name)}_runReport.md")
 
 
-def load_run_cost(csv_name: str) -> dict:
+def load_run_cost(csv_name: str, user_hash: str | None = None) -> dict:
     """Per-run cost snapshot. Falls back to the shared logs/cost_report.json only
     when it clearly belongs to this run (same economy + pillar)."""
-    per_run = read_json(cost_report_path(csv_name))
+    per_run = read_json(cost_report_path(csv_name, user_hash))
     if per_run is not None:
         return per_run
     shared = read_json(SHARED_COST_REPORT)

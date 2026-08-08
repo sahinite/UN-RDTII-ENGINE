@@ -11,25 +11,28 @@ import pandas as pd
 
 from .reports import render_cost_report, run_report_markdown_text
 from .utils import (
-    OUTPUT_DIR,
     ROUND1_DB,
     cost_report_path,
+    find_run_csv,
     list_runs,
     load_taxonomy,
     parse_run_name,
     read_json,
     run_report_path,
 )
+from src.auth import db
+from src.queue import scheduler
 
 
-def load_run(csv_name: str):
+def load_run(csv_name: str, ctx=None):
     """Everything the Results tabs render for one run:
     (csv_df, json, files, comparison(styled), round1, note, cost_html, report_md)."""
     empty = pd.DataFrame()
     if not csv_name:
         return (empty, {}, None, empty, empty, "Select a run.",
                 render_cost_report(None), "_Select a run to view its report._")
-    csv_path = OUTPUT_DIR / csv_name
+    user_hash = getattr(ctx, "user_hash", None)
+    csv_path = find_run_csv(csv_name, user_hash)
     json_path = csv_path.with_suffix(".json")
     if not csv_path.exists():
         return (empty, {}, None, empty, empty, f"File not found: {csv_name}",
@@ -41,14 +44,52 @@ def load_run(csv_name: str):
     if json_path.exists():
         files.append(str(json_path))
         payload = read_json(json_path, default={"error": "could not parse JSON output"})
-    for extra in (run_report_path(csv_name), cost_report_path(csv_name)):
+    for extra in (run_report_path(csv_name, user_hash), cost_report_path(csv_name, user_hash)):
         if extra.exists():
             files.append(str(extra))
 
     comparison, round1_rows, note = build_round1_comparison(csv_name, output_df)
-    cost_html = render_cost_report(cost_report_path(csv_name))
-    report_md = run_report_markdown_text(csv_name)
+    cost_html = render_cost_report(cost_report_path(csv_name, user_hash))
+    report_md = run_report_markdown_text(csv_name, user_hash)
     return output_df, payload, files, comparison, round1_rows, note, cost_html, report_md
+
+
+def refresh_runs(ctx=None):
+    if ctx is None:
+        return gr.update(choices=[], value=None), pd.DataFrame(), {}, None, pd.DataFrame(), pd.DataFrame(), "Sign in to view your runs.", render_cost_report(None), "_Sign in to view your runs._"
+    runs = list_runs(ctx.user_hash)
+    selected = runs[0] if runs else None
+    return gr.update(choices=runs, value=selected), *load_run(selected, ctx)
+
+
+def list_active_runs(ctx=None):
+    if ctx is None:
+        return pd.DataFrame(columns=["run_id", "economy", "pillar", "status"])
+    conn = db.get_connection(db.DEFAULT_DB_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT run_id, economy, pillar, status, enqueued_at, started_at "
+            "FROM runs WHERE email=? AND status IN ('queued','running') "
+            "ORDER BY enqueued_at DESC",
+            (ctx.email,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return pd.DataFrame([dict(r) for r in rows])
+
+
+def cancel_selected_run(run_id: str, ctx=None):
+    if ctx is None:
+        return "Sign in required.", list_active_runs(None)
+    if not run_id:
+        return "Select a queued or running run ID to cancel.", list_active_runs(ctx)
+    conn = db.get_connection(db.DEFAULT_DB_PATH)
+    try:
+        ok, err = scheduler.cancel_run(str(run_id).strip(), ctx.email, conn)
+    finally:
+        conn.close()
+    message = "Cancelled." if ok else f"Could not cancel: {err or 'unknown error'}"
+    return message, list_active_runs(ctx)
 
 
 def build_round1_comparison(csv_name: str, output_df: pd.DataFrame):
@@ -151,6 +192,11 @@ def build_results_screen() -> dict:
             run_dropdown = gr.Dropdown(runs, label="Run output (CSV)",
                                        value=runs[0] if runs else None, scale=3)
             refresh_button = gr.Button("Refresh", scale=1)
+        with gr.Accordion("Queued / running", open=False):
+            active_runs_table = gr.Dataframe(interactive=False, wrap=True)
+            cancel_run_id = gr.Textbox(label="Run ID to cancel")
+            cancel_button = gr.Button("Cancel run")
+            cancel_status = gr.Markdown("")
         summary_note = gr.Markdown("")
         with gr.Tabs():
             with gr.Tab("Generated CSV"):
@@ -174,6 +220,10 @@ def build_results_screen() -> dict:
     return {
         "run_dropdown": run_dropdown,
         "refresh_button": refresh_button,
+        "active_runs_table": active_runs_table,
+        "cancel_run_id": cancel_run_id,
+        "cancel_button": cancel_button,
+        "cancel_status": cancel_status,
         "summary_note": summary_note,
         "csv_table": csv_table,
         "json_view": json_view,

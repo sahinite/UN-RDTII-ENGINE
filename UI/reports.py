@@ -27,6 +27,7 @@ from .utils import (
     SHARED_COST_REPORT,
     cost_report_path,
     detect_fetch_kind,
+    find_run_csv,
     list_runs,
     load_run_cost,
     parse_run_name,
@@ -40,12 +41,16 @@ from .utils import (
 
 # ── Data gathering ────────────────────────────────────────────────────────────
 
-def gather_report_data(csv_name: str, run_state: dict | None = None) -> dict:
+def gather_report_data(
+    csv_name: str,
+    run_state: dict | None = None,
+    user_hash: str | None = None,
+) -> dict:
     """Everything both report renderers need. `run_state` (if present) only adds
     live-run extras the files can't provide (queued/attempted/failed, wall-clock)."""
     run_state = run_state or {}
     economy, pillar = parse_run_name(csv_name)
-    csv_path = OUTPUT_DIR / csv_name
+    csv_path = find_run_csv(csv_name, user_hash)
     json_path = csv_path.with_suffix(".json")
 
     rows: list[dict] = []
@@ -83,7 +88,7 @@ def gather_report_data(csv_name: str, run_state: dict | None = None) -> dict:
         })
 
     # ── cost (per-run snapshot) ──────────────────────────────────────────────
-    cost = load_run_cost(csv_name)
+    cost = load_run_cost(csv_name, user_hash)
     components = cost.get("components", {})
 
     return {
@@ -310,18 +315,24 @@ def render_report_markdown(d: dict) -> str:
 
 # ── Persistence & backfill ────────────────────────────────────────────────────
 
-def persist_run_artifacts(csv_name: str, run_state: dict) -> None:
+def persist_run_artifacts(
+    csv_name: str,
+    run_state: dict,
+    user_hash: str | None = None,
+    source_cost_path: Path | None = None,
+) -> None:
     """On a completed run: snapshot the shared cost report to a per-run file, then
     write the run-report markdown alongside the CSV."""
-    if SHARED_COST_REPORT.exists():
+    source_cost_path = source_cost_path or SHARED_COST_REPORT
+    if source_cost_path.exists():
         try:
-            cost_report_path(csv_name).write_text(
-                SHARED_COST_REPORT.read_text(encoding="utf-8"), encoding="utf-8")
+            cost_report_path(csv_name, user_hash).write_text(
+                source_cost_path.read_text(encoding="utf-8"), encoding="utf-8")
         except Exception:
             pass
     try:
-        run_report_path(csv_name).write_text(
-            render_report_markdown(gather_report_data(csv_name, run_state)),
+        run_report_path(csv_name, user_hash).write_text(
+            render_report_markdown(gather_report_data(csv_name, run_state, user_hash)),
             encoding="utf-8")
     except Exception:
         pass
@@ -365,15 +376,15 @@ def backfill_all_runs() -> None:
         ensure_run_artifacts(run, use_shared_cost=(run == shared_cost_owner))
 
 
-def run_report_markdown_text(csv_name: str) -> str:
+def run_report_markdown_text(csv_name: str, user_hash: str | None = None) -> str:
     """Saved run-report markdown for a run (generated on the fly if absent)."""
     if not csv_name:
         return "_Select a run to view its report._"
-    report_path = run_report_path(csv_name)
+    report_path = run_report_path(csv_name, user_hash)
     if report_path.exists():
         return report_path.read_text(encoding="utf-8")
     try:
-        return render_report_markdown(gather_report_data(csv_name))
+        return render_report_markdown(gather_report_data(csv_name, user_hash=user_hash))
     except Exception as exc:
         return f"_Could not build report: {exc}_"
 

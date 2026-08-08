@@ -10,8 +10,9 @@ Modules:
     reports.py             — run report + cost report builders, per-run artifacts
     run_screen.py          — Run tab (pickers, live visual, logs, streaming runner)
     results_screen.py      — Results tab (CSV/JSON, Round 1 comparison, report, cost)
+    settings_screen.py     — My Settings tab (profile, provider, encrypted API keys)
     configure_screen.py    — Configure tab (new economy YAML / new pillar indicators)
-    environment_screen.py  — Environment tab (.env editor, incl. LLM provider + keys)
+    auth_modal.py          — Google Sign-In overlay and browser/Python token bridge
 """
 
 from .app import build_app, launch
