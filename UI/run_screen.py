@@ -29,7 +29,7 @@ from .reports import (
     render_cost_report,
     render_report_html,
 )
-from .settings_screen import missing_provider_key_message
+from .settings_screen import missing_required_keys_message
 from .utils import (
     PROJECT_ROOT,
     cost_report_path,
@@ -72,7 +72,7 @@ def run_pipeline_streaming(economy: str, pillar: int, ctx=None):
         yield _empty_yield("Select an economy and a pillar first.")
         return
 
-    missing_key = missing_provider_key_message(ctx)
+    missing_key = missing_required_keys_message(ctx)
     if missing_key:
         yield _empty_yield(missing_key)
         return

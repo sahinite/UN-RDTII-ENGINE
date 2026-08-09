@@ -21,7 +21,7 @@ ENV_GROUPS: list[tuple[str, bool, list[tuple]]] = [
     ("LLM & providers", False, [
         ("LLM_PROVIDER", "select", "openai", "Provider the run pins",
          ["anthropic", "openai", "gemini", "deepseek", "groq", "qwen", "ollama"]),
-        ("LLM_MODEL", "text", "gpt-4o", "Model id (blank = provider default)", None),
+        ("LLM_MODEL", "text", "gpt-5", "Model id (blank = provider default)", None),
         ("LLM_API_KEY", "secret", "", "Generic key for the pinned provider "
          "(a provider-specific key below overrides it)", None),
         ("ANTHROPIC_API_KEY", "secret", "", "Claude — tier 1", None),

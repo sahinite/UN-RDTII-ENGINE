@@ -6,6 +6,8 @@ highlighted), the saved run report, the per-run cost visual, and downloads.
 
 from __future__ import annotations
 
+from html import escape
+
 import gradio as gr
 import pandas as pd
 
@@ -24,19 +26,47 @@ from src.auth import db
 from src.queue import scheduler
 
 
+def render_results_empty_state(message: str = "No results available yet.") -> str:
+    return (
+        '<div class="rd-results-empty" role="status">'
+        '<div class="rd-results-empty-box">'
+        '<div class="rd-results-empty-icon" aria-hidden="true"></div>'
+        '<h3>No results yet</h3>'
+        f'<p>{escape(message)}</p>'
+        '</div></div>'
+    )
+
+
+def empty_results_payload(message: str = "No results available yet.") -> tuple:
+    """Outputs shared by initial load, sign-out, and an empty run list."""
+    empty = pd.DataFrame()
+    return (
+        empty,
+        {},
+        None,
+        empty,
+        empty,
+        "",
+        render_cost_report(None),
+        "",
+        gr.update(value=render_results_empty_state(message), visible=True),
+        gr.update(visible=False),
+    )
+
+
 def load_run(csv_name: str, ctx=None):
     """Everything the Results tabs render for one run:
-    (csv_df, json, files, comparison(styled), round1, note, cost_html, report_md)."""
+    data outputs followed by empty-state and content visibility updates."""
     empty = pd.DataFrame()
+    if ctx is None:
+        return empty_results_payload("Sign in to view your runs.")
     if not csv_name:
-        return (empty, {}, None, empty, empty, "Select a run.",
-                render_cost_report(None), "_Select a run to view its report._")
+        return empty_results_payload()
     user_hash = getattr(ctx, "user_hash", None)
     csv_path = find_run_csv(csv_name, user_hash)
     json_path = csv_path.with_suffix(".json")
     if not csv_path.exists():
-        return (empty, {}, None, empty, empty, f"File not found: {csv_name}",
-                render_cost_report(None), f"_File not found: {csv_name}_")
+        return empty_results_payload("The selected result is no longer available.")
 
     output_df = pd.read_csv(csv_path)
     payload = {}
@@ -51,12 +81,25 @@ def load_run(csv_name: str, ctx=None):
     comparison, round1_rows, note = build_round1_comparison(csv_name, output_df)
     cost_html = render_cost_report(cost_report_path(csv_name, user_hash))
     report_md = run_report_markdown_text(csv_name, user_hash)
-    return output_df, payload, files, comparison, round1_rows, note, cost_html, report_md
+    return (
+        output_df,
+        payload,
+        files,
+        comparison,
+        round1_rows,
+        note,
+        cost_html,
+        report_md,
+        gr.update(visible=False),
+        gr.update(visible=True),
+    )
 
 
 def refresh_runs(ctx=None):
     if ctx is None:
-        return gr.update(choices=[], value=None), pd.DataFrame(), {}, None, pd.DataFrame(), pd.DataFrame(), "Sign in to view your runs.", render_cost_report(None), "_Sign in to view your runs._"
+        return gr.update(choices=[], value=None), *empty_results_payload(
+            "Sign in to view your runs."
+        )
     runs = list_runs(ctx.user_hash)
     selected = runs[0] if runs else None
     return gr.update(choices=runs, value=selected), *load_run(selected, ctx)
@@ -78,18 +121,25 @@ def list_active_runs(ctx=None):
     return pd.DataFrame([dict(r) for r in rows])
 
 
+def active_runs_view(ctx=None):
+    """Return active rows and show their controls only when rows exist."""
+    rows = list_active_runs(ctx)
+    has_active_runs = not rows.empty
+    return rows, gr.update(visible=has_active_runs, open=has_active_runs)
+
+
 def cancel_selected_run(run_id: str, ctx=None):
     if ctx is None:
-        return "Sign in required.", list_active_runs(None)
+        return "Sign in required.", *active_runs_view(None)
     if not run_id:
-        return "Select a queued or running run ID to cancel.", list_active_runs(ctx)
+        return "Select a queued or running run ID to cancel.", *active_runs_view(ctx)
     conn = db.get_connection(db.DEFAULT_DB_PATH)
     try:
         ok, err = scheduler.cancel_run(str(run_id).strip(), ctx.email, conn)
     finally:
         conn.close()
     message = "Cancelled." if ok else f"Could not cancel: {err or 'unknown error'}"
-    return message, list_active_runs(ctx)
+    return message, *active_runs_view(ctx)
 
 
 def build_round1_comparison(csv_name: str, output_df: pd.DataFrame):
@@ -185,42 +235,51 @@ def build_round1_comparison(csv_name: str, output_df: pd.DataFrame):
 
 def build_results_screen() -> dict:
     """Lay out the Results tab; returns the components the app wires together."""
-    runs = list_runs()
+    # Run choices are always populated after authentication. Loading global
+    # outputs here can briefly expose another user's files during app startup.
+    runs: list[str] = []
 
     with gr.Tab("Results"):
         with gr.Row():
             run_dropdown = gr.Dropdown(runs, label="Run output (CSV)",
                                        value=runs[0] if runs else None, scale=3)
             refresh_button = gr.Button("Refresh", scale=1)
-        with gr.Accordion("Queued / running", open=False):
+        with gr.Accordion(
+            "Queued / running", open=False, visible=False
+        ) as active_runs_panel:
             active_runs_table = gr.Dataframe(interactive=False, wrap=True)
             cancel_run_id = gr.Textbox(label="Run ID to cancel")
             cancel_button = gr.Button("Cancel run")
             cancel_status = gr.Markdown("")
-        summary_note = gr.Markdown("")
-        with gr.Tabs():
-            with gr.Tab("Generated CSV"):
-                csv_table = gr.Dataframe(interactive=False, wrap=True, max_height=480)
-            with gr.Tab("Generated JSON"):
-                json_view = gr.JSON()
-            with gr.Tab("Compare vs Round 1"):
-                gr.Markdown("Per-indicator comparison: Round 1 ground truth vs this run's "
-                            "output. Mismatched rows are highlighted.")
-                comparison_table = gr.Dataframe(interactive=False, wrap=True, max_height=480)
-                gr.Markdown("Raw Round 1 rows for this economy + pillar:")
-                round1_table = gr.Dataframe(interactive=False, wrap=True, max_height=320)
-            with gr.Tab("Run report"):
-                report_markdown = gr.Markdown("_Select a run to view its report._")
-            with gr.Tab("Cost"):
-                cost_html = gr.HTML(render_cost_report(None))
-            with gr.Tab("Download"):
-                download_files = gr.File(label="Output files", interactive=False,
-                                         file_count="multiple")
+        empty_state = gr.HTML(
+            render_results_empty_state(), visible=not bool(runs)
+        )
+        with gr.Group(visible=bool(runs)) as results_content:
+            summary_note = gr.Markdown("")
+            with gr.Tabs():
+                with gr.Tab("Generated CSV"):
+                    csv_table = gr.Dataframe(interactive=False, wrap=True, max_height=480)
+                with gr.Tab("Generated JSON"):
+                    json_view = gr.JSON()
+                with gr.Tab("Compare vs Round 1"):
+                    gr.Markdown("Per-indicator comparison: Round 1 ground truth vs this run's "
+                                "output. Mismatched rows are highlighted.")
+                    comparison_table = gr.Dataframe(interactive=False, wrap=True, max_height=480)
+                    gr.Markdown("Raw Round 1 rows for this economy + pillar:")
+                    round1_table = gr.Dataframe(interactive=False, wrap=True, max_height=320)
+                with gr.Tab("Run report"):
+                    report_markdown = gr.Markdown("_Select a run to view its report._")
+                with gr.Tab("Cost"):
+                    cost_html = gr.HTML(render_cost_report(None))
+                with gr.Tab("Download"):
+                    download_files = gr.File(label="Output files", interactive=False,
+                                             file_count="multiple")
 
     return {
         "run_dropdown": run_dropdown,
         "refresh_button": refresh_button,
         "active_runs_table": active_runs_table,
+        "active_runs_panel": active_runs_panel,
         "cancel_run_id": cancel_run_id,
         "cancel_button": cancel_button,
         "cancel_status": cancel_status,
@@ -232,4 +291,6 @@ def build_results_screen() -> dict:
         "report_markdown": report_markdown,
         "cost_html": cost_html,
         "download_files": download_files,
+        "empty_state": empty_state,
+        "results_content": results_content,
     }

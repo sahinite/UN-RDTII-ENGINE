@@ -3,7 +3,7 @@
 
 PROVIDER_CASCADE order (DO NOT reorder):
   1. AnthropicProvider  — claude-sonnet-4-20250514 (pinned primary)
-  2. OpenAIProvider     — gpt-4o
+  2. OpenAIProvider     — gpt-5
   3. GeminiProvider     — gemini-2.5-flash (OpenAI-compatible; GEMINI_API_KEY)
   4. DeepSeekProvider   — deepseek-chat (V3, OpenAI-compatible; DEEPSEEK_API_KEY)
   5. GroqProvider       — qwen/qwen3-32b (free tier; fallback qwen/qwen3.6-27b)
@@ -43,7 +43,7 @@ logger = logging.getLogger("mapping.llm_client")
 # Ordered by priority — DO NOT reorder
 PROVIDER_CASCADE: list[BaseLLMProvider] = [
     AnthropicProvider(),   # 1 — claude-sonnet-4-20250514 (pinned)
-    OpenAIProvider(),      # 2 — gpt-4o
+    OpenAIProvider(),      # 2 — gpt-5
     GeminiProvider(),      # 3 — gemini-2.5-flash (GEMINI_API_KEY)
     DeepSeekProvider(),    # 4 — deepseek-chat V3 (DEEPSEEK_API_KEY)
     GroqProvider(),        # 5 — qwen/qwen3-32b via Groq (qwen/qwen3.6-27b fallback)

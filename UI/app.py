@@ -33,9 +33,10 @@ from .configure_screen import build_configure_screen, save_economy, save_pillar
 from .header import RESTORE_THEME_JS
 from .reports import backfill_all_runs
 from .results_screen import (
+    active_runs_view,
     build_results_screen,
     cancel_selected_run,
-    list_active_runs,
+    empty_results_payload,
     load_run,
     refresh_runs,
 )
@@ -53,11 +54,7 @@ _OPEN_RESULTS_TAB_JS = (
 
 
 def _empty_results():
-    import pandas as pd
-    from .reports import render_cost_report
-
-    empty = pd.DataFrame()
-    return empty, {}, None, empty, empty, "Sign in to view your runs.", render_cost_report(None), "_Sign in to view your runs._"
+    return empty_results_payload("Sign in to view your runs.")
 
 
 def _auth_required_update(message: str = "Sign in to continue."):
@@ -130,21 +127,27 @@ def build_app() -> gr.Blocks:
         results_outputs = [results["csv_table"], results["json_view"],
                            results["download_files"], results["comparison_table"],
                            results["round1_table"], results["summary_note"],
-                           results["cost_html"], results["report_markdown"]]
+                           results["cost_html"], results["report_markdown"],
+                           results["empty_state"], results["results_content"]]
 
         results_refresh_outputs = [results["run_dropdown"], *results_outputs]
         results["refresh_button"].click(
             refresh_runs,
             inputs=auth_state,
             outputs=results_refresh_outputs,
-        ).then(list_active_runs, inputs=auth_state, outputs=results["active_runs_table"])
+        ).then(
+            active_runs_view,
+            inputs=auth_state,
+            outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        )
         results["run_dropdown"].change(load_run, inputs=[results["run_dropdown"], auth_state],
                                        outputs=results_outputs)
         app.load(_empty_results, outputs=results_outputs)
         results["cancel_button"].click(
             cancel_selected_run,
             inputs=[results["cancel_run_id"], auth_state],
-            outputs=[results["cancel_status"], results["active_runs_table"]],
+            outputs=[results["cancel_status"], results["active_runs_table"],
+                     results["active_runs_panel"]],
         )
 
         # "View Results" → load the just-finished run into Results, then jump there.
@@ -185,7 +188,11 @@ def build_app() -> gr.Blocks:
         ).then(None, None, None, js=js_init_gis_button()
         ).then(settings_values, inputs=auth_state, outputs=settings["value_outputs"]
         ).then(refresh_runs, inputs=auth_state, outputs=results_refresh_outputs
-        ).then(list_active_runs, inputs=auth_state, outputs=results["active_runs_table"])
+        ).then(
+            active_runs_view,
+            inputs=auth_state,
+            outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        )
 
         if dev_bypass.is_bypass_enabled():
             app.load(
@@ -194,11 +201,16 @@ def build_app() -> gr.Blocks:
                 outputs=auth_outputs,
             ).then(settings_values, inputs=auth_state, outputs=settings["value_outputs"]
             ).then(refresh_runs, inputs=auth_state, outputs=results_refresh_outputs
-            ).then(list_active_runs, inputs=auth_state, outputs=results["active_runs_table"])
+            ).then(
+                active_runs_view,
+                inputs=auth_state,
+                outputs=[results["active_runs_table"], results["active_runs_panel"]],
+            )
 
         settings["save_button"].click(
             save_settings,
-            inputs=[settings["contact"], settings["provider"], *settings["key_components"], auth_state],
+            inputs=[settings["contact"], settings["provider"], settings["model"],
+                    *settings["key_components"], auth_state],
             outputs=[auth_state, *settings["value_outputs"]],
         )
         settings["sign_out_button"].click(
@@ -210,7 +222,11 @@ def build_app() -> gr.Blocks:
         ).then(settings_values, inputs=auth_state, outputs=settings["value_outputs"]
         ).then(_empty_results, outputs=results_outputs
         ).then(lambda: gr.update(choices=[], value=None), outputs=results["run_dropdown"]
-        ).then(list_active_runs, inputs=auth_state, outputs=results["active_runs_table"])
+        ).then(
+            active_runs_view,
+            inputs=auth_state,
+            outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        )
 
         app.load(None, None, None, js=js_init_gis_button())
         app.load(None, None, None, js=js_restore_token_on_load())

@@ -1,4 +1,4 @@
-"""OpenAI GPT-4o provider."""
+"""OpenAI GPT-5 provider."""
 
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from src.mapping.base_provider import BaseLLMProvider, resolve_api_key
 from src.mapping.exceptions import ProviderAPIError, ProviderRateLimitError, ProviderTimeoutError
 from src.mapping.models import LLMResponse
 
-OPENAI_MODEL_DEFAULT = "gpt-4o"
+OPENAI_MODEL_DEFAULT = "gpt-5"
 
-# Cost per 1K tokens — approximate; accurate only for gpt-4o.
+# GPT-5 standard API rates per 1K tokens ($1.25 / $10.00 per 1M).
 # The hackathon cost logger reads actual usage from the API response,
 # so this is only used as a fallback estimate when the model is unknown.
-OPENAI_INPUT_COST_PER_1K = 0.005
-OPENAI_OUTPUT_COST_PER_1K = 0.015
+OPENAI_INPUT_COST_PER_1K = 0.00125
+OPENAI_OUTPUT_COST_PER_1K = 0.01
 
 
 def _resolve_model() -> str:

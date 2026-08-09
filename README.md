@@ -30,7 +30,7 @@ and `LLM_API_KEY` (its key). That's all — one key for whichever provider you p
 |---------|---------------|---------|
 | `LLM_PROVIDER` | Which AI reads the law | `anthropic`, `openai`, `gemini`, `deepseek`, `groq`, `qwen`, or `ollama` |
 | `LLM_API_KEY` | Your key for the selected AI | provider's API console |
-| `LLM_MODEL` | *(Optional)* Pick a specific model — leave blank to use the provider's default | `gpt-4o` |
+| `LLM_MODEL` | *(Optional)* Pick a specific model — leave blank to use the provider's default | `gpt-5` |
 | `MISTRAL_API_KEY` | Reading **scanned** PDFs cheaply (~$0.10 per 100 pages) | console.mistral.ai |
 
 > Prefer a different AI? Set `LLM_PROVIDER` to `anthropic`, `gemini`, `deepseek`, `groq`, `qwen`,
@@ -59,9 +59,9 @@ cp .env.example .env
 Now open `.env` in any text editor and fill in these lines, for example:
 
 ```bash
-LLM_PROVIDER=openai               # which AI to use (recommended: OpenAI gpt-4o)
+LLM_PROVIDER=openai               # which AI to use (default: OpenAI gpt-5)
 LLM_API_KEY=sk-...                # your key for that AI
-# LLM_MODEL=gpt-4o                # optional: leave off to use the provider's default
+# LLM_MODEL=gpt-5                 # optional: leave off to use the provider's default
 MISTRAL_API_KEY=...               # optional: cheap OCR for scanned PDFs
 ```
 
@@ -184,7 +184,7 @@ Everything runs on your machine, so there are trade-offs to expect:
 
 - **Slower.** The local AI is the bottleneck — a run can take **several minutes to tens of
   minutes** vs seconds-to-minutes on a cloud key, and it's much slower on a laptop without a GPU.
-- **A little less accurate.** Small local models miss more than gpt-4o/Claude, so expect a few
+- **A little less accurate.** Small local models miss more than GPT-5/Claude, so expect a few
   more rows flagged for review.
 - **First run downloads models** (~5 GB for the AI, plus OCR/embedding models) — one-time, but
   it needs disk space and a decent connection.

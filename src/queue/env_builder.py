@@ -8,6 +8,8 @@ PROVIDER_KEYS: frozenset[str] = frozenset({
     "DEEPSEEK_API_KEY",
     "GROQ_API_KEY",
     "DASHSCOPE_API_KEY",
+    "LLM_API_KEY",
+    "MISTRAL_API_KEY",
     "LLM_PROVIDER",
     "LLM_MODEL",
 })

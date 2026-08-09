@@ -16,31 +16,24 @@ PROVIDER_OPTIONS: list[tuple[str, str]] = [
     ("DeepSeek", "deepseek"),
     ("Groq", "groq"),
     ("DashScope / Qwen", "qwen"),
-    ("Ollama Qwen", "ollama"),
-    ("Ollama Granite", "ollama_granite"),
 ]
+
+PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-5",
+    "gemini": "gemini-2.5-flash",
+    "deepseek": "deepseek-chat",
+    "groq": "qwen/qwen3-32b",
+    "qwen": "qwen-plus",
+}
 
 PROVIDER_KEY_FIELDS: list[tuple[str, str, str]] = [
-    ("ANTHROPIC_API_KEY", "Anthropic API key", "sk-ant-..."),
-    ("OPENAI_API_KEY", "OpenAI API key", "sk-..."),
-    ("GEMINI_API_KEY", "Gemini API key", "AI..."),
-    ("DEEPSEEK_API_KEY", "DeepSeek API key", "sk-..."),
-    ("GROQ_API_KEY", "Groq API key", "gsk_..."),
-    ("DASHSCOPE_API_KEY", "DashScope API key", "sk-..."),
-    ("OLLAMA_BASE_URL", "Ollama base URL", "http://localhost:11434"),
-    ("OLLAMA_NUM_CTX", "Ollama context window", "8192"),
+    ("LLM_API_KEY", "LLM API key (required)", "Key for the selected provider"),
+    ("MISTRAL_API_KEY", "Mistral API key (required)", "Mistral OCR key"),
 ]
 
-_PROVIDER_TO_REQUIRED_KEY = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "qwen": "DASHSCOPE_API_KEY",
-    "ollama": "OLLAMA_BASE_URL",
-    "ollama_granite": "OLLAMA_BASE_URL",
-}
+_REQUIRED_KEYS = {key_name: label.replace(" (required)", "")
+                  for key_name, label, _placeholder in PROVIDER_KEY_FIELDS}
 
 
 def selected_provider(ctx: Any) -> str:
@@ -49,19 +42,30 @@ def selected_provider(ctx: Any) -> str:
     return provider if provider in valid else "openai"
 
 
-def missing_provider_key_message(ctx: Any) -> str | None:
-    provider = selected_provider(ctx)
-    required = _PROVIDER_TO_REQUIRED_KEY.get(provider)
-    if not required:
+def default_model_for_provider(provider: str) -> str:
+    return PROVIDER_DEFAULT_MODELS.get(provider, PROVIDER_DEFAULT_MODELS["openai"])
+
+
+def selected_model(ctx: Any, provider: str | None = None) -> str:
+    active_provider = provider or selected_provider(ctx)
+    configured = getattr(ctx, "config", {}).get("LLM_MODEL") if ctx else None
+    return str(configured).strip() if configured else default_model_for_provider(active_provider)
+
+
+def provider_model_update(provider: str):
+    default_model = default_model_for_provider(provider)
+    return gr.update(choices=[default_model], value=default_model)
+
+
+def missing_required_keys_message(ctx: Any) -> str | None:
+    secrets = getattr(ctx, "secrets", {}) or {}
+    missing = [label for key_name, label in _REQUIRED_KEYS.items()
+               if not str(secrets.get(key_name, "")).strip()]
+    if not missing:
         return None
-    if required.startswith("OLLAMA_"):
-        return None
-    if required not in getattr(ctx, "secrets", {}):
-        return (
-            f"No API key is stored for {provider}. Open My Settings and add "
-            f"{required} before running the pipeline."
-        )
-    return None
+    return (
+        f"Set up {' and '.join(missing)} in My Settings before running the pipeline."
+    )
 
 
 def _admin_emails() -> list[str]:
@@ -92,37 +96,49 @@ def _current_contact(ctx: Any) -> str:
 def settings_values(ctx: Any, status_message: str = "") -> tuple:
     if ctx is None:
         return (
-            "", "", "", "", selected_provider(None),
+            "", "", "", "", selected_provider(None), selected_model(None),
             status_message or "Sign in to manage your settings.",
             *["" for _ in PROVIDER_KEY_FIELDS],
         )
-    secret_values = []
-    for key_name, _label, _placeholder in PROVIDER_KEY_FIELDS:
-        if key_name.startswith("OLLAMA_"):
-            secret_values.append(ctx.secrets.get(key_name, ""))
-        else:
-            secret_values.append("")
+    provider = selected_provider(ctx)
     return (
         ctx.name,
         ctx.email,
         ctx.picture_url,
         _current_contact(ctx),
-        selected_provider(ctx),
+        provider,
+        selected_model(ctx, provider),
         status_message,
-        *secret_values,
+        *["" for _ in PROVIDER_KEY_FIELDS],
     )
 
 
-def save_settings(contact: str, provider: str, *key_values_and_ctx):
+def save_settings(contact: str, provider: str, model: str, *key_values_and_ctx):
     *key_values, ctx = key_values_and_ctx
     if ctx is None:
         return None, *settings_values(None, "Sign in required.")
+
+    submitted = {
+        key_name: str(raw_value or "").strip()
+        for (key_name, _label, _placeholder), raw_value
+        in zip(PROVIDER_KEY_FIELDS, key_values)
+    }
+    missing = [
+        label for key_name, label in _REQUIRED_KEYS.items()
+        if not submitted.get(key_name) and not str(ctx.secrets.get(key_name, "")).strip()
+    ]
+    if missing:
+        message = f"Required: {' and '.join(missing)}."
+        return ctx, *settings_values(ctx, message)
 
     conn = db.get_connection(db.DEFAULT_DB_PATH)
     try:
         session.update_user_contact(ctx.email, str(contact or ""), conn)
         config = dict(ctx.config or {})
+        valid_providers = {value for _label, value in PROVIDER_OPTIONS}
+        provider = provider if provider in valid_providers else selected_provider(ctx)
         config["LLM_PROVIDER"] = provider
+        config["LLM_MODEL"] = str(model or "").strip() or default_model_for_provider(provider)
         session.save_user_config(ctx.email, config, conn)
 
         for (key_name, _label, _placeholder), raw_value in zip(PROVIDER_KEY_FIELDS, key_values):
@@ -150,15 +166,26 @@ def build_settings_screen(visible: bool = False) -> dict:
             label="Active LLM provider",
             value="openai",
         )
+        model = gr.Dropdown(
+            [PROVIDER_DEFAULT_MODELS["openai"]],
+            label="Model",
+            value=PROVIDER_DEFAULT_MODELS["openai"],
+            allow_custom_value=True,
+        )
+        provider.input(
+            provider_model_update,
+            inputs=provider,
+            outputs=model,
+            show_progress="hidden",
+        )
 
         key_components = []
         with gr.Accordion("API keys", open=True):
             for key_name, label, placeholder in PROVIDER_KEY_FIELDS:
-                field_type = "text" if key_name.startswith("OLLAMA_") else "password"
                 key_components.append(
                     gr.Textbox(
                         label=label,
-                        type=field_type,
+                        type="password",
                         placeholder=placeholder,
                     )
                 )
@@ -175,6 +202,7 @@ def build_settings_screen(visible: bool = False) -> dict:
         "picture_url": picture_url,
         "contact": contact,
         "provider": provider,
+        "model": model,
         "key_components": key_components,
         "save_button": save_button,
         "sign_out_button": sign_out_button,
@@ -185,6 +213,7 @@ def build_settings_screen(visible: bool = False) -> dict:
             picture_url,
             contact,
             provider,
+            model,
             status,
             *key_components,
         ],
