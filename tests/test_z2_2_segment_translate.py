@@ -273,6 +273,7 @@ class TestTranslateDocument:
         assert "argos ok" in result.translated_text          # kept the good chunk
         assert "fallback chunk" in result.translated_text     # fell back for failures
         assert tt.call_count >= 1                             # fallback was used
+        assert result.translation_provider == "argos+deepl"
 
     def test_translation_cost_entry_populated(self, my_config):
         doc = _make_doc(raw_text="teks Melayu", economy="MY")

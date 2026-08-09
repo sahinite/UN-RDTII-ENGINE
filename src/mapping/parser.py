@@ -33,6 +33,20 @@ _CROSS_REF_PATTERNS = re.compile(
 _DELEGATED_LEG_KEYWORDS = re.compile(
     r"\b(Regulations|Order|Rules|Subsidiary Legislation|Direction)\b"
 )
+_TRANSLATION_PROVIDER_LABELS = {
+    "argos": "Argos Translate",
+    "deepl": "DeepL",
+    "google": "Google Translate",
+}
+
+
+def _translation_provider_label(provider: str) -> str:
+    """Turn stored provider provenance into a readable output note."""
+    providers = [part.strip().lower() for part in provider.split("+") if part.strip()]
+    return " + ".join(
+        _TRANSLATION_PROVIDER_LABELS.get(part, part.replace("_", " ").title())
+        for part in providers
+    )
 
 
 def _norm_text(text: str) -> str:
@@ -284,8 +298,11 @@ def _build_extraction_result(
         notes_parts.append("Recommend human review — " + "; ".join(flag_reasons))
     # Only note a translation source when the doc was actually translated —
     # verbatim_original is always set (ADR-017), so it is NOT a translation signal.
-    if doc_metadata.get("translation_provider") not in (None, "", "none", "failed"):
-        notes_parts.append("Translation source: DeepL/Google Translate")
+    translation_provider = doc_metadata.get("translation_provider")
+    if translation_provider not in (None, "", "none", "failed"):
+        notes_parts.append(
+            f"Translation source: {_translation_provider_label(str(translation_provider))}"
+        )
 
     # Decision 12: cross-reference and delegated legislation detection
     if snippet and _CROSS_REF_PATTERNS.search(snippet):

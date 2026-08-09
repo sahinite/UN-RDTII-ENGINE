@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+from html import escape
 from typing import Any
 
 import gradio as gr
 
 from src.auth import db, session
+from .auth_modal import profile_picture_src
 
 PROVIDER_OPTIONS: list[tuple[str, str]] = [
     ("Anthropic", "anthropic"),
@@ -57,6 +59,26 @@ def provider_model_update(provider: str):
     return gr.update(choices=[default_model], value=default_model)
 
 
+def key_visibility_updates(show_keys: bool) -> tuple:
+    field_type = "text" if show_keys else "password"
+    return tuple(gr.update(type=field_type) for _ in PROVIDER_KEY_FIELDS)
+
+
+def reset_key_visibility() -> tuple:
+    return False, *key_visibility_updates(False)
+
+
+def render_profile_picture(ctx: Any) -> str:
+    src = profile_picture_src(ctx)
+    name = str(getattr(ctx, "name", "") or "User")
+    return (
+        '<div class="rd-settings-avatar-wrap">'
+        f'<img class="rd-settings-avatar" src="{escape(src, quote=True)}" '
+        f'alt="{escape(name, quote=True)} profile picture">'
+        '</div>'
+    )
+
+
 def missing_required_keys_message(ctx: Any) -> str | None:
     secrets = getattr(ctx, "secrets", {}) or {}
     missing = [label for key_name, label in _REQUIRED_KEYS.items()
@@ -96,20 +118,22 @@ def _current_contact(ctx: Any) -> str:
 def settings_values(ctx: Any, status_message: str = "") -> tuple:
     if ctx is None:
         return (
-            "", "", "", "", selected_provider(None), selected_model(None),
+            "", "", render_profile_picture(None), "", selected_provider(None), selected_model(None),
             status_message or "Sign in to manage your settings.",
             *["" for _ in PROVIDER_KEY_FIELDS],
         )
     provider = selected_provider(ctx)
+    secrets = getattr(ctx, "secrets", {}) or {}
     return (
         ctx.name,
         ctx.email,
-        ctx.picture_url,
+        render_profile_picture(ctx),
         _current_contact(ctx),
         provider,
         selected_model(ctx, provider),
         status_message,
-        *["" for _ in PROVIDER_KEY_FIELDS],
+        *[str(secrets.get(key_name, "") or "")
+          for key_name, _label, _placeholder in PROVIDER_KEY_FIELDS],
     )
 
 
@@ -155,10 +179,14 @@ def save_settings(contact: str, provider: str, model: str, *key_values_and_ctx):
 
 def build_settings_screen(visible: bool = False) -> dict:
     with gr.Tab("My Settings", visible=visible) as tab:
-        with gr.Row():
-            profile_name = gr.Textbox(label="Name", interactive=False)
-            profile_email = gr.Textbox(label="Email", interactive=False)
-        picture_url = gr.Textbox(label="Picture URL", interactive=False)
+        with gr.Row(elem_classes=["rd-settings-profile"]):
+            profile_picture = gr.HTML(
+                render_profile_picture(None), scale=0, min_width=104
+            )
+            with gr.Column():
+                with gr.Row():
+                    profile_name = gr.Textbox(label="Name", interactive=False)
+                    profile_email = gr.Textbox(label="Email", interactive=False)
         contact = gr.Textbox(label="Contact")
 
         provider = gr.Dropdown(
@@ -189,6 +217,13 @@ def build_settings_screen(visible: bool = False) -> dict:
                         placeholder=placeholder,
                     )
                 )
+            show_keys = gr.Checkbox(label="Show API keys", value=False)
+            show_keys.change(
+                key_visibility_updates,
+                inputs=show_keys,
+                outputs=key_components,
+                show_progress="hidden",
+            )
 
         with gr.Row():
             save_button = gr.Button("Save settings", variant="primary")
@@ -199,18 +234,19 @@ def build_settings_screen(visible: bool = False) -> dict:
         "tab": tab,
         "profile_name": profile_name,
         "profile_email": profile_email,
-        "picture_url": picture_url,
+        "profile_picture": profile_picture,
         "contact": contact,
         "provider": provider,
         "model": model,
         "key_components": key_components,
+        "show_keys": show_keys,
         "save_button": save_button,
         "sign_out_button": sign_out_button,
         "status": status,
         "value_outputs": [
             profile_name,
             profile_email,
-            picture_url,
+            profile_picture,
             contact,
             provider,
             model,

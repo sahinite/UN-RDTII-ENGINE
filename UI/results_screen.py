@@ -37,6 +37,37 @@ def render_results_empty_state(message: str = "No results available yet.") -> st
     )
 
 
+def render_comparison_summary(
+    economy: str,
+    pillar: int,
+    round1_count: int,
+    provision_count: int,
+    mismatch_count: int,
+) -> str:
+    mismatch_label = "mismatch" if mismatch_count == 1 else "mismatches"
+    return (
+        '<div class="rd-results-summary" role="status">'
+        '<div class="rd-results-summary-title">'
+        f'<strong>{escape(economy)}</strong><span>Pillar {pillar}</span>'
+        '</div>'
+        '<div class="rd-results-summary-metrics">'
+        f'<span><strong>{round1_count}</strong> Round 1 indicators</span>'
+        f'<span><strong>{provision_count}</strong> provision rows</span>'
+        f'<span class="rd-results-summary-mismatch"><strong>{mismatch_count}</strong> '
+        f'{mismatch_label}</span>'
+        '</div>'
+        '<p>Mismatched rows are highlighted in Compare vs Round 1.</p>'
+        '</div>'
+    )
+
+
+def render_comparison_notice(message: str) -> str:
+    return (
+        '<div class="rd-results-summary rd-results-summary-notice" role="status">'
+        f'<p>{escape(message)}</p></div>'
+    )
+
+
 def empty_results_payload(message: str = "No results available yet.") -> tuple:
     """Outputs shared by initial load, sign-out, and an empty run list."""
     empty = pd.DataFrame()
@@ -148,14 +179,20 @@ def build_round1_comparison(csv_name: str, output_df: pd.DataFrame):
     empty = pd.DataFrame()
     economy, pillar = parse_run_name(csv_name)
     if not economy or not pillar:
-        return empty, empty, "Could not parse economy/pillar from the file name."
+        return empty, empty, render_comparison_notice(
+            "Could not parse economy/pillar from the file name."
+        )
     if not ROUND1_DB.exists():
-        return empty, empty, "Round 1 database not found under data/database/."
+        return empty, empty, render_comparison_notice(
+            "Round 1 database not found under data/database/."
+        )
 
     try:
         round1 = pd.read_excel(ROUND1_DB, sheet_name=economy)
     except ValueError:
-        return empty, empty, f"No '{economy}' sheet in the Round 1 database."
+        return empty, empty, render_comparison_notice(
+            f"No '{economy}' sheet in the Round 1 database."
+        )
 
     round1 = round1[round1["Indicator_ID"].astype(str).str.match(rf"^{pillar}\.\d")].copy()
     keep = [c for c in ["Indicator_ID", "Raw Score", "Act and/or practice", "Coverage",
@@ -212,11 +249,12 @@ def build_round1_comparison(csv_name: str, output_df: pd.DataFrame):
 
     comparison = pd.DataFrame(rows)
     mismatches = sum(1 for r in rows if not r["Match"].startswith("✓"))
-    note = (
-        f"**{economy} — Pillar {pillar}** · Round 1 assessed {len(round1)} indicator(s); "
-        f"engine output has {len(output_df)} provision row(s). "
-        f"**{mismatches} mismatched row(s)** highlighted below "
-        f"(✗ = Round 1 act the engine missed, ⚠ = engine finding not in Round 1)."
+    note = render_comparison_summary(
+        economy=economy,
+        pillar=pillar,
+        round1_count=len(round1),
+        provision_count=len(output_df),
+        mismatch_count=mismatches,
     )
 
     # Highlight whole mismatched rows so the gaps are obvious at a glance.
@@ -239,7 +277,7 @@ def build_results_screen() -> dict:
     # outputs here can briefly expose another user's files during app startup.
     runs: list[str] = []
 
-    with gr.Tab("Results"):
+    with gr.Tab("Results") as results_tab:
         with gr.Row():
             run_dropdown = gr.Dropdown(runs, label="Run output (CSV)",
                                        value=runs[0] if runs else None, scale=3)
@@ -255,7 +293,7 @@ def build_results_screen() -> dict:
             render_results_empty_state(), visible=not bool(runs)
         )
         with gr.Group(visible=bool(runs)) as results_content:
-            summary_note = gr.Markdown("")
+            summary_note = gr.HTML("")
             with gr.Tabs():
                 with gr.Tab("Generated CSV"):
                     csv_table = gr.Dataframe(interactive=False, wrap=True, max_height=480)
@@ -276,6 +314,7 @@ def build_results_screen() -> dict:
                                              file_count="multiple")
 
     return {
+        "tab": results_tab,
         "run_dropdown": run_dropdown,
         "refresh_button": refresh_button,
         "active_runs_table": active_runs_table,

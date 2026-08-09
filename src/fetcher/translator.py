@@ -5,7 +5,7 @@ Layer 1: Portal search keywords  → English  (translate_keywords)
 Layer 2: Act titles              → English  (translate_act_title)
 Layer 3: Full document text      → English  (translate_document)
 
-Provider order: DeepL (DEEPL_API_KEY) → Google Translate fallback.
+Provider order: Argos Translate → DeepL → Google Translate fallback.
 verbatim_original is always preserved alongside the translated text.
 Buddhist Era (BE) years are converted to Gregorian before Layer 3 when
 economy_config.be_year_conversion is True.
@@ -85,6 +85,14 @@ def _is_english(lang: str) -> bool:
 def _lang_root(lang: str) -> str:
     """'ms', 'ms-MY', 'ms_MY' → 'ms' (Argos/DeepL use bare ISO-639-1 codes)."""
     return lang.lower().strip().replace("_", "-").split("-")[0]
+
+
+def _merge_providers(current: str, provider: str) -> str:
+    """Keep ordered, exact provenance when translation uses a fallback."""
+    providers = [p for p in current.split("+") if p not in ("", "none", "failed")]
+    if provider not in ("", "none", "failed") and provider not in providers:
+        providers.append(provider)
+    return "+".join(providers) or "none"
 
 
 # Argos Translate — offline neural MT, no API key. Primary translator. Runs in
@@ -433,7 +441,7 @@ def translate_document(
         total_cost += title_cost
         chars_translated += len(doc.act_title)
         if title_prov not in ("none", "failed"):
-            provider_used = title_prov  # the provider that ACTUALLY translated
+            provider_used = _merge_providers(provider_used, title_prov)
     else:
         title_en = doc.act_title
     title_en = normalise_law_reference(title_en)
@@ -469,25 +477,23 @@ def translate_document(
             # fallback only for chunks Argos couldn't handle.
             argos_parts = _argos_translate_many(chunks, source_lang)
             translated_parts: list[str] = []
-            argos_used = False
+            if any(part is not None for part in argos_parts):
+                provider_used = _merge_providers(provider_used, "argos")
             for chunk, argos_out in zip(chunks, argos_parts):
                 if argos_out is not None:
                     translated_parts.append(argos_out)
-                    argos_used = True
                 else:
                     t, prov, cost = translate_text(chunk, source_lang, provider)
                     translated_parts.append(t)
                     total_cost += cost
                     if prov not in ("none", "failed"):
-                        provider_used = prov
-            if argos_used and provider_used == "none":
-                provider_used = "argos"
+                        provider_used = _merge_providers(provider_used, prov)
             translated_text = "".join(translated_parts)
         else:
             translated_text, prov, cost = translate_text(text_for_l3, source_lang, provider)
             total_cost += cost
             if prov not in ("none", "failed"):
-                provider_used = prov
+                provider_used = _merge_providers(provider_used, prov)
     else:
         translated_text = text_for_l3  # English or empty — no call needed
 

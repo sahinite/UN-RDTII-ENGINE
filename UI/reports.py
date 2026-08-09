@@ -391,12 +391,20 @@ def run_report_markdown_text(csv_name: str, user_hash: str | None = None) -> str
 
 # ── Cost report (visual) ──────────────────────────────────────────────────────
 
+def render_cost_empty(message: str = "No cost report available yet.") -> str:
+    return (
+        COST_CSS
+        + '<div class="rdc"><div class="rdc-empty">'
+        + esc(message)
+        + "</div></div>"
+    )
+
+
 def render_cost_report(cost_path: Path | str | None = None) -> str:
     """Tile + bar visual of one cost report (per-run file, or the shared one)."""
     path = Path(cost_path) if cost_path else SHARED_COST_REPORT
     if not path.exists():
-        return (COST_CSS + '<div class="rdc"><div class="rdc-empty">'
-                'No cost report for this run.</div></div>')
+        return render_cost_empty("No cost report for this run.")
     report = read_json(path)
     if report is None:
         return (COST_CSS + '<div class="rdc"><div class="rdc-empty">'

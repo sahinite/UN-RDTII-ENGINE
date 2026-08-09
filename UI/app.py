@@ -40,8 +40,13 @@ from .results_screen import (
     load_run,
     refresh_runs,
 )
-from .run_screen import build_run_screen, run_pipeline_streaming
-from .settings_screen import build_settings_screen, save_settings, settings_values
+from .run_screen import build_run_screen, latest_run_cost_html, run_pipeline_streaming
+from .settings_screen import (
+    build_settings_screen,
+    reset_key_visibility,
+    save_settings,
+    settings_values,
+)
 from .styles import APP_CSS
 from .utils import PROJECT_ROOT
 
@@ -122,6 +127,12 @@ def build_app() -> gr.Blocks:
                      run["report_html"], run["view_results_button"],
                      auth["overlay_html"]],
         )
+        run["tab"].select(
+            latest_run_cost_html,
+            inputs=auth_state,
+            outputs=run["run_cost_html"],
+            show_progress="hidden",
+        )
 
         # ── Results screen ───────────────────────────────────────────────────
         results_outputs = [results["csv_table"], results["json_view"],
@@ -139,10 +150,29 @@ def build_app() -> gr.Blocks:
             active_runs_view,
             inputs=auth_state,
             outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        ).then(
+            latest_run_cost_html,
+            inputs=auth_state,
+            outputs=run["run_cost_html"],
         )
         results["run_dropdown"].change(load_run, inputs=[results["run_dropdown"], auth_state],
                                        outputs=results_outputs)
-        app.load(_empty_results, outputs=results_outputs)
+        # Refresh on entry so the empty state and populated content cannot drift
+        # apart after a pipeline completes or results are added in another tab.
+        results["tab"].select(
+            refresh_runs,
+            inputs=auth_state,
+            outputs=results_refresh_outputs,
+            show_progress="hidden",
+        ).then(
+            active_runs_view,
+            inputs=auth_state,
+            outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        ).then(
+            latest_run_cost_html,
+            inputs=auth_state,
+            outputs=run["run_cost_html"],
+        )
         results["cancel_button"].click(
             cancel_selected_run,
             inputs=[results["cancel_run_id"], auth_state],
@@ -192,6 +222,10 @@ def build_app() -> gr.Blocks:
             active_runs_view,
             inputs=auth_state,
             outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        ).then(
+            latest_run_cost_html,
+            inputs=auth_state,
+            outputs=run["run_cost_html"],
         )
 
         if dev_bypass.is_bypass_enabled():
@@ -205,7 +239,21 @@ def build_app() -> gr.Blocks:
                 active_runs_view,
                 inputs=auth_state,
                 outputs=[results["active_runs_table"], results["active_runs_panel"]],
+            ).then(
+                latest_run_cost_html,
+                inputs=auth_state,
+                outputs=run["run_cost_html"],
             )
+
+        settings["tab"].select(
+            settings_values,
+            inputs=auth_state,
+            outputs=settings["value_outputs"],
+            show_progress="hidden",
+        ).then(
+            reset_key_visibility,
+            outputs=[settings["show_keys"], *settings["key_components"]],
+        )
 
         settings["save_button"].click(
             save_settings,
@@ -226,6 +274,10 @@ def build_app() -> gr.Blocks:
             active_runs_view,
             inputs=auth_state,
             outputs=[results["active_runs_table"], results["active_runs_panel"]],
+        ).then(
+            latest_run_cost_html,
+            inputs=auth_state,
+            outputs=run["run_cost_html"],
         )
 
         app.load(None, None, None, js=js_init_gis_button())

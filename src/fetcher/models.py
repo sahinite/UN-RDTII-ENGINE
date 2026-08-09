@@ -149,7 +149,7 @@ class ActSegment:
 @dataclass
 class TranslationCostEntry:
     source_language: str
-    provider: str       # "deepl" | "google" | "none" | "failed"
+    provider: str       # "argos" | "deepl" | "google" | mixed with "+"
     chars_translated: int
     cost_usd: float     # $0.0 for Google (free tier); $20/1M chars for DeepL Pro
 
@@ -170,7 +170,7 @@ class TranslatedDocument:
     act_title_translated: str        # Layer 2 output
     keywords_translated: list        # Layer 1 output (list[str])
     verbatim_original: str           # Always the original-language raw_text
-    translation_provider: str        # "deepl" | "google" | "none" | "failed"
+    translation_provider: str        # actual provider(s), e.g. "argos" or "argos+deepl"
     translation_cost_entry: TranslationCostEntry
     be_year_conversions: list        # [(be_str, ce_int)] — empty for non-BE economies
 

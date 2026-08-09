@@ -26,6 +26,7 @@ from .pipeline_view import (
 from .reports import (
     gather_report_data,
     persist_run_artifacts,
+    render_cost_empty,
     render_cost_report,
     render_report_html,
 )
@@ -59,6 +60,16 @@ def _run_log_path(ctx, run_id: str) -> Path:
 
 def _run_cost_source_path(ctx, run_id: str) -> Path:
     return PROJECT_ROOT / "logs" / ctx.user_hash / run_id / "cost_report.json"
+
+
+def latest_run_cost_html(ctx=None) -> str:
+    """Render only the signed-in user's newest run cost."""
+    if ctx is None:
+        return render_cost_empty("Sign in to view your latest run cost.")
+    runs = list_runs(ctx.user_hash)
+    if not runs:
+        return render_cost_empty("No completed run cost available yet.")
+    return render_cost_report(cost_report_path(runs[0], ctx.user_hash))
 
 
 def run_pipeline_streaming(economy: str, pillar: int, ctx=None):
@@ -202,7 +213,7 @@ def run_pipeline_streaming(economy: str, pillar: int, ctx=None):
     succeeded = state["phase"] == "complete"
 
     report_html = ""
-    cost_html = render_cost_report(None)
+    cost_html = latest_run_cost_html(ctx)
     if succeeded and state["csv_name"]:
         # Save this run's own cost snapshot + markdown report, then render from them.
         persist_run_artifacts(
@@ -233,7 +244,7 @@ def build_run_screen() -> dict:
     economies = list_economies()
     pillars = list_pillars()
 
-    with gr.Tab("Run"):
+    with gr.Tab("Run") as run_tab:
         with gr.Row(equal_height=True):
             economy_dropdown = gr.Dropdown(
                 economies, label="Economy",
@@ -252,9 +263,10 @@ def build_run_screen() -> dict:
                 logs_box = gr.Textbox(value="", lines=22, max_lines=22, label="Runtime logs",
                                       interactive=False, autoscroll=True)
             with gr.Tab("Cost"):
-                run_cost_html = gr.HTML(render_cost_report(None))
+                run_cost_html = gr.HTML(latest_run_cost_html())
 
     return {
+        "tab": run_tab,
         "economy_dropdown": economy_dropdown,
         "pillar_dropdown": pillar_dropdown,
         "run_button": run_button,

@@ -30,6 +30,30 @@ def test_parse_valid_json_returns_extraction_result():
     assert r.provider_used == "anthropic"
 
 
+@pytest.mark.parametrize(
+    ("provider", "expected_note"),
+    [
+        ("argos", "Translation source: Argos Translate"),
+        ("deepl", "Translation source: DeepL"),
+        ("google", "Translation source: Google Translate"),
+        ("argos+deepl", "Translation source: Argos Translate + DeepL"),
+    ],
+)
+def test_translation_note_uses_actual_provider(provider, expected_note):
+    from src.mapping.parser import parse_llm_response
+
+    metadata = {**DOC_METADATA, "translation_provider": provider}
+    results = parse_llm_response(
+        make_llm_response(VALID_LLM_JSON),
+        "P6-I1",
+        [make_retrieved_chunk()],
+        metadata,
+    )
+
+    assert expected_note in (results[0].notes or "")
+    assert "DeepL/Google Translate" not in (results[0].notes or "")
+
+
 def test_parse_not_found_returns_empty_list():
     from src.mapping.parser import parse_llm_response
 

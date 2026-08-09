@@ -47,6 +47,10 @@ _DEFAULT_AVATAR = (
 )
 
 
+def profile_picture_src(ctx: Any) -> str:
+    return str(getattr(ctx, "picture_url", "") or _DEFAULT_AVATAR)
+
+
 def render_overlay_html(error_message: str = "") -> str:
     error_block = (
         f'<div class="auth-error">{_html_escape(error_message)}</div>'
@@ -166,7 +170,7 @@ def js_init_gis_button() -> str:
 def render_header_html(ctx: Any) -> str:
     if ctx is None:
         return '<div class="rd-auth-header"><span class="rd-auth-anon">Not signed in</span></div>'
-    picture = ctx.picture_url or _DEFAULT_AVATAR
+    picture = profile_picture_src(ctx)
     return (
         '<div class="rd-auth-header">'
         f'<img src="{_html_escape(picture)}" class="rd-avatar"/>'
