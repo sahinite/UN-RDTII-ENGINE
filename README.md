@@ -1,7 +1,6 @@
 # RDTII Extraction Engine
 
 **UN Global Hackathon on AI for Digital Trade Regulatory Analysis**
-Team: Galaxefi · Round 1 · Submission: 20 July 2026 · Demo: 3 August 2026
 
 ## What it does?
 
